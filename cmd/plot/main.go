@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,17 +79,36 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		tmpl.Execute(w, data)
 	})
 
-	r.Get("/chart/{metric}", func(w http.ResponseWriter, r *http.Request) {
-		metric := chi.URLParam(r, "metric")
-		theme := r.URL.Query().Get("theme")
-		if theme == "" {
-			theme = "light"
-		}
-
+	r.Get("/api/companies", func(w http.ResponseWriter, r *http.Request) {
 		companies, err := repo.GetAllCompanies()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(companies)
+	})
+
+	r.Get("/chart/{metric}", func(w http.ResponseWriter, r *http.Request) {
+		metric := chi.URLParam(r, "metric")
+		theme := r.URL.Query().Get("theme")
+		companiesParam := r.URL.Query().Get("companies")
+
+		if theme == "" {
+			theme = "light"
+		}
+
+		var companies []string
+		if companiesParam != "" {
+			companies = strings.Split(companiesParam, ",")
+		} else {
+			var err error
+			companies, err = repo.GetAllCompanies()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		data, err := repo.GetCompaniesMetric(companies, metric)
