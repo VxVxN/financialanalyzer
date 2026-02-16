@@ -127,7 +127,7 @@ func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]Me
 	}
 
 	for key, handler := range handlers {
-		if strings.Contains(metricName, key) {
+		if strings.HasPrefix(metricName, key) {
 			return &MetricConfig{
 				Name:    key,
 				Handler: handler,
