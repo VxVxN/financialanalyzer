@@ -24,7 +24,7 @@
             --bg-button-hover: #4d4d4d;
             --text-primary: #ffffff;
             --text-secondary: #e0e0e0;
-            --border-color: #555;
+            --border-color: #666;
             --active-color: #0056b3;
             --active-border: #004099;
             --shadow-color: rgba(255,255,255,0.1);
@@ -98,10 +98,11 @@
 
         .chart-frame {
             width: 100%;
-            height: 600px;
             border: none;
             display: none;
             border-radius: 4px;
+            min-height: 900px;
+            background-color: var(--bg-primary);
         }
 
         .chart-frame.active {
@@ -135,7 +136,7 @@
 <body>
 <h1>Financial Analyzer</h1>
 
-<button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙 Dark theme</button>
+<button class="theme-toggle" id="themeToggle">🌙 Dark theme</button>
 
 <div class="metric-buttons" id="metric-buttons"></div>
 <div id="chart-container"></div>
@@ -144,15 +145,18 @@
     const metrics = {{.Metrics}};
     const container = document.getElementById('chart-container');
     const buttonsContainer = document.getElementById('metric-buttons');
+    const themeToggle = document.getElementById('themeToggle');
     let charts = {};
+
+    function getCurrentTheme() {
+        return document.documentElement.getAttribute('data-theme') || 'light';
+    }
 
     function reloadAllIframes(theme) {
         Object.keys(charts).forEach(metric => {
             const iframe = charts[metric];
             const wasActive = iframe.classList.contains('active');
-            const newSrc = `/chart/${metric}?theme=${theme}&t=${Date.now()}`;
-
-            iframe.src = newSrc;
+            iframe.src = `/chart/${metric}?theme=${theme}&t=${Date.now()}`;
 
             if (wasActive) {
                 iframe.onload = function() {
@@ -162,46 +166,41 @@
         });
     }
 
-    function toggleTheme() {
+    function setTheme(theme) {
         const html = document.documentElement;
-        const currentTheme = html.getAttribute('data-theme');
-        const button = document.getElementById('themeToggle');
-        let newTheme;
-
-        if (currentTheme === 'dark') {
-            html.removeAttribute('data-theme');
-            button.innerHTML = '🌙 Dark theme';
-            localStorage.setItem('theme', 'light');
-            newTheme = 'light';
-        } else {
+        if (theme === 'dark') {
             html.setAttribute('data-theme', 'dark');
-            button.innerHTML = '☀️ Light theme';
-            localStorage.setItem('theme', 'dark');
-            newTheme = 'dark';
+            themeToggle.innerHTML = '☀️ Light theme';
+        } else {
+            html.removeAttribute('data-theme');
+            themeToggle.innerHTML = '🌙 Dark theme';
         }
+        localStorage.setItem('theme', theme);
+        reloadAllIframes(theme);
+    }
 
-        reloadAllIframes(newTheme);
+    function toggleTheme() {
+        const currentTheme = getCurrentTheme();
+        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
     }
 
     function loadTheme() {
         const savedTheme = localStorage.getItem('theme');
-        const button = document.getElementById('themeToggle');
-
-        if (savedTheme === 'dark') {
-            document.documentElement.setAttribute('data-theme', 'dark');
-            button.innerHTML = '☀️ Light theme';
+        if (savedTheme) {
+            setTheme(savedTheme);
         } else {
-            button.innerHTML = '🌙 Dark theme';
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            setTheme(prefersDark ? 'dark' : 'light');
         }
     }
+
+    themeToggle.addEventListener('click', toggleTheme);
 
     metrics.forEach((metric, index) => {
         const iframe = document.createElement('iframe');
         iframe.className = 'chart-frame';
         iframe.id = `chart-${metric}`;
-
-        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-        iframe.src = `/chart/${metric}?theme=${currentTheme}`;
+        iframe.src = `/chart/${metric}?theme=${getCurrentTheme()}`;
 
         container.appendChild(iframe);
         charts[metric] = iframe;
@@ -209,11 +208,10 @@
         const button = document.createElement('button');
         button.className = 'metric-button' + (index === 0 ? ' active' : '');
         button.textContent = formatMetricName(metric);
-        button.onclick = (function(m) {
-            return function() {
-                showChart(m);
-            };
-        })(metric);
+        button.setAttribute('data-metric', metric);
+        button.addEventListener('click', function() {
+            showChart(metric);
+        });
         buttonsContainer.appendChild(button);
     });
 
@@ -225,10 +223,11 @@
             btn.classList.remove('active');
         });
 
-        document.getElementById(`chart-${metric}`).classList.add('active');
+        const iframe = document.getElementById(`chart-${metric}`);
+        iframe.classList.add('active');
 
         const activeButton = Array.from(document.querySelectorAll('.metric-button')).find(
-            btn => btn.textContent === formatMetricName(metric)
+            btn => btn.getAttribute('data-metric') === metric
         );
         if (activeButton) {
             activeButton.classList.add('active');
