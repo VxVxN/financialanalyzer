@@ -2,6 +2,8 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -49,4 +51,91 @@ func nullIfZero(val float64) interface{} {
 		return nil
 	}
 	return val
+}
+
+type CompanyMetric struct {
+	Year    int
+	Quarter string
+	Company string
+	Value   float64
+}
+
+func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]CompanyMetric, error) {
+	placeholders := make([]string, len(companies))
+	args := make([]interface{}, len(companies))
+	for i, company := range companies {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = company
+	}
+
+	query := fmt.Sprintf(`
+		SELECT year, quarter, company, %s as value
+		FROM company_financials
+		WHERE company IN (%s)
+		ORDER BY year, 
+			CASE quarter
+				WHEN 'Q1' THEN 1
+				WHEN 'Q2' THEN 2
+				WHEN 'Q3' THEN 3
+				WHEN 'Q4' THEN 4
+			END
+	`, metric, strings.Join(placeholders, ","))
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query metric %s: %w", metric, err)
+	}
+	defer rows.Close()
+
+	var result []CompanyMetric
+	for rows.Next() {
+		var item CompanyMetric
+		var value sql.NullFloat64
+
+		if err := rows.Scan(&item.Year, &item.Quarter, &item.Company, &value); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		if value.Valid {
+			item.Value = value.Float64
+		} else {
+			item.Value = 0
+		}
+
+		result = append(result, item)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return result, nil
+}
+
+func (r *Repository) GetAllCompanies() ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT DISTINCT company 
+		FROM company_financials 
+		WHERE company IS NOT NULL AND company != ''
+		ORDER BY company
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var companies []string
+	for rows.Next() {
+		var company string
+		if err := rows.Scan(&company); err != nil {
+			return nil, err
+		}
+		companies = append(companies, company)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return companies, nil
 }
