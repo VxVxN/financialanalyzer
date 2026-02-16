@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"os"
@@ -57,28 +58,43 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		tmpl, err := template.ParseFiles("templates/index.html")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		metrics := []string{"revenue", "net_profit", "ebitda", "pe", "roe", "capitalization", "debt"}
+
+		data := struct {
+			Metrics []string
+		}{
+			Metrics: metrics,
+		}
+
+		w.Header().Set("Content-Type", "text/html")
+		tmpl.Execute(w, data)
+	})
+
+	r.Get("/chart/{metric}", func(w http.ResponseWriter, r *http.Request) {
+		metric := chi.URLParam(r, "metric")
+
 		companies, err := repo.GetAllCompanies()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		data, err := repo.GetCompaniesMetric(companies, metric)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		page := components.NewPage()
-		page.PageTitle = "Financial Analyzer"
+		page.PageTitle = fmt.Sprintf("%s - Financial Analyzer", formatMetricName(metric))
 
-		metrics := []string{"revenue", "net_profit", "ebitda", "pe", "roe", "capitalization", "debt"}
-
-		for _, metric := range metrics {
-			data, err := repo.GetCompaniesMetric(companies, metric)
-			if err != nil {
-				logger.Error("Failed to get metric", "metric", metric, "error", err)
-				continue
-			}
-
-			if len(data) == 0 {
-				continue
-			}
-
+		if len(data) > 0 {
 			lineChart := createNormalizedLineChart(data, metric, companies)
 			page.AddCharts(lineChart)
 		}
