@@ -140,6 +140,9 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			Show:   opts.Bool(true),
 			Bottom: "0",
 			Orient: "horizontal",
+			TextStyle: &opts.TextStyle{
+				Color: "auto",
+			},
 		}),
 		charts.WithTooltipOpts(opts.Tooltip{
 			Show:    opts.Bool(true),
@@ -179,12 +182,13 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			AxisLabel: &opts.AxisLabel{
 				Rotate: 30,
 				Margin: 10,
+				Color:  "auto",
 			},
 			SplitLine: &opts.SplitLine{
 				Show: opts.Bool(true),
 				LineStyle: &opts.LineStyle{
 					Type:  "dashed",
-					Color: "#e9ecef",
+					Color: "#aaa",
 				},
 			},
 		}),
@@ -195,12 +199,13 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			Type:         "value",
 			AxisLabel: &opts.AxisLabel{
 				Formatter: "{value}%",
+				Color:     "auto",
 			},
 			SplitLine: &opts.SplitLine{
 				Show: opts.Bool(true),
 				LineStyle: &opts.LineStyle{
 					Type:  "dashed",
-					Color: "#e9ecef",
+					Color: "#aaa",
 				},
 			},
 		}),
