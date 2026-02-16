@@ -135,9 +135,14 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 				function(params) {
 					let result = params[0].name + '<br/>';
 					for(let i = 0; i < params.length; i++) {
-						result += params[i].marker + ' ' + 
-								params[i].seriesName + ': ' + 
-								params[i].value.toFixed(2) + '%%<br/>';
+						if (params[i].value !== null && params[i].value !== undefined) {
+							result += params[i].marker + ' ' + 
+									params[i].seriesName + ': ' + 
+									params[i].value.toFixed(2) + '%%<br/>';
+						} else {
+							result += params[i].marker + ' ' + 
+									params[i].seriesName + ': No data<br/>';
+						}
 					}
 					return result;
 				}
@@ -260,10 +265,11 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			color := colors[idx%len(colors)]
 			line.AddSeries(company, values,
 				charts.WithLineChartOpts(opts.LineChart{
-					Smooth:     opts.Bool(true),
-					ShowSymbol: opts.Bool(true),
-					Symbol:     "circle",
-					SymbolSize: 8,
+					Smooth:       opts.Bool(true),
+					ShowSymbol:   opts.Bool(true),
+					Symbol:       "circle",
+					SymbolSize:   8,
+					ConnectNulls: opts.Bool(true),
 				}),
 				charts.WithLabelOpts(opts.Label{
 					Show: opts.Bool(false),
