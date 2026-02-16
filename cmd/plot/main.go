@@ -325,10 +325,15 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 
 	metricName := formatMetricName(metric)
 
+	yAxisName := metricName
+	unit := getMetricUnit(metric)
+
+	tooltipFormatter := getTooltipFormatter(metric, unit)
+
 	line.SetGlobalOptions(
 		charts.WithTitleOpts(opts.Title{
 			Title:    fmt.Sprintf("%s Comparison", metricName),
-			Subtitle: "Normalized to show relative performance (first value = 100%)",
+			Subtitle: "Absolute values",
 			Left:     "center",
 		}),
 		charts.WithInitializationOpts(opts.Initialization{
@@ -347,22 +352,7 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			AxisPointer: &opts.AxisPointer{
 				Type: "shadow",
 			},
-			Formatter: opts.FuncOpts(`
-				function(params) {
-					let result = params[0].name + '<br/>';
-					for(let i = 0; i < params.length; i++) {
-						if (params[i].value !== null && params[i].value !== undefined) {
-							result += params[i].marker + ' ' + 
-									params[i].seriesName + ': ' + 
-									params[i].value.toFixed(2) + '%<br/>';
-						} else {
-							result += params[i].marker + ' ' + 
-									params[i].seriesName + ': No data<br/>';
-						}
-					}
-					return result;
-				}
-			`),
+			Formatter: opts.FuncOpts(tooltipFormatter),
 		}),
 		charts.WithGridOpts(opts.Grid{
 			Show:         opts.Bool(true),
@@ -388,12 +378,12 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 			},
 		}),
 		charts.WithYAxisOpts(opts.YAxis{
-			Name:         "Normalized Value (%)",
+			Name:         yAxisName,
 			NameLocation: "center",
 			NameGap:      50,
 			Type:         "value",
 			AxisLabel: &opts.AxisLabel{
-				Formatter: "{value}%",
+				Formatter: opts.FuncOpts(fmt.Sprintf("function(value) { return value + '%s'; }", unit)),
 			},
 			SplitLine: &opts.SplitLine{
 				Show: opts.Bool(true),
@@ -446,30 +436,10 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 		if companyValues, ok := companyData[company]; ok {
 			values := make([]opts.LineData, len(quarters))
 
-			var baseValue float64
-			for _, q := range quarters {
-				if val, ok := companyValues[q]; ok && val != 0 {
-					baseValue = val
-					break
-				}
-			}
-
-			if baseValue == 0 {
-				for _, q := range quarters {
-					if val, ok := companyValues[q]; ok {
-						baseValue = val
-						break
-					}
-				}
-				if baseValue == 0 {
-					baseValue = 1
-				}
-			}
-
 			for i, q := range quarters {
 				if val, ok := companyValues[q]; ok && val != 0 {
 					values[i] = opts.LineData{
-						Value:      (val / baseValue) * 100,
+						Value:      val,
 						Symbol:     "circle",
 						SymbolSize: 8,
 					}
@@ -501,6 +471,58 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 	}
 
 	return line
+}
+
+func getTooltipFormatter(metric, unit string) string {
+	switch metric {
+	case "capitalization", "revenue", "net_profit", "ebitda", "debt":
+		return `
+			function(params) {
+				let result = params[0].name + '<br/>';
+				for(let i = 0; i < params.length; i++) {
+					if (params[i].value !== null && params[i].value !== undefined) {
+						let value = params[i].value;
+						let formattedValue;
+						if (value >= 1000000000000) {
+							formattedValue = (value / 1000000000000).toFixed(2) + 'T';
+						} else if (value >= 1000000000) {
+							formattedValue = (value / 1000000000).toFixed(2) + 'B';
+						} else if (value >= 1000000) {
+							formattedValue = (value / 1000000).toFixed(2) + 'M';
+						} else if (value >= 1000) {
+							formattedValue = (value / 1000).toFixed(2) + 'K';
+						} else {
+							formattedValue = value.toFixed(2);
+						}
+						result += params[i].marker + ' ' + 
+								params[i].seriesName + ': ' + 
+								formattedValue + '` + unit + `' + '<br/>';
+					} else {
+						result += params[i].marker + ' ' + 
+								params[i].seriesName + ': No data<br/>';
+					}
+				}
+				return result;
+			}
+		`
+	default:
+		return `
+			function(params) {
+				let result = params[0].name + '<br/>';
+				for(let i = 0; i < params.length; i++) {
+					if (params[i].value !== null && params[i].value !== undefined) {
+						result += params[i].marker + ' ' + 
+								params[i].seriesName + ': ' + 
+								params[i].value.toFixed(2) + '` + unit + `' + '<br/>';
+					} else {
+						result += params[i].marker + ' ' + 
+								params[i].seriesName + ': No data<br/>';
+					}
+				}
+				return result;
+			}
+		`
+	}
 }
 
 func formatMetricName(metric string) string {
