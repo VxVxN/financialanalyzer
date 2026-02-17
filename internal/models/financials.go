@@ -4,6 +4,7 @@ type QuarterData struct {
 	Year           int
 	Quarter        string
 	Company        string
+	Category       string
 	Capitalization float64
 	Revenue        float64
 	NetProfit      float64

@@ -18,8 +18,8 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 	query := `
-    INSERT INTO company_financials (year, quarter, company, capitalization, revenue, net_profit, ebitda, debt, pe, roe)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     ON CONFLICT (year, quarter, company) 
     DO UPDATE SET
         capitalization = COALESCE(EXCLUDED.capitalization, company_financials.capitalization),
@@ -34,6 +34,7 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 		data.Year,
 		data.Quarter,
 		data.Company,
+		data.Category,
 		nullIfZero(data.Capitalization),
 		nullIfZero(data.Revenue),
 		nullIfZero(data.NetProfit),

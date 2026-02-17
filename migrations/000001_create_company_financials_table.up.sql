@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS company_financials (
       year INTEGER NOT NULL,
       quarter VARCHAR(2) NOT NULL,
       company VARCHAR(100) NOT NULL,
+      category VARCHAR(100) NOT NULL,
       capitalization NUMERIC(15,2),
       revenue NUMERIC(15,2),
       net_profit NUMERIC(15,2),

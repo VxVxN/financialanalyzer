@@ -65,7 +65,7 @@ func (p *CSVParser) readCSV(file io.Reader) ([][]string, error) {
 
 func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, error) {
 	quarters := records[0]
-	companyName := p.extractCompanyName()
+	companyName, category := p.extractCompanyNameAndCategory()
 
 	var results []models.QuarterData
 
@@ -87,7 +87,7 @@ func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, er
 			continue
 		}
 
-		data, err := p.processMetricRow(metricConfig, metricName, quarters, record, companyName)
+		data, err := p.processMetricRow(metricConfig, metricName, quarters, record, companyName, category)
 		if err != nil {
 			continue
 		}
@@ -98,9 +98,11 @@ func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, er
 	return results, nil
 }
 
-func (p *CSVParser) extractCompanyName() string {
+func (p *CSVParser) extractCompanyNameAndCategory() (string, string) {
 	filename := path.Base(p.filePath)
-	return strings.TrimSuffix(filename, filepath.Ext(filename))
+	filename = strings.TrimSuffix(filename, filepath.Ext(filename))
+	splitedFilename := strings.Split(filename, "_")
+	return splitedFilename[0], splitedFilename[1]
 }
 
 func (p *CSVParser) shouldSkipMetric(metricName string) bool {
@@ -144,6 +146,7 @@ func (p *CSVParser) processMetricRow(
 	quarters []string,
 	record []string,
 	companyName string,
+	category string,
 ) ([]models.QuarterData, error) {
 
 	var results []models.QuarterData
@@ -165,9 +168,10 @@ func (p *CSVParser) processMetricRow(
 		}
 
 		data := models.QuarterData{
-			Year:    year,
-			Quarter: quarter,
-			Company: companyName,
+			Year:     year,
+			Quarter:  quarter,
+			Company:  companyName,
+			Category: category,
 		}
 
 		p.applyMetricValue(config, &data, value)
