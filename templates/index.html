@@ -104,6 +104,34 @@
             background-color: var(--bg-button-hover);
         }
 
+        .category-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .category-tab {
+            padding: 8px 16px;
+            background-color: var(--bg-button);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+
+        .category-tab:hover {
+            background-color: var(--bg-button-hover);
+        }
+
+        .category-tab.active {
+            background-color: var(--active-color);
+            color: white;
+            border-color: var(--active-border);
+        }
+
         .companies-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -258,6 +286,12 @@
             padding: 50px;
             color: var(--text-secondary);
         }
+
+        .error-message {
+            text-align: center;
+            padding: 50px;
+            color: #ff6b6b;
+        }
     </style>
 </head>
 <body>
@@ -274,8 +308,9 @@
         </div>
     </div>
 
+    <div class="category-tabs" id="categoryTabs"></div>
+
     <div class="companies-grid" id="companiesGrid">
-        <!-- Companies will be loaded here -->
         <div class="loading">Loading companies...</div>
     </div>
 
@@ -297,6 +332,7 @@
     const buttonsContainer = document.getElementById('metric-buttons');
     const themeToggle = document.getElementById('themeToggle');
     const companiesGrid = document.getElementById('companiesGrid');
+    const categoryTabs = document.getElementById('categoryTabs');
     const selectAllBtn = document.getElementById('selectAllBtn');
     const deselectAllBtn = document.getElementById('deselectAllBtn');
     const analyzeBtn = document.getElementById('analyzeBtn');
@@ -304,8 +340,10 @@
     const selectedCountSpan = document.getElementById('selectedCount');
 
     let charts = {};
-    let allCompanies = [];
+    let companiesWithCategories = [];
+    let categories = [];
     let selectedCompanies = [];
+    let currentCategory = 'all';
 
     function getCurrentTheme() {
         return document.documentElement.getAttribute('data-theme') || 'light';
@@ -356,44 +394,112 @@
         }
     }
 
-    async function loadCompanies() {
+    async function loadData() {
         try {
-            const response = await fetch('/api/companies');
-            allCompanies = await response.json();
+            companiesGrid.innerHTML = '<div class="loading">Loading companies...</div>';
 
-            if (allCompanies.length === 0) {
-                companiesGrid.innerHTML = '<div class="loading">No companies found</div>';
-                return;
-            }
+            await Promise.all([
+                loadCompaniesWithCategories(),
+                loadCategories()
+            ]);
 
+            renderCategoryTabs();
             renderCompaniesGrid();
         } catch (error) {
-            console.error('Error loading companies:', error);
-            companiesGrid.innerHTML = '<div class="loading">Error loading companies</div>';
+            console.error('Error loading data:', error);
+            companiesGrid.innerHTML = '<div class="error-message">Error loading companies data. Please try again.</div>';
         }
     }
 
+    async function loadCompaniesWithCategories() {
+        const response = await fetch('/api/companies-with-categories');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        companiesWithCategories = await response.json();
+        console.log('Loaded companies:', companiesWithCategories);
+    }
+
+    async function loadCategories() {
+        const response = await fetch('/api/categories');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        categories = await response.json();
+        console.log('Loaded categories:', categories);
+    }
+
+    function renderCategoryTabs() {
+        categoryTabs.innerHTML = '';
+
+        const allTab = document.createElement('button');
+        allTab.className = `category-tab ${currentCategory === 'all' ? 'active' : ''}`;
+        allTab.textContent = 'All Companies';
+        allTab.setAttribute('data-category', 'all');
+        allTab.addEventListener('click', () => {
+            currentCategory = 'all';
+            renderCategoryTabs();
+            renderCompaniesGrid();
+        });
+        categoryTabs.appendChild(allTab);
+
+        categories.forEach(category => {
+            if (!category) return;
+
+            const tab = document.createElement('button');
+            tab.className = `category-tab ${category === currentCategory ? 'active' : ''}`;
+            tab.textContent = category;
+            tab.setAttribute('data-category', category);
+            tab.addEventListener('click', () => {
+                currentCategory = category;
+                renderCategoryTabs();
+                renderCompaniesGrid();
+            });
+            categoryTabs.appendChild(tab);
+        });
+    }
+
     function renderCompaniesGrid() {
+        if (!companiesWithCategories || companiesWithCategories.length === 0) {
+            companiesGrid.innerHTML = '<div class="loading">No companies found</div>';
+            return;
+        }
+
         companiesGrid.innerHTML = '';
 
-        allCompanies.forEach(company => {
+        const filteredCompanies = currentCategory === 'all'
+            ? companiesWithCategories
+            : companiesWithCategories.filter(c => c && c.category === currentCategory);
+
+        if (filteredCompanies.length === 0) {
+            companiesGrid.innerHTML = '<div class="loading">No companies in this category</div>';
+            return;
+        }
+
+        const uniqueCompanies = new Map();
+        filteredCompanies.forEach(companyData => {
+            if (companyData && companyData.company && !uniqueCompanies.has(companyData.company)) {
+                uniqueCompanies.set(companyData.company, companyData);
+            }
+        });
+
+        Array.from(uniqueCompanies.values()).forEach(companyData => {
             const item = document.createElement('div');
             item.className = 'company-item';
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
-            checkbox.id = `company-${company}`;
-            checkbox.value = company;
+            checkbox.id = `company-${companyData.company}`;
+            checkbox.value = companyData.company;
             checkbox.addEventListener('change', updateSelectedCompanies);
 
             const label = document.createElement('label');
-            label.htmlFor = `company-${company}`;
-            label.textContent = company;
+            label.htmlFor = `company-${companyData.company}`;
+            label.textContent = companyData.company;
 
             item.appendChild(checkbox);
             item.appendChild(label);
 
-            // Make the whole item clickable
             item.addEventListener('click', (e) => {
                 if (e.target !== checkbox) {
                     checkbox.checked = !checkbox.checked;
@@ -403,6 +509,8 @@
 
             companiesGrid.appendChild(item);
         });
+
+        updateSelectedCompanies();
     }
 
     function updateSelectedCompanies() {
@@ -474,7 +582,9 @@
         });
 
         const iframe = document.getElementById(`chart-${metric}`);
-        iframe.classList.add('active');
+        if (iframe) {
+            iframe.classList.add('active');
+        }
 
         const activeButton = Array.from(document.querySelectorAll('.metric-button')).find(
             btn => btn.getAttribute('data-metric') === metric
@@ -502,7 +612,7 @@
     deselectAllBtn.addEventListener('click', deselectAllCompanies);
     analyzeBtn.addEventListener('click', analyzeCompanies);
 
-    loadCompanies();
+    loadData();
     loadTheme();
 </script>
 </body>

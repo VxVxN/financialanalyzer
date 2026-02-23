@@ -140,3 +140,50 @@ func (r *Repository) GetAllCompanies() ([]string, error) {
 
 	return companies, nil
 }
+
+func (r *Repository) GetAllCategories() ([]string, error) {
+	query := `SELECT DISTINCT category FROM company_financials WHERE category IS NOT NULL AND category != '' ORDER BY category`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error getting categories: %w", err)
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var category string
+		if err := rows.Scan(&category); err != nil {
+			return nil, fmt.Errorf("error scanning category: %w", err)
+		}
+		categories = append(categories, category)
+	}
+
+	return categories, nil
+}
+
+type CompanyWithCategory struct {
+	Company  string `json:"company"`
+	Category string `json:"category"`
+}
+
+func (r *Repository) GetAllCompaniesWithCategories() ([]CompanyWithCategory, error) {
+	query := `SELECT DISTINCT company, category FROM company_financials ORDER BY company`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error getting companies with categories: %w", err)
+	}
+	defer rows.Close()
+
+	var companies []CompanyWithCategory
+	for rows.Next() {
+		var c CompanyWithCategory
+		if err := rows.Scan(&c.Company, &c.Category); err != nil {
+			return nil, fmt.Errorf("error scanning company with category: %w", err)
+		}
+		companies = append(companies, c)
+	}
+
+	return companies, nil
+}
