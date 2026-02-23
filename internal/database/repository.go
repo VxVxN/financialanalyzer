@@ -187,3 +187,23 @@ func (r *Repository) GetAllCompaniesWithCategories() ([]CompanyWithCategory, err
 
 	return companies, nil
 }
+
+func (r *Repository) DeleteCompany(company string) error {
+	query := `DELETE FROM company_financials WHERE company = $1`
+
+	result, err := r.db.Exec(query, company)
+	if err != nil {
+		return fmt.Errorf("error deleting company %s: %w", company, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("company %s not found", company)
+	}
+
+	return nil
+}

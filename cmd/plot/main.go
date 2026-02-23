@@ -59,6 +59,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	r.Get("/", controller.IndexHandler)
 	r.Get("/api/companies", controller.GetCompanies)
+	r.Delete("/api/companies", controller.DeleteCompany)
 	r.Get("/api/companies-with-categories", controller.GetCompaniesWithCategories)
 	r.Get("/api/categories", controller.GetCategories)
 	r.Get("/chart/{metric}", controller.ChartHandler)
