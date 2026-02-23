@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Financial Analyzer</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Analyzer — Refactored</title>
     <style>
+        /* ---------- CSS Variables (Light / Dark) ---------- */
         :root {
             --bg-primary: #ffffff;
             --bg-secondary: #f0f0f0;
@@ -16,6 +18,8 @@
             --active-border: #0056b3;
             --shadow-color: rgba(0,0,0,0.1);
             --checkbox-bg: #ffffff;
+            --danger-color: #dc3545;
+            --danger-hover: #c82333;
         }
 
         [data-theme="dark"] {
@@ -32,6 +36,11 @@
             --checkbox-bg: #3d3d3d;
         }
 
+        /* ---------- Base & Layout ---------- */
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
@@ -42,8 +51,10 @@
 
         h1 {
             color: var(--text-primary);
+            margin-top: 0;
         }
 
+        /* ---------- Theme Toggle ---------- */
         .theme-toggle {
             position: fixed;
             top: 20px;
@@ -63,6 +74,7 @@
             background-color: var(--bg-button-hover);
         }
 
+        /* ---------- Companies Section ---------- */
         .companies-section {
             margin-bottom: 30px;
             padding: 20px;
@@ -76,6 +88,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
 
         .companies-header h2 {
@@ -104,6 +118,7 @@
             background-color: var(--bg-button-hover);
         }
 
+        /* ---------- Category Tabs ---------- */
         .category-tabs {
             display: flex;
             gap: 10px;
@@ -132,6 +147,7 @@
             border-color: var(--active-border);
         }
 
+        /* ---------- Companies Grid ---------- */
         .companies-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -151,8 +167,9 @@
             background-color: var(--bg-button);
             border: 1px solid var(--border-color);
             border-radius: 4px;
-            cursor: pointer;
             transition: all 0.2s;
+            position: relative;
+            gap: 6px;
         }
 
         .company-item:hover {
@@ -160,9 +177,10 @@
         }
 
         .company-item input[type="checkbox"] {
-            margin-right: 8px;
+            margin: 0;
             cursor: pointer;
             accent-color: var(--active-color);
+            flex-shrink: 0;
         }
 
         .company-item label {
@@ -172,6 +190,31 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            flex: 1;
+        }
+
+        .company-delete-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: none;
+            background-color: transparent;
+            color: var(--text-secondary);
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            opacity: 0.6;
+            flex-shrink: 0;
+        }
+
+        .company-delete-btn:hover {
+            background-color: var(--danger-color);
+            color: white;
+            opacity: 1;
         }
 
         .selected-count {
@@ -180,6 +223,7 @@
             color: var(--text-secondary);
         }
 
+        /* ---------- Action Buttons ---------- */
         .action-buttons {
             display: flex;
             gap: 15px;
@@ -199,7 +243,7 @@
             transition: background-color 0.3s;
         }
 
-        .primary-button:hover {
+        .primary-button:hover:not(:disabled) {
             background-color: var(--active-border);
         }
 
@@ -210,6 +254,7 @@
             border: 1px solid var(--border-color);
         }
 
+        /* ---------- Metric Buttons ---------- */
         .metric-buttons {
             display: flex;
             gap: 10px;
@@ -237,6 +282,7 @@
             border-color: var(--active-border);
         }
 
+        /* ---------- Chart Container ---------- */
         #chart-container {
             margin-top: 20px;
             background-color: var(--bg-secondary);
@@ -258,244 +304,25 @@
             display: block;
         }
 
-        .metric-button:focus {
-            outline: 2px solid var(--active-color);
-            outline-offset: 2px;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-track {
-            background: var(--bg-secondary);
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-thumb {
-            background: var(--bg-button);
-            border-radius: 5px;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-            background: var(--bg-button-hover);
-        }
-
-        .loading {
+        /* ---------- Loading / Error ---------- */
+        .loading, .error-message {
             text-align: center;
             padding: 50px;
             color: var(--text-secondary);
         }
-
         .error-message {
-            text-align: center;
-            padding: 50px;
             color: #ff6b6b;
         }
 
-        .delete-section {
-            margin: 20px 0;
-            text-align: right;
-        }
-
-        .delete-button {
-            padding: 10px 20px;
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.3s;
-        }
-
-        .delete-button:hover {
-            background-color: #c82333;
-        }
-
-        .modal {
-            display: none;
+        /* ---------- Delete Confirmation Modal (inline) ---------- */
+        .overlay {
             position: fixed;
-            z-index: 1000;
-            left: 0;
             top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
-
-        .modal-content {
-            background-color: var(--bg-primary);
-            margin: 50px auto;
-            padding: 0;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            width: 80%;
-            max-width: 600px;
-            max-height: 80vh;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 4px 6px var(--shadow-color);
-        }
-
-        .modal-header {
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .modal-header h2 {
-            margin: 0;
-            font-size: 1.2em;
-            color: var(--text-primary);
-        }
-
-        .close {
-            color: var(--text-secondary);
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-            line-height: 1;
-        }
-
-        .close:hover {
-            color: var(--text-primary);
-        }
-
-        .modal-body {
-            padding: 20px;
-            overflow-y: auto;
-            max-height: 400px;
-        }
-
-        .modal-footer {
-            padding: 15px 20px;
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-
-        .modal-btn {
-            padding: 8px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.3s;
-        }
-
-        .cancel-btn {
-            background-color: var(--bg-button);
-            color: var(--text-primary);
-        }
-
-        .cancel-btn:hover {
-            background-color: var(--bg-button-hover);
-        }
-
-        .delete-confirm-btn {
-            background-color: #dc3545;
-            color: white;
-        }
-
-        .delete-confirm-btn:hover:not(:disabled) {
-            background-color: #c82333;
-        }
-
-        .delete-confirm-btn:disabled {
-            background-color: var(--bg-button);
-            color: var(--text-secondary);
-            cursor: not-allowed;
-        }
-
-        .companies-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .delete-company-item {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-        }
-
-        .delete-company-item:hover {
-            background-color: var(--bg-button-hover);
-        }
-
-        .delete-company-item input[type="checkbox"] {
-            margin-right: 10px;
-            cursor: pointer;
-            accent-color: #dc3545;
-        }
-
-        .delete-company-item label {
-            cursor: pointer;
-            color: var(--text-primary);
-            font-size: 14px;
-        }
-
-        .company-item {
-            display: flex;
-            align-items: center;
-            padding: 8px;
-            background-color: var(--bg-button);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-        }
-
-        .company-item:hover {
-            background-color: var(--bg-button-hover);
-        }
-
-        .company-item input[type="checkbox"] {
-            margin-right: 8px;
-            cursor: pointer;
-            accent-color: var(--active-color);
-        }
-
-        .company-item label {
-            cursor: pointer;
-            color: var(--text-primary);
-            font-size: 14px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            flex: 1;
-        }
-
-        .company-delete-btn {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            border: none;
-            background-color: transparent;
-            color: var(--text-secondary);
-            font-size: 18px;
-            line-height: 1;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            margin-left: 5px;
-            opacity: 0.6;
-        }
-
-        .company-delete-btn:hover {
-            background-color: #dc3545;
-            color: white;
-            opacity: 1;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1999;
         }
 
         .delete-confirmation {
@@ -524,50 +351,44 @@
             gap: 10px;
         }
 
-        .delete-confirm-btn, .delete-cancel-btn {
-            padding: 8px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.3s;
-        }
-
         .delete-confirm-btn {
-            background-color: #dc3545;
+            background-color: var(--danger-color);
             color: white;
         }
-
         .delete-confirm-btn:hover {
-            background-color: #c82333;
+            background-color: var(--danger-hover);
         }
-
         .delete-cancel-btn {
             background-color: var(--bg-button);
             color: var(--text-primary);
         }
-
         .delete-cancel-btn:hover {
             background-color: var(--bg-button-hover);
         }
 
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1999;
+        /* ---------- Scrollbar for dark theme ---------- */
+        [data-theme="dark"] ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        [data-theme="dark"] ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+        [data-theme="dark"] ::-webkit-scrollbar-thumb {
+            background: var(--bg-button);
+            border-radius: 5px;
+        }
+        [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+            background: var(--bg-button-hover);
         }
     </style>
 </head>
 <body>
 <h1>Financial Analyzer</h1>
-
 <button class="theme-toggle" id="themeToggle">🌙 Dark theme</button>
 
-<div class="companies-section">
+<!-- Companies selection panel -->
+<section class="companies-section">
     <div class="companies-header">
         <h2>Select Companies to Analyze</h2>
         <div class="company-controls">
@@ -576,454 +397,374 @@
         </div>
     </div>
 
+    <!-- Category tabs will be injected here -->
     <div class="category-tabs" id="categoryTabs"></div>
 
+    <!-- Companies grid -->
     <div class="companies-grid" id="companiesGrid">
         <div class="loading">Loading companies...</div>
     </div>
 
     <div class="selected-count" id="selectedCount">Selected: 0 companies</div>
-</div>
+</section>
 
+<!-- Main action button -->
 <div class="action-buttons">
     <button class="primary-button" id="analyzeBtn" disabled>Analyze Selected Companies</button>
 </div>
 
-<div id="deleteModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Delete Companies</h2>
-            <span class="close">&times;</span>
-        </div>
-        <div class="modal-body">
-            <div class="companies-list" id="deleteCompaniesList"></div>
-        </div>
-        <div class="modal-footer">
-            <button class="modal-btn cancel-btn" id="cancelDeleteBtn">Cancel</button>
-            <button class="modal-btn delete-confirm-btn" id="confirmDeleteBtn" disabled>Delete Selected</button>
-        </div>
-    </div>
-</div>
-
+<!-- Metrics section (hidden until analysis) -->
 <div id="metricsSection" style="display: none;">
     <div class="metric-buttons" id="metric-buttons"></div>
     <div id="chart-container"></div>
 </div>
 
 <script>
-    const metrics = {{.Metrics}};
-    const container = document.getElementById('chart-container');
-    const buttonsContainer = document.getElementById('metric-buttons');
-    const themeToggle = document.getElementById('themeToggle');
-    const companiesGrid = document.getElementById('companiesGrid');
-    const categoryTabs = document.getElementById('categoryTabs');
-    const selectAllBtn = document.getElementById('selectAllBtn');
-    const deselectAllBtn = document.getElementById('deselectAllBtn');
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const metricsSection = document.getElementById('metricsSection');
-    const selectedCountSpan = document.getElementById('selectedCount');
+    (function() {
+        // ---------- DATA FROM BACKEND ----------
+        const metrics = {{.Metrics}};   // injected by Go template
 
-    let charts = {};
-    let companiesWithCategories = [];
-    let categories = [];
-    let selectedCompanies = [];
-    let currentCategory = 'all';
+        // ---------- DOM ELEMENTS ----------
+        const elements = {
+            themeToggle: document.getElementById('themeToggle'),
+            companiesGrid: document.getElementById('companiesGrid'),
+            categoryTabs: document.getElementById('categoryTabs'),
+            selectAllBtn: document.getElementById('selectAllBtn'),
+            deselectAllBtn: document.getElementById('deselectAllBtn'),
+            analyzeBtn: document.getElementById('analyzeBtn'),
+            metricsSection: document.getElementById('metricsSection'),
+            selectedCountSpan: document.getElementById('selectedCount'),
+            container: document.getElementById('chart-container'),
+            buttonsContainer: document.getElementById('metric-buttons')
+        };
 
-    function getCurrentTheme() {
-        return document.documentElement.getAttribute('data-theme') || 'light';
-    }
+        // ---------- STATE ----------
+        let state = {
+            companiesWithCategories: [],    // [{ company, category }]
+            categories: [],                 // string[]
+            selectedCompanies: [],           // string[] (company names)
+            currentCategory: 'all',
+            charts: {}                       // metric -> iframe element
+        };
 
-    function reloadAllIframes(theme) {
-        if (selectedCompanies.length === 0) return;
+        // ---------- THEME MANAGEMENT ----------
+        function getCurrentTheme() {
+            return document.documentElement.getAttribute('data-theme') || 'light';
+        }
 
-        Object.keys(charts).forEach(metric => {
-            const iframe = charts[metric];
-            const wasActive = iframe.classList.contains('active');
-            const companiesParam = selectedCompanies.join(',');
-            iframe.src = `/chart/${metric}?theme=${theme}&companies=${companiesParam}&t=${Date.now()}`;
-
-            if (wasActive) {
-                iframe.onload = function() {
-                    iframe.classList.add('active');
-                };
+        function setTheme(theme) {
+            const html = document.documentElement;
+            if (theme === 'dark') {
+                html.setAttribute('data-theme', 'dark');
+                elements.themeToggle.innerHTML = '☀️ Light theme';
+            } else {
+                html.removeAttribute('data-theme');
+                elements.themeToggle.innerHTML = '🌙 Dark theme';
             }
-        });
-    }
-
-    function setTheme(theme) {
-        const html = document.documentElement;
-        if (theme === 'dark') {
-            html.setAttribute('data-theme', 'dark');
-            themeToggle.innerHTML = '☀️ Light theme';
-        } else {
-            html.removeAttribute('data-theme');
-            themeToggle.innerHTML = '🌙 Dark theme';
+            localStorage.setItem('theme', theme);
+            reloadAllIframes(theme);
         }
-        localStorage.setItem('theme', theme);
-        reloadAllIframes(theme);
-    }
 
-    function toggleTheme() {
-        const currentTheme = getCurrentTheme();
-        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
-    }
-
-    function loadTheme() {
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            setTheme(savedTheme);
-        } else {
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            setTheme(prefersDark ? 'dark' : 'light');
+        function toggleTheme() {
+            const current = getCurrentTheme();
+            setTheme(current === 'dark' ? 'light' : 'dark');
         }
-    }
 
-    async function loadData() {
-        try {
-            companiesGrid.innerHTML = '<div class="loading">Loading companies...</div>';
-
-            await Promise.all([
-                loadCompaniesWithCategories(),
-                loadCategories()
-            ]);
-
-            renderCategoryTabs();
-            renderCompaniesGrid();
-        } catch (error) {
-            console.error('Error loading data:', error);
-            companiesGrid.innerHTML = '<div class="error-message">Error loading companies data. Please try again.</div>';
+        function loadSavedTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved) {
+                setTheme(saved);
+            } else {
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                setTheme(prefersDark ? 'dark' : 'light');
+            }
         }
-    }
 
-    async function loadCompaniesWithCategories() {
-        const response = await fetch('/api/companies-with-categories');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        // ---------- DATA FETCHING ----------
+        async function loadCompaniesWithCategories() {
+            const resp = await fetch('/api/companies-with-categories');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return await resp.json();
         }
-        companiesWithCategories = await response.json();
-        console.log('Loaded companies:', companiesWithCategories);
-    }
 
-    async function loadCategories() {
-        const response = await fetch('/api/categories');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        async function loadCategories() {
+            const resp = await fetch('/api/categories');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return await resp.json();
         }
-        categories = await response.json();
-        console.log('Loaded categories:', categories);
-    }
 
-    function renderCategoryTabs() {
-        categoryTabs.innerHTML = '';
+        async function loadData() {
+            try {
+                elements.companiesGrid.innerHTML = '<div class="loading">Loading companies...</div>';
 
-        const allTab = document.createElement('button');
-        allTab.className = `category-tab ${currentCategory === 'all' ? 'active' : ''}`;
-        allTab.textContent = 'All Companies';
-        allTab.setAttribute('data-category', 'all');
-        allTab.addEventListener('click', () => {
-            currentCategory = 'all';
-            renderCategoryTabs();
-            renderCompaniesGrid();
-        });
-        categoryTabs.appendChild(allTab);
+                const [companies, cats] = await Promise.all([
+                    loadCompaniesWithCategories(),
+                    loadCategories()
+                ]);
 
-        categories.forEach(category => {
-            if (!category) return;
+                state.companiesWithCategories = companies;
+                state.categories = cats;
 
-            const tab = document.createElement('button');
-            tab.className = `category-tab ${category === currentCategory ? 'active' : ''}`;
-            tab.textContent = category;
-            tab.setAttribute('data-category', category);
-            tab.addEventListener('click', () => {
-                currentCategory = category;
                 renderCategoryTabs();
                 renderCompaniesGrid();
-            });
-            categoryTabs.appendChild(tab);
-        });
-    }
-
-    function renderCompaniesGrid() {
-        if (!companiesWithCategories || companiesWithCategories.length === 0) {
-            companiesGrid.innerHTML = '<div class="loading">No companies found</div>';
-            return;
-        }
-
-        companiesGrid.innerHTML = '';
-
-        const filteredCompanies = currentCategory === 'all'
-            ? companiesWithCategories
-            : companiesWithCategories.filter(c => c && c.category === currentCategory);
-
-        if (filteredCompanies.length === 0) {
-            companiesGrid.innerHTML = '<div class="loading">No companies in this category</div>';
-            return;
-        }
-
-        const uniqueCompanies = new Map();
-        filteredCompanies.forEach(companyData => {
-            if (companyData && companyData.company && !uniqueCompanies.has(companyData.company)) {
-                uniqueCompanies.set(companyData.company, companyData);
+            } catch (err) {
+                console.error('loadData error:', err);
+                elements.companiesGrid.innerHTML = '<div class="error-message">Error loading companies. Please refresh.</div>';
             }
-        });
+        }
 
-        Array.from(uniqueCompanies.values()).forEach(companyData => {
-            const item = document.createElement('div');
-            item.className = 'company-item';
+        // ---------- RENDERING ----------
+        function renderCategoryTabs() {
+            const { categoryTabs } = elements;
+            categoryTabs.innerHTML = '';
 
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `company-${companyData.company}`;
-            checkbox.value = companyData.company;
-            checkbox.addEventListener('change', updateSelectedCompanies);
+            // "All Companies" tab
+            const allTab = createTab('All Companies', 'all', state.currentCategory === 'all');
+            categoryTabs.appendChild(allTab);
 
-            const label = document.createElement('label');
-            label.htmlFor = `company-${companyData.company}`;
-            label.textContent = companyData.company;
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'company-delete-btn';
-            deleteBtn.innerHTML = '×';
-            deleteBtn.title = 'Delete company';
-            deleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                confirmDeleteCompany(companyData.company);
+            // Category tabs
+            state.categories.filter(Boolean).forEach(cat => {
+                const tab = createTab(cat, cat, state.currentCategory === cat);
+                categoryTabs.appendChild(tab);
             });
 
-            item.appendChild(checkbox);
-            item.appendChild(label);
-            item.appendChild(deleteBtn);
-
-            companiesGrid.appendChild(item);
-        });
-
-        updateSelectedCompanies();
-    }
-
-    function updateSelectedCompanies() {
-        const checkboxes = document.querySelectorAll('.company-item input[type="checkbox"]:checked');
-        selectedCompanies = Array.from(checkboxes).map(cb => cb.value);
-
-        selectedCountSpan.textContent = `Selected: ${selectedCompanies.length} company${selectedCompanies.length !== 1 ? 's' : ''}`;
-
-        analyzeBtn.disabled = selectedCompanies.length === 0;
-
-        if (selectedCompanies.length === 0) {
-            metricsSection.style.display = 'none';
-        }
-    }
-
-    function selectAllCompanies() {
-        document.querySelectorAll('.company-item input[type="checkbox"]').forEach(cb => {
-            cb.checked = true;
-        });
-        updateSelectedCompanies();
-    }
-
-    function deselectAllCompanies() {
-        document.querySelectorAll('.company-item input[type="checkbox"]').forEach(cb => {
-            cb.checked = false;
-        });
-        updateSelectedCompanies();
-    }
-
-    async function analyzeCompanies() {
-        if (selectedCompanies.length === 0) return;
-
-        container.innerHTML = '';
-        buttonsContainer.innerHTML = '';
-        charts = {};
-
-        metricsSection.style.display = 'block';
-
-        metrics.forEach((metric, index) => {
-            const iframe = document.createElement('iframe');
-            iframe.className = 'chart-frame';
-            iframe.id = `chart-${metric}`;
-            iframe.src = `/chart/${metric}?theme=${getCurrentTheme()}&companies=${selectedCompanies.join(',')}`;
-
-            container.appendChild(iframe);
-            charts[metric] = iframe;
-
-            const button = document.createElement('button');
-            button.className = 'metric-button' + (index === 0 ? ' active' : '');
-            button.textContent = formatMetricName(metric);
-            button.setAttribute('data-metric', metric);
-            button.addEventListener('click', function() {
-                showChart(metric);
-            });
-            buttonsContainer.appendChild(button);
-        });
-
-        if (metrics.length > 0) {
-            showChart(metrics[0]);
-        }
-    }
-
-    function showChart(metric) {
-        document.querySelectorAll('.chart-frame').forEach(iframe => {
-            iframe.classList.remove('active');
-        });
-        document.querySelectorAll('.metric-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-
-        const iframe = document.getElementById(`chart-${metric}`);
-        if (iframe) {
-            iframe.classList.add('active');
-        }
-
-        const activeButton = Array.from(document.querySelectorAll('.metric-button')).find(
-            btn => btn.getAttribute('data-metric') === metric
-        );
-        if (activeButton) {
-            activeButton.classList.add('active');
-        }
-    }
-
-    function formatMetricName(metric) {
-        const names = {
-            'revenue': 'Revenue',
-            'net_profit': 'Net Profit',
-            'ebitda': 'EBITDA',
-            'pe': 'P/E Ratio',
-            'roe': 'ROE (%)',
-            'capitalization': 'Market Cap',
-            'debt': 'Debt'
-        };
-        return names[metric] || metric;
-    }
-
-    themeToggle.addEventListener('click', toggleTheme);
-    selectAllBtn.addEventListener('click', selectAllCompanies);
-    deselectAllBtn.addEventListener('click', deselectAllCompanies);
-    analyzeBtn.addEventListener('click', analyzeCompanies);
-
-    loadData();
-    loadTheme();
-
-    const deleteModal = document.getElementById('deleteModal');
-    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
-    const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
-    const closeModalBtn = document.querySelector('.close');
-
-    let selectedDeleteCompanies = new Set();
-
-    closeModalBtn.addEventListener('click', () => {
-        deleteModal.style.display = 'none';
-        selectedDeleteCompanies.clear();
-    });
-
-    cancelDeleteBtn.addEventListener('click', () => {
-        deleteModal.style.display = 'none';
-        selectedDeleteCompanies.clear();
-    });
-
-    window.addEventListener('click', (event) => {
-        if (event.target === deleteModal) {
-            deleteModal.style.display = 'none';
-            selectedDeleteCompanies.clear();
-        }
-    });
-
-    confirmDeleteBtn.addEventListener('click', async () => {
-        if (selectedDeleteCompanies.size === 0) return;
-
-        const deletePromises = Array.from(selectedDeleteCompanies).map(company =>
-            fetch('/api/companies', {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ company: company })
-            })
-        );
-
-        try {
-            const results = await Promise.all(deletePromises);
-            const allSuccess = results.every(r => r.ok);
-
-            if (allSuccess) {
-                alert('Selected companies deleted successfully');
-                deleteModal.style.display = 'none';
-                selectedDeleteCompanies.clear();
-                await loadData();
-
-                deselectAllCompanies();
-                metricsSection.style.display = 'none';
-            } else {
-                alert('Some companies could not be deleted');
+            function createTab(label, value, isActive) {
+                const btn = document.createElement('button');
+                btn.className = `category-tab ${isActive ? 'active' : ''}`;
+                btn.textContent = label;
+                btn.setAttribute('data-category', value);
+                btn.addEventListener('click', () => {
+                    state.currentCategory = value;
+                    renderCategoryTabs();
+                    renderCompaniesGrid();
+                });
+                return btn;
             }
-        } catch (error) {
-            console.error('Error deleting companies:', error);
-            alert('Error deleting companies');
         }
-    });
 
-    function confirmDeleteCompany(companyName) {
-        const overlay = document.createElement('div');
-        overlay.className = 'overlay';
+        function renderCompaniesGrid() {
+            const { companiesGrid } = elements;
+            if (!state.companiesWithCategories.length) {
+                companiesGrid.innerHTML = '<div class="loading">No companies found</div>';
+                return;
+            }
 
-        const confirmation = document.createElement('div');
-        confirmation.className = 'delete-confirmation';
-        confirmation.innerHTML = `
-        <p>Are you sure you want to delete "${companyName}"?</p>
-        <div class="delete-confirmation-buttons">
-            <button class="delete-cancel-btn">Cancel</button>
-            <button class="delete-confirm-btn">Delete</button>
-        </div>
-    `;
+            // Filter by category
+            const filtered = state.currentCategory === 'all'
+                ? state.companiesWithCategories
+                : state.companiesWithCategories.filter(c => c && c.category === state.currentCategory);
 
-        document.body.appendChild(overlay);
-        document.body.appendChild(confirmation);
+            // Remove duplicates (by company name)
+            const uniqueMap = new Map();
+            filtered.forEach(item => {
+                if (item && item.company && !uniqueMap.has(item.company)) {
+                    uniqueMap.set(item.company, item);
+                }
+            });
+            const uniqueCompanies = Array.from(uniqueMap.values());
 
-        const cancelBtn = confirmation.querySelector('.delete-cancel-btn');
-        const confirmBtn = confirmation.querySelector('.delete-confirm-btn');
+            if (uniqueCompanies.length === 0) {
+                companiesGrid.innerHTML = '<div class="loading">No companies in this category</div>';
+                return;
+            }
 
-        cancelBtn.addEventListener('click', () => {
-            overlay.remove();
-            confirmation.remove();
-        });
+            // Build grid
+            companiesGrid.innerHTML = '';
+            uniqueCompanies.forEach(companyData => {
+                const companyName = companyData.company;
+                const item = document.createElement('div');
+                item.className = 'company-item';
 
-        confirmBtn.addEventListener('click', async () => {
-            try {
-                const response = await fetch('/api/companies', {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ company: companyName })
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `company-${companyName}`;
+                checkbox.value = companyName;
+                checkbox.addEventListener('change', updateSelectedCompanies);
+
+                const label = document.createElement('label');
+                label.htmlFor = `company-${companyName}`;
+                label.textContent = companyName;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'company-delete-btn';
+                deleteBtn.innerHTML = '×';
+                deleteBtn.title = 'Delete company';
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    confirmDeleteCompany(companyName);
                 });
 
-                if (response.ok) {
-                    overlay.remove();
-                    confirmation.remove();
+                item.append(checkbox, label, deleteBtn);
+                companiesGrid.appendChild(item);
+            });
 
-                    await loadData();
+            // Restore checked state
+            const checkboxes = companiesGrid.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = state.selectedCompanies.includes(cb.value);
+            });
+            updateSelectedCompanies();
+        }
 
-                    deselectAllCompanies();
-                    metricsSection.style.display = 'none';
+        // ---------- SELECTION HANDLING ----------
+        function updateSelectedCompanies() {
+            const checkboxes = document.querySelectorAll('.company-item input[type="checkbox"]:checked');
+            state.selectedCompanies = Array.from(checkboxes).map(cb => cb.value);
 
-                    alert(`Company "${companyName}" deleted successfully`);
-                } else {
-                    const error = await response.text();
-                    alert(`Error deleting company: ${error}`);
-                    overlay.remove();
-                    confirmation.remove();
-                }
-            } catch (error) {
-                console.error('Error deleting company:', error);
-                alert('Error deleting company');
-                overlay.remove();
-                confirmation.remove();
+            const count = state.selectedCompanies.length;
+            elements.selectedCountSpan.textContent = `Selected: ${count} company${count !== 1 ? 's' : ''}`;
+            elements.analyzeBtn.disabled = count === 0;
+
+            if (count === 0) {
+                elements.metricsSection.style.display = 'none';
             }
-        });
+        }
 
-        overlay.addEventListener('click', () => {
-            overlay.remove();
-            confirmation.remove();
-        });
-    }
+        function selectAllCompanies() {
+            document.querySelectorAll('.company-item input[type="checkbox"]').forEach(cb => cb.checked = true);
+            updateSelectedCompanies();
+        }
+
+        function deselectAllCompanies() {
+            document.querySelectorAll('.company-item input[type="checkbox"]').forEach(cb => cb.checked = false);
+            updateSelectedCompanies();
+        }
+
+        // ---------- ANALYSIS & CHARTS ----------
+        async function analyzeCompanies() {
+            if (state.selectedCompanies.length === 0) return;
+
+            const { container, buttonsContainer, metricsSection } = elements;
+            container.innerHTML = '';
+            buttonsContainer.innerHTML = '';
+            state.charts = {};
+
+            metricsSection.style.display = 'block';
+
+            metrics.forEach((metric, index) => {
+                // Create iframe
+                const iframe = document.createElement('iframe');
+                iframe.className = 'chart-frame';
+                iframe.id = `chart-${metric}`;
+                iframe.src = `/chart/${metric}?theme=${getCurrentTheme()}&companies=${state.selectedCompanies.join(',')}`;
+                container.appendChild(iframe);
+                state.charts[metric] = iframe;
+
+                // Create button
+                const btn = document.createElement('button');
+                btn.className = `metric-button ${index === 0 ? 'active' : ''}`;
+                btn.textContent = formatMetricName(metric);
+                btn.setAttribute('data-metric', metric);
+                btn.addEventListener('click', () => showChart(metric));
+                buttonsContainer.appendChild(btn);
+            });
+
+            if (metrics.length) showChart(metrics[0]);
+        }
+
+        function showChart(metric) {
+            // Deactivate all
+            document.querySelectorAll('.chart-frame').forEach(ifr => ifr.classList.remove('active'));
+            document.querySelectorAll('.metric-button').forEach(btn => btn.classList.remove('active'));
+
+            // Activate selected
+            const iframe = document.getElementById(`chart-${metric}`);
+            if (iframe) iframe.classList.add('active');
+
+            const activeBtn = Array.from(document.querySelectorAll('.metric-button')).find(
+                btn => btn.getAttribute('data-metric') === metric
+            );
+            if (activeBtn) activeBtn.classList.add('active');
+        }
+
+        function formatMetricName(metric) {
+            const names = {
+                'revenue': 'Revenue',
+                'net_profit': 'Net Profit',
+                'ebitda': 'EBITDA',
+                'pe': 'P/E Ratio',
+                'roe': 'ROE (%)',
+                'capitalization': 'Market Cap',
+                'debt': 'Debt'
+            };
+            return names[metric] || metric;
+        }
+
+        function reloadAllIframes(theme) {
+            if (state.selectedCompanies.length === 0) return;
+            Object.entries(state.charts).forEach(([metric, iframe]) => {
+                const wasActive = iframe.classList.contains('active');
+                iframe.src = `/chart/${metric}?theme=${theme}&companies=${state.selectedCompanies.join(',')}&t=${Date.now()}`;
+                if (wasActive) {
+                    iframe.onload = () => iframe.classList.add('active');
+                }
+            });
+        }
+
+        // ---------- DELETE COMPANY (inline confirmation) ----------
+        function confirmDeleteCompany(companyName) {
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay';
+
+            const confirmBox = document.createElement('div');
+            confirmBox.className = 'delete-confirmation';
+            confirmBox.innerHTML = `
+                    <p>Are you sure you want to delete "${companyName}"?</p>
+                    <div class="delete-confirmation-buttons">
+                        <button class="delete-cancel-btn">Cancel</button>
+                        <button class="delete-confirm-btn">Delete</button>
+                    </div>
+                `;
+
+            document.body.append(overlay, confirmBox);
+
+            const cancelBtn = confirmBox.querySelector('.delete-cancel-btn');
+            const deleteBtn = confirmBox.querySelector('.delete-confirm-btn');
+
+            const cleanup = () => {
+                overlay.remove();
+                confirmBox.remove();
+            };
+
+            cancelBtn.addEventListener('click', cleanup);
+            overlay.addEventListener('click', cleanup);
+
+            deleteBtn.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/api/companies', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ company: companyName })
+                    });
+
+                    if (!resp.ok) {
+                        const errText = await resp.text();
+                        throw new Error(errText);
+                    }
+
+                    cleanup();
+                    await loadData();               // refresh lists
+                    deselectAllCompanies();          // clear selection
+                    elements.metricsSection.style.display = 'none';
+                    alert(`Company "${companyName}" deleted successfully.`);
+                } catch (err) {
+                    console.error('Delete error:', err);
+                    alert(`Error deleting company: ${err.message}`);
+                    cleanup();
+                }
+            });
+        }
+
+        // ---------- EVENT LISTENERS ----------
+        elements.themeToggle.addEventListener('click', toggleTheme);
+        elements.selectAllBtn.addEventListener('click', selectAllCompanies);
+        elements.deselectAllBtn.addEventListener('click', deselectAllCompanies);
+        elements.analyzeBtn.addEventListener('click', analyzeCompanies);
+
+        // ---------- INITIALIZATION ----------
+        loadData();
+        loadSavedTheme();
+    })();
 </script>
 </body>
 </html>
