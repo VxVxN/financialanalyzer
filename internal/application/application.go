@@ -26,6 +26,13 @@ func Init(cfg *config.Config) (*Application, error) {
 	}, nil
 }
 
+func (app *Application) MigrateDB() error {
+	if err := database.RunMigrations(app.db); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+	return nil
+}
+
 func (app *Application) Close() {
 	app.db.Close()
 }

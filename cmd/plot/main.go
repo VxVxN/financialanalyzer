@@ -46,6 +46,10 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer app.Close()
 
+	if err = app.MigrateDB(); err != nil {
+		return err
+	}
+
 	controller := handlers.NewController(app.Repo)
 
 	r := chi.NewRouter()
