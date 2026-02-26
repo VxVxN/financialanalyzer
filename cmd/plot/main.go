@@ -64,6 +64,10 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	r.Get("/api/categories", controller.GetCategories)
 	r.Get("/chart/{metric}", controller.ChartHandler)
 
+	r.Get("/api/company-note", controller.GetCompanyNote)
+	r.Post("/api/company-note", controller.SaveCompanyNote)
+	r.Delete("/api/company-note", controller.DeleteCompanyNote)
+
 	logger.Info("Starting server", "port", cfg.Port)
 
 	srv := &http.Server{

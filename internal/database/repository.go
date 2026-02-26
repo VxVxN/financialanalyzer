@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -203,6 +204,60 @@ func (r *Repository) DeleteCompany(company string) error {
 
 	if rowsAffected == 0 {
 		return fmt.Errorf("company %s not found", company)
+	}
+
+	return nil
+}
+
+type CompanyNote struct {
+	Company   string    `json:"company"`
+	Note      string    `json:"note"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (r *Repository) GetCompanyNote(company string) (string, error) {
+	query := `SELECT note FROM company_notes WHERE company = $1`
+
+	var note sql.NullString
+	err := r.db.QueryRow(query, company).Scan(&note)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("error getting company note: %w", err)
+	}
+
+	if note.Valid {
+		return note.String, nil
+	}
+	return "", nil
+}
+
+func (r *Repository) SaveCompanyNote(company, note string) error {
+	query := `
+        INSERT INTO company_notes (company, note, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (company) 
+        DO UPDATE SET
+            note = EXCLUDED.note,
+            updated_at = CURRENT_TIMESTAMP
+    `
+
+	_, err := r.db.Exec(query, company, note)
+	if err != nil {
+		return fmt.Errorf("error saving company note: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) DeleteCompanyNote(company string) error {
+	query := `DELETE FROM company_notes WHERE company = $1`
+
+	_, err := r.db.Exec(query, company)
+	if err != nil {
+		return fmt.Errorf("error deleting company note: %w", err)
 	}
 
 	return nil

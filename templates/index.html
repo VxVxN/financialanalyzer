@@ -381,6 +381,120 @@
         [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
             background: var(--bg-button-hover);
         }
+
+        .company-note-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: none;
+            background-color: transparent;
+            color: var(--text-secondary);
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            opacity: 0.6;
+            flex-shrink: 0;
+        }
+
+        .company-note-btn:hover {
+            background-color: var(--active-color);
+            color: white;
+            opacity: 1;
+        }
+
+        .company-note-btn.has-note {
+            color: var(--active-color);
+            opacity: 1;
+        }
+
+        .company-note-btn.has-note:hover {
+            background-color: var(--active-color);
+            color: white;
+        }
+
+        /* Note Modal */
+        .note-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 30px; /* Увеличено с 25px */
+            box-shadow: 0 4px 20px var(--shadow-color);
+            z-index: 2000;
+            min-width: 600px; /* Увеличено с 400px */
+            max-width: 800px; /* Увеличено с 600px */
+            width: 80%; /* Добавлено для адаптивности */
+        }
+
+        .note-modal h3 {
+            margin: 0 0 20px 0; /* Увеличен нижний отступ */
+            color: var(--text-primary);
+            font-size: 20px; /* Увеличен с 18px */
+        }
+
+        .note-modal textarea {
+            width: 100%;
+            min-height: 250px; /* Увеличено с 150px */
+            padding: 15px; /* Увеличено с 12px */
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 15px; /* Увеличено с 14px */
+            resize: vertical;
+            margin-bottom: 20px; /* Увеличено с 15px */
+        }
+
+        .note-modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px; /* Увеличено с 10px */
+        }
+
+        .note-save-btn {
+            background-color: var(--active-color);
+            color: white;
+            padding: 10px 20px; /* Добавлено для больших кнопок */
+            font-size: 15px; /* Добавлено */
+        }
+
+        .note-save-btn:hover {
+            background-color: var(--active-border);
+        }
+
+        .note-cancel-btn {
+            background-color: var(--bg-button);
+            color: var(--text-primary);
+            padding: 10px 20px; /* Добавлено для больших кнопок */
+            font-size: 15px; /* Добавлено */
+        }
+
+        .note-cancel-btn:hover {
+            background-color: var(--bg-button-hover);
+        }
+
+        .note-delete-btn {
+            background-color: var(--danger-color);
+            color: white;
+            margin-right: auto;
+            padding: 10px 20px; /* Добавлено для больших кнопок */
+            font-size: 15px; /* Добавлено */
+        }
+
+        .note-timestamp {
+            font-size: 13px; /* Увеличено с 12px */
+            color: var(--text-secondary);
+            margin-top: 15px; /* Увеличено с 10px */
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -585,6 +699,15 @@
                 label.htmlFor = `company-${companyName}`;
                 label.textContent = companyName;
 
+                const noteBtn = document.createElement('button');
+                noteBtn.className = 'company-note-btn';
+                noteBtn.innerHTML = '📝';
+                noteBtn.title = 'Add/edit note';
+                noteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openNoteModal(companyName);
+                });
+
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'company-delete-btn';
                 deleteBtn.innerHTML = '×';
@@ -594,7 +717,7 @@
                     confirmDeleteCompany(companyName);
                 });
 
-                item.append(checkbox, label, deleteBtn);
+                item.append(checkbox, label, noteBtn, deleteBtn);
                 companiesGrid.appendChild(item);
             });
 
@@ -604,6 +727,142 @@
                 cb.checked = state.selectedCompanies.includes(cb.value);
             });
             updateSelectedCompanies();
+
+            // Load notes for all companies
+            loadAllNotes();
+        }
+
+        // Notes state
+        let companyNotes = {}; // company -> { note, timestamp }
+
+        async function loadAllNotes() {
+            const companies = state.companiesWithCategories.map(c => c.company);
+            const uniqueCompanies = [...new Set(companies)];
+
+            for (const company of uniqueCompanies) {
+                try {
+                    const resp = await fetch(`/api/company-note?company=${encodeURIComponent(company)}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data.note) {
+                            companyNotes[company] = {
+                                note: data.note,
+                                timestamp: Date.now()
+                            };
+                            updateNoteButton(company);
+                        }
+                    }
+                } catch (err) {
+                    console.error(`Error loading note for ${company}:`, err);
+                }
+            }
+        }
+
+        function updateNoteButton(company) {
+            const noteBtn = document.querySelector(`.company-item label[for="company-${company}"] + .company-note-btn`);
+            if (noteBtn && companyNotes[company]) {
+                noteBtn.classList.add('has-note');
+            }
+        }
+
+        async function openNoteModal(company) {
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'note-modal';
+
+            // Load existing note
+            let existingNote = '';
+            try {
+                const resp = await fetch(`/api/company-note?company=${encodeURIComponent(company)}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    existingNote = data.note || '';
+                }
+            } catch (err) {
+                console.error('Error loading note:', err);
+            }
+
+            modal.innerHTML = `
+        <h3>Note for ${company}</h3>
+        <textarea id="noteText" placeholder="Enter your notes about this company...">${escapeHtml(existingNote)}</textarea>
+        <div class="note-modal-buttons">
+            ${existingNote ? '<button class="note-delete-btn" id="deleteNoteBtn">Delete</button>' : ''}
+            <button class="note-cancel-btn" id="cancelNoteBtn">Cancel</button>
+            <button class="note-save-btn" id="saveNoteBtn">Save</button>
+        </div>
+    `;
+
+            document.body.append(overlay, modal);
+
+            const textarea = modal.querySelector('#noteText');
+            const saveBtn = modal.querySelector('#saveNoteBtn');
+            const cancelBtn = modal.querySelector('#cancelNoteBtn');
+            const deleteBtn = modal.querySelector('#deleteNoteBtn');
+
+            const cleanup = () => {
+                overlay.remove();
+                modal.remove();
+            };
+
+            cancelBtn.addEventListener('click', cleanup);
+            overlay.addEventListener('click', cleanup);
+
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', async () => {
+                    try {
+                        const resp = await fetch(`/api/company-note?company=${encodeURIComponent(company)}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (!resp.ok) throw new Error('Failed to delete note');
+
+                        delete companyNotes[company];
+                        updateNoteButton(company);
+                        cleanup();
+                    } catch (err) {
+                        console.error('Error deleting note:', err);
+                        alert('Failed to delete note');
+                    }
+                });
+            }
+
+            saveBtn.addEventListener('click', async () => {
+                const note = textarea.value.trim();
+
+                try {
+                    const resp = await fetch('/api/company-note', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ company, note })
+                    });
+
+                    if (!resp.ok) throw new Error('Failed to save note');
+
+                    if (note) {
+                        companyNotes[company] = {
+                            note: note,
+                            timestamp: Date.now()
+                        };
+                    } else {
+                        delete companyNotes[company];
+                    }
+
+                    updateNoteButton(company);
+                    cleanup();
+                } catch (err) {
+                    console.error('Error saving note:', err);
+                    alert('Failed to save note');
+                }
+            });
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // ---------- SELECTION HANDLING ----------
@@ -729,8 +988,10 @@
             cancelBtn.addEventListener('click', cleanup);
             overlay.addEventListener('click', cleanup);
 
+            // Update the deleteBtn click handler in confirmDeleteCompany function
             deleteBtn.addEventListener('click', async () => {
                 try {
+                    // Delete company data
                     const resp = await fetch('/api/companies', {
                         method: 'DELETE',
                         headers: { 'Content-Type': 'application/json' },
@@ -742,7 +1003,13 @@
                         throw new Error(errText);
                     }
 
+                    // Delete company note
+                    await fetch(`/api/company-note?company=${encodeURIComponent(companyName)}`, {
+                        method: 'DELETE'
+                    });
+
                     cleanup();
+                    delete companyNotes[companyName];
                     await loadData();               // refresh lists
                     deselectAllCompanies();          // clear selection
                     elements.metricsSection.style.display = 'none';
