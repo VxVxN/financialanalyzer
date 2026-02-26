@@ -57,6 +57,9 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
+	fileServer := http.FileServer(http.Dir("./static"))
+	r.Handle("/static/*", http.StripPrefix("/static/", fileServer))
+
 	r.Get("/", controller.IndexHandler)
 	r.Get("/api/companies", controller.GetCompanies)
 	r.Delete("/api/companies", controller.DeleteCompany)
