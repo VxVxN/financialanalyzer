@@ -45,7 +45,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	csvParser := parser.NewCSVParser(cfg.CSVPath)
+	csvParser := parser.NewCSVParser(cfg.CSVPath, logger)
 	data, err := csvParser.Parse()
 	if err != nil {
 		return fmt.Errorf("failed to parse CSV: %w", err)

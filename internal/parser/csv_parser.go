@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,11 +15,12 @@ import (
 )
 
 type CSVParser struct {
-	filePath string
+	rootPath string
+	logger   *slog.Logger
 }
 
-func NewCSVParser(filePath string) *CSVParser {
-	return &CSVParser{filePath: filePath}
+func NewCSVParser(rootPath string, logger *slog.Logger) *CSVParser {
+	return &CSVParser{rootPath: rootPath, logger: logger}
 }
 
 type MetricHandler func(*models.QuarterData, float64)
@@ -31,7 +33,39 @@ type MetricConfig struct {
 }
 
 func (p *CSVParser) Parse() ([]models.QuarterData, error) {
-	file, err := os.Open(p.filePath)
+	var allResults []models.QuarterData
+
+	err := filepath.Walk(p.rootPath, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), ".csv") {
+			return nil
+		}
+
+		p.logger.Debug("Parsing file", "path", filePath)
+
+		fileParser := &CSVParser{rootPath: filePath}
+		results, err := fileParser.parseFile()
+		if err != nil {
+			p.logger.Error("Error parsing file", "path", filePath, "err", err)
+			return nil
+		}
+
+		allResults = append(allResults, results...)
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	return allResults, nil
+}
+
+func (p *CSVParser) parseFile() ([]models.QuarterData, error) {
+	file, err := os.Open(p.rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -87,7 +121,7 @@ func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, er
 			continue
 		}
 
-		data, err := p.processMetricRow(metricConfig, metricName, quarters, record, companyName, category)
+		data, err := p.processMetricRow(metricConfig, quarters, record, companyName, category)
 		if err != nil {
 			continue
 		}
@@ -99,9 +133,14 @@ func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, er
 }
 
 func (p *CSVParser) extractCompanyNameAndCategory() (string, string) {
-	filename := path.Base(p.filePath)
+	filename := path.Base(p.rootPath)
 	filename = strings.TrimSuffix(filename, filepath.Ext(filename))
 	splitedFilename := strings.Split(filename, "_")
+
+	if len(splitedFilename) < 2 {
+		return filename, "unknown"
+	}
+
 	return splitedFilename[0], splitedFilename[1]
 }
 
@@ -140,14 +179,8 @@ func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]Me
 	return nil
 }
 
-func (p *CSVParser) processMetricRow(
-	config *MetricConfig,
-	metricName string,
-	quarters []string,
-	record []string,
-	companyName string,
-	category string,
-) ([]models.QuarterData, error) {
+func (p *CSVParser) processMetricRow(config *MetricConfig, quarters []string, record []string, companyName string,
+	category string) ([]models.QuarterData, error) {
 
 	var results []models.QuarterData
 
