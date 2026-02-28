@@ -20,6 +20,7 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 	metric := chi.URLParam(r, "metric")
 	theme := r.URL.Query().Get("theme")
 	companiesParam := r.URL.Query().Get("companies")
+	colorsParam := r.URL.Query().Get("colors")
 
 	if theme == "" {
 		theme = "light"
@@ -34,6 +35,23 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+	}
+
+	var companyColors map[string]string
+	if colorsParam != "" {
+		colors := strings.Split(colorsParam, ",")
+		companyColors = make(map[string]string)
+		for i, company := range companies {
+			if i < len(colors) {
+				companyColors[company] = colors[i]
+			}
+		}
+	} else {
+		var err error
+		companyColors, err = controller.repo.GetCompaniesColors(companies)
+		if err != nil {
+			companyColors = make(map[string]string)
 		}
 	}
 
@@ -78,7 +96,7 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 	page.PageTitle = fmt.Sprintf("%s - Financial Analyzer", formatMetricName(metric))
 
 	if len(data) > 0 {
-		lineChart := createNormalizedLineChart(data, metric, companies)
+		lineChart := createNormalizedLineChart(data, metric, companies, companyColors)
 		page.AddCharts(lineChart)
 	}
 
@@ -219,7 +237,7 @@ func renderDataTable(w http.ResponseWriter, data []database.CompanyMetric, compa
 	fmt.Fprintf(w, `</tbody></table></div>`)
 }
 
-func createNormalizedLineChart(data []database.CompanyMetric, metric string, companies []string) *charts.Line {
+func createNormalizedLineChart(data []database.CompanyMetric, metric string, companies []string, companyColors map[string]string) *charts.Line {
 	line := charts.NewLine()
 
 	metricName := formatMetricName(metric)
@@ -326,7 +344,7 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 
 	line.SetXAxis(quarters)
 
-	colors := []string{
+	defaultColors := []string{
 		"#5470c6", "#fac858", "#ee6666", "#73c0de",
 		"#3ba272", "#fc8452", "#9a60b4", "#ea7ccc",
 	}
@@ -350,7 +368,11 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 				}
 			}
 
-			color := colors[idx%len(colors)]
+			color := companyColors[company]
+			if color == "" {
+				color = defaultColors[idx%len(defaultColors)]
+			}
+
 			line.AddSeries(company, values,
 				charts.WithLineChartOpts(opts.LineChart{
 					Smooth:       opts.Bool(true),
@@ -364,6 +386,9 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 				}),
 				charts.WithAreaStyleOpts(opts.AreaStyle{
 					Color: color + "20",
+				}),
+				charts.WithItemStyleOpts(opts.ItemStyle{
+					Color: color,
 				}),
 			)
 		}

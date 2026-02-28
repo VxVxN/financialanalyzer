@@ -71,17 +71,17 @@ func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]Co
 	}
 
 	query := fmt.Sprintf(`
-		SELECT year, quarter, company, %s as value
-		FROM company_financials
-		WHERE company IN (%s)
-		ORDER BY year, 
-			CASE quarter
-				WHEN 'Q1' THEN 1
-				WHEN 'Q2' THEN 2
-				WHEN 'Q3' THEN 3
-				WHEN 'Q4' THEN 4
-			END
-	`, metric, strings.Join(placeholders, ","))
+        SELECT year, quarter, company, %s as value
+        FROM company_financials
+        WHERE company IN (%s)
+        ORDER BY year, 
+            CASE quarter
+                WHEN 'Q1' THEN 1
+                WHEN 'Q2' THEN 2
+                WHEN 'Q3' THEN 3
+                WHEN 'Q4' THEN 4
+            END
+    `, metric, strings.Join(placeholders, ","))
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
@@ -116,11 +116,11 @@ func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]Co
 
 func (r *Repository) GetAllCompanies() ([]string, error) {
 	rows, err := r.db.Query(`
-		SELECT DISTINCT company 
-		FROM company_financials 
-		WHERE company IS NOT NULL AND company != ''
-		ORDER BY company
-	`)
+        SELECT DISTINCT company 
+        FROM company_financials 
+        WHERE company IS NOT NULL AND company != ''
+        ORDER BY company
+    `)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +258,94 @@ func (r *Repository) DeleteCompanyNote(company string) error {
 	_, err := r.db.Exec(query, company)
 	if err != nil {
 		return fmt.Errorf("error deleting company note: %w", err)
+	}
+
+	return nil
+}
+
+type CompanyColor struct {
+	Company string `json:"company"`
+	Color   string `json:"color"`
+}
+
+func (r *Repository) GetCompanyColor(company string) (string, error) {
+	query := `SELECT color FROM company_colors WHERE company = $1`
+
+	var color sql.NullString
+	err := r.db.QueryRow(query, company).Scan(&color)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("error getting company color: %w", err)
+	}
+
+	if color.Valid {
+		return color.String, nil
+	}
+	return "", nil
+}
+
+func (r *Repository) SaveCompanyColor(company, color string) error {
+	query := `
+        INSERT INTO company_colors (company, color, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (company) 
+        DO UPDATE SET
+            color = EXCLUDED.color,
+            updated_at = CURRENT_TIMESTAMP
+    `
+
+	_, err := r.db.Exec(query, company, color)
+	if err != nil {
+		return fmt.Errorf("error saving company color: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) GetCompaniesColors(companies []string) (map[string]string, error) {
+	if len(companies) == 0 {
+		return make(map[string]string), nil
+	}
+
+	placeholders := make([]string, len(companies))
+	args := make([]interface{}, len(companies))
+	for i, company := range companies {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = company
+	}
+
+	query := fmt.Sprintf(`
+        SELECT company, color 
+        FROM company_colors 
+        WHERE company IN (%s)
+    `, strings.Join(placeholders, ","))
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error getting companies colors: %w", err)
+	}
+	defer rows.Close()
+
+	colors := make(map[string]string)
+	for rows.Next() {
+		var company, color string
+		if err := rows.Scan(&company, &color); err != nil {
+			return nil, fmt.Errorf("error scanning company color: %w", err)
+		}
+		colors[company] = color
+	}
+
+	return colors, nil
+}
+
+func (r *Repository) DeleteCompanyColor(company string) error {
+	query := `DELETE FROM company_colors WHERE company = $1`
+
+	_, err := r.db.Exec(query, company)
+	if err != nil {
+		return fmt.Errorf("error deleting company color: %w", err)
 	}
 
 	return nil

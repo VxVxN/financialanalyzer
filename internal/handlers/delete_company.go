@@ -38,6 +38,9 @@ func (controller *Controller) DeleteCompany(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	controller.repo.DeleteCompanyNote(req.Company)
+	controller.repo.DeleteCompanyColor(req.Company)
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Company deleted successfully",
