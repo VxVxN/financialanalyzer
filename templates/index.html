@@ -1081,26 +1081,26 @@
             }
 
             saveBtn.addEventListener('click', async () => {
-                const color = colorPicker.value;
+                const note = textarea.value;
 
                 try {
-                    const resp = await fetch('/api/company-color', {
+                    const resp = await fetch('/api/company-note', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ company, color })
+                        body: JSON.stringify({ company, note })
                     });
 
-                    if (!resp.ok) throw new Error('Failed to save color');
+                    if (!resp.ok) throw new Error('Failed to save note');
 
-                    state.companyColors[company] = color;
-                    updateColorPreview(company);
+                    companyNotes[company] = {
+                        note: note,
+                        timestamp: Date.now()
+                    };
+                    updateNoteButton(company);
                     cleanup();
-
-                    await loadCompaniesColorsByCategory(state.currentCategory === 'all' ? '' : state.currentCategory);
-                    renderCompaniesGrid();
                 } catch (err) {
-                    console.error('Error saving color:', err);
-                    alert('Failed to save color');
+                    console.error('Error saving note:', err);
+                    alert('Failed to save note');
                 }
             });
         }
