@@ -718,22 +718,20 @@
             return await resp.json();
         }
 
-        async function loadAllCompanyColors() {
-            const companies = state.companiesWithCategories.map(c => c.company);
-            const uniqueCompanies = [...new Set(companies)];
+        async function loadCompaniesColorsByCategory(category) {
+            try {
+                const url = category && category !== 'all'
+                    ? `/api/companies-colors?category=${encodeURIComponent(category)}`
+                    : '/api/companies-colors?category=';
 
-            for (const company of uniqueCompanies) {
-                try {
-                    const resp = await fetch(`/api/company-color?company=${encodeURIComponent(company)}`);
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (data.color) {
-                            state.companyColors[company] = data.color;
-                        }
-                    }
-                } catch (err) {
-                    console.error(`Error loading color for ${company}:`, err);
+                const resp = await fetch(url);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    // Обновляем состояние с полученными цветами
+                    Object.assign(state.companyColors, data.colors);
                 }
+            } catch (err) {
+                console.error('Error loading companies colors:', err);
             }
         }
 
@@ -749,7 +747,7 @@
                 state.companiesWithCategories = companies;
                 state.categories = cats;
 
-                await loadAllCompanyColors();
+                await loadCompaniesColorsByCategory('');
 
                 renderCategoryTabs();
                 renderCompaniesGrid();
@@ -895,8 +893,11 @@
                 btn.className = `category-tab ${isActive ? 'active' : ''}`;
                 btn.textContent = label;
                 btn.setAttribute('data-category', value);
-                btn.addEventListener('click', () => {
+                btn.addEventListener('click', async () => {
                     state.currentCategory = value;
+
+                    await loadCompaniesColorsByCategory(value === 'all' ? '' : value);
+
                     renderCategoryTabs();
                     renderCompaniesGrid();
                 });
@@ -1080,31 +1081,26 @@
             }
 
             saveBtn.addEventListener('click', async () => {
-                const note = textarea.value.trim();
+                const color = colorPicker.value;
 
                 try {
-                    const resp = await fetch('/api/company-note', {
+                    const resp = await fetch('/api/company-color', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ company, note })
+                        body: JSON.stringify({ company, color })
                     });
 
-                    if (!resp.ok) throw new Error('Failed to save note');
+                    if (!resp.ok) throw new Error('Failed to save color');
 
-                    if (note) {
-                        companyNotes[company] = {
-                            note: note,
-                            timestamp: Date.now()
-                        };
-                    } else {
-                        delete companyNotes[company];
-                    }
-
-                    updateNoteButton(company);
+                    state.companyColors[company] = color;
+                    updateColorPreview(company);
                     cleanup();
+
+                    await loadCompaniesColorsByCategory(state.currentCategory === 'all' ? '' : state.currentCategory);
+                    renderCompaniesGrid();
                 } catch (err) {
-                    console.error('Error saving note:', err);
-                    alert('Failed to save note');
+                    console.error('Error saving color:', err);
+                    alert('Failed to save color');
                 }
             });
         }
@@ -1263,6 +1259,7 @@
                     cleanup();
                     delete companyNotes[companyName];
                     delete state.companyColors[companyName];
+
                     await loadData();
                     deselectAllCompanies();
                     elements.metricsSection.style.display = 'none';

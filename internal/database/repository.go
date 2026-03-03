@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -222,7 +223,7 @@ func (r *Repository) GetCompanyNote(company string) (string, error) {
 	var note sql.NullString
 	err := r.db.QueryRow(query, company).Scan(&note)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", fmt.Errorf("error getting company note: %w", err)
@@ -266,24 +267,6 @@ func (r *Repository) DeleteCompanyNote(company string) error {
 type CompanyColor struct {
 	Company string `json:"company"`
 	Color   string `json:"color"`
-}
-
-func (r *Repository) GetCompanyColor(company string) (string, error) {
-	query := `SELECT color FROM company_colors WHERE company = $1`
-
-	var color sql.NullString
-	err := r.db.QueryRow(query, company).Scan(&color)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", nil
-		}
-		return "", fmt.Errorf("error getting company color: %w", err)
-	}
-
-	if color.Valid {
-		return color.String, nil
-	}
-	return "", nil
 }
 
 func (r *Repository) SaveCompanyColor(company, color string) error {
@@ -349,4 +332,37 @@ func (r *Repository) DeleteCompanyColor(company string) error {
 	}
 
 	return nil
+}
+
+func (r *Repository) GetCompaniesColorsByCategory(category string) (map[string]string, error) {
+	query := `
+        SELECT DISTINCT cf.company, cc.color 
+        FROM company_financials cf
+        LEFT JOIN company_colors cc ON cf.company = cc.company
+    `
+	var args []interface{}
+	if category != "" {
+		query = query + "WHERE cf.category = $1"
+		args = append(args, category)
+	}
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error getting companies colors by category: %w", err)
+	}
+	defer rows.Close()
+
+	colors := make(map[string]string)
+	for rows.Next() {
+		var company string
+		var color sql.NullString
+		if err := rows.Scan(&company, &color); err != nil {
+			return nil, fmt.Errorf("error scanning company color: %w", err)
+		}
+		if color.Valid {
+			colors[company] = color.String
+		}
+	}
+
+	return colors, nil
 }

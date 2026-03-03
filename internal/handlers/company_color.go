@@ -11,30 +11,6 @@ type CompanyColorRequest struct {
 	Color   string `json:"color"`
 }
 
-func (controller *Controller) GetCompanyColor(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	company := r.URL.Query().Get("company")
-	if company == "" {
-		http.Error(w, "Company parameter is required", http.StatusBadRequest)
-		return
-	}
-
-	color, err := controller.repo.GetCompanyColor(company)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"company": company,
-		"color":   color,
-	})
-}
-
 func (controller *Controller) SaveCompanyColor(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -92,5 +68,29 @@ func (controller *Controller) DeleteCompanyColor(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Color deleted successfully",
+	})
+}
+
+type CompaniesColorsResponse struct {
+	Colors map[string]string `json:"colors"`
+}
+
+func (controller *Controller) GetCompaniesColors(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	category := r.URL.Query().Get("category")
+
+	colors, err := controller.repo.GetCompaniesColorsByCategory(category)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(CompaniesColorsResponse{
+		Colors: colors,
 	})
 }
