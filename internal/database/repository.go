@@ -10,12 +10,24 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
+const (
+	multiplier = 100
+)
+
 type Repository struct {
 	db *sql.DB
 }
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
+}
+
+func toPrecisionInt(rubles float64) int64 {
+	return int64(rubles * multiplier)
+}
+
+func fromPrecisionInt(kopecks int64) float64 {
+	return float64(kopecks) / multiplier
 }
 
 func (r *Repository) SaveQuarterData(data models.QuarterData) error {
@@ -37,19 +49,19 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 		data.Quarter,
 		data.Company,
 		data.Category,
-		nullIfZero(data.Capitalization),
-		nullIfZero(data.Revenue),
-		nullIfZero(data.NetProfit),
-		nullIfZero(data.EBITDA),
-		nullIfZero(data.Debt),
-		nullIfZero(data.PE),
-		nullIfZero(data.ROE),
+		nullIfZeroInt64(toPrecisionInt(data.Capitalization)),
+		nullIfZeroInt64(toPrecisionInt(data.Revenue)),
+		nullIfZeroInt64(toPrecisionInt(data.NetProfit)),
+		nullIfZeroInt64(toPrecisionInt(data.EBITDA)),
+		nullIfZeroInt64(toPrecisionInt(data.Debt)),
+		nullIfZeroInt64(toPrecisionInt(data.PE)),
+		nullIfZeroInt64(toPrecisionInt(data.ROE)),
 	)
 
 	return err
 }
 
-func nullIfZero(val float64) interface{} {
+func nullIfZeroInt64(val int64) interface{} {
 	if val == 0 {
 		return nil
 	}
@@ -93,14 +105,14 @@ func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]Co
 	var result []CompanyMetric
 	for rows.Next() {
 		var item CompanyMetric
-		var value sql.NullFloat64
+		var value sql.NullInt64
 
 		if err := rows.Scan(&item.Year, &item.Quarter, &item.Company, &value); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		if value.Valid {
-			item.Value = value.Float64
+			item.Value = fromPrecisionInt(value.Int64)
 		} else {
 			item.Value = 0
 		}
@@ -110,6 +122,73 @@ func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]Co
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return result, nil
+}
+
+func (r *Repository) GetCompanyMetricValue(company, metric string, year int, quarter string) (float64, error) {
+	query := fmt.Sprintf(`
+        SELECT %s 
+        FROM company_financials 
+        WHERE company = $1 AND year = $2 AND quarter = $3
+    `, metric)
+
+	var value sql.NullInt64
+	err := r.db.QueryRow(query, company, year, quarter).Scan(&value)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get metric value: %w", err)
+	}
+
+	if value.Valid {
+		return fromPrecisionInt(value.Int64), nil
+	}
+	return 0, nil
+}
+
+func (r *Repository) GetAllCompaniesMetricValues(metric string) (map[string]map[string]float64, error) {
+	query := fmt.Sprintf(`
+        SELECT company, year, quarter, %s as value
+        FROM company_financials
+        ORDER BY company, year, 
+            CASE quarter
+                WHEN 'Q1' THEN 1
+                WHEN 'Q2' THEN 2
+                WHEN 'Q3' THEN 3
+                WHEN 'Q4' THEN 4
+            END
+    `, metric)
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query metric %s: %w", metric, err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]map[string]float64)
+	for rows.Next() {
+		var company string
+		var year int
+		var quarter string
+		var value sql.NullInt64
+
+		if err := rows.Scan(&company, &year, &quarter, &value); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		if _, exists := result[company]; !exists {
+			result[company] = make(map[string]float64)
+		}
+
+		key := fmt.Sprintf("%d-%s", year, quarter)
+		if value.Valid {
+			result[company][key] = fromPrecisionInt(value.Int64)
+		} else {
+			result[company][key] = 0
+		}
 	}
 
 	return result, nil
