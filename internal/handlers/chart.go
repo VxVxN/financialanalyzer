@@ -399,53 +399,70 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 
 func getTooltipFormatter(metric, unit string) string {
 	switch metric {
-	case "capitalization", "revenue", "net_profit", "ebitda", "debt":
+	case "capitalization", "revenue", "net_profit", "ebitda", "debt", "capex":
 		return `
-			function(params) {
-				let result = params[0].name + '<br/>';
-				for(let i = 0; i < params.length; i++) {
-					if (params[i].value !== null && params[i].value !== undefined) {
-						let value = params[i].value;
-						let formattedValue;
-						if (value >= 1000000000000) {
-							formattedValue = (value / 1000000000000).toFixed(2) + 'T';
-						} else if (value >= 1000000000) {
-							formattedValue = (value / 1000000000).toFixed(2) + 'B';
-						} else if (value >= 1000000) {
-							formattedValue = (value / 1000000).toFixed(2) + 'M';
-						} else if (value >= 1000) {
-							formattedValue = (value / 1000).toFixed(2) + 'K';
-						} else {
-							formattedValue = value.toFixed(2);
-						}
-						result += params[i].marker + ' ' + 
-								params[i].seriesName + ': ' + 
-								formattedValue + '` + unit + `' + '<br/>';
-					} else {
-						result += params[i].marker + ' ' + 
-								params[i].seriesName + ': No data<br/>';
-					}
-				}
-				return result;
-			}
-		`
+            function(params) {
+                let result = params[0].name + '<br/>';
+                for(let i = 0; i < params.length; i++) {
+                    if (params[i].value !== null && params[i].value !== undefined) {
+                        let value = params[i].value;
+                        let formattedValue;
+                        if (value >= 1000000000000) {
+                            formattedValue = (value / 1000000000000).toFixed(2) + 'T';
+                        } else if (value >= 1000000000) {
+                            formattedValue = (value / 1000000000).toFixed(2) + 'B';
+                        } else if (value >= 1000000) {
+                            formattedValue = (value / 1000000).toFixed(2) + 'M';
+                        } else if (value >= 1000) {
+                            formattedValue = (value / 1000).toFixed(2) + 'K';
+                        } else {
+                            formattedValue = value.toFixed(2);
+                        }
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': ' + 
+                                formattedValue + '` + unit + `' + '<br/>';
+                    } else {
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': No data<br/>';
+                    }
+                }
+                return result;
+            }
+        `
+	case "pe", "ps":
+		return `
+            function(params) {
+                let result = params[0].name + '<br/>';
+                for(let i = 0; i < params.length; i++) {
+                    if (params[i].value !== null && params[i].value !== undefined) {
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': ' + 
+                                params[i].value.toFixed(2) + '<br/>';
+                    } else {
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': No data<br/>';
+                    }
+                }
+                return result;
+            }
+        `
 	default:
 		return `
-			function(params) {
-				let result = params[0].name + '<br/>';
-				for(let i = 0; i < params.length; i++) {
-					if (params[i].value !== null && params[i].value !== undefined) {
-						result += params[i].marker + ' ' + 
-								params[i].seriesName + ': ' + 
-								params[i].value.toFixed(2) + '` + unit + `' + '<br/>';
-					} else {
-						result += params[i].marker + ' ' + 
-								params[i].seriesName + ': No data<br/>';
-					}
-				}
-				return result;
-			}
-		`
+            function(params) {
+                let result = params[0].name + '<br/>';
+                for(let i = 0; i < params.length; i++) {
+                    if (params[i].value !== null && params[i].value !== undefined) {
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': ' + 
+                                params[i].value.toFixed(2) + '` + unit + `' + '<br/>';
+                    } else {
+                        result += params[i].marker + ' ' + 
+                                params[i].seriesName + ': No data<br/>';
+                    }
+                }
+                return result;
+            }
+        `
 	}
 }
 
@@ -459,6 +476,8 @@ func formatMetricName(metric string) string {
 		return "EBITDA"
 	case "pe":
 		return "P/E Ratio"
+	case "ps":
+		return "P/S Ratio"
 	case "roe":
 		return "ROE (%)"
 	case "capitalization":

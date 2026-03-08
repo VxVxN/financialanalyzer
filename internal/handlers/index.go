@@ -12,7 +12,7 @@ func (controller *Controller) IndexHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	metrics := []string{"revenue", "net_profit", "ebitda", "pe", "roe", "capitalization", "debt"}
+	metrics := []string{"revenue", "net_profit", "ebitda", "pe", "ps", "roe", "capitalization", "debt", "capex"}
 
 	data := struct {
 		Metrics []string

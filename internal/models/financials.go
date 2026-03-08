@@ -11,11 +11,19 @@ type QuarterData struct {
 	EBITDA         float64
 	Debt           float64
 	PE             float64
+	PS             float64
 	ROE            float64
+	CAPEX          float64
 }
 
 func (q *QuarterData) IsEmpty() bool {
-	return q.Capitalization == 0 && q.Revenue == 0 &&
-		q.NetProfit == 0 && q.EBITDA == 0 &&
-		q.Debt == 0 && q.PE == 0 && q.ROE == 0
+	return q.Capitalization == 0 &&
+		q.Revenue == 0 &&
+		q.NetProfit == 0 &&
+		q.EBITDA == 0 &&
+		q.Debt == 0 &&
+		q.PE == 0 &&
+		q.PS == 0 &&
+		q.ROE == 0 &&
+		q.CAPEX == 0
 }

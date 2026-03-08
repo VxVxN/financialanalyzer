@@ -161,10 +161,14 @@ func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]Me
 	switch {
 	case strings.Contains(metricName, "P/E"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "PE"}
-	case strings.Contains(metricName, "Долг") && !strings.Contains(metricName, "Чистый"):
+	case strings.Contains(metricName, "P/S"):
+		return &MetricConfig{IsSpecial: true, SpecialType: "PS"}
+	case strings.HasPrefix(metricName, "Долг") && !strings.Contains(metricName, "EBITDA"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "DEBT"}
-	case strings.Contains(metricName, "Чистая прибыль") && !strings.Contains(metricName, "н/с"):
+	case strings.HasPrefix(metricName, "Чистая прибыль") && !strings.Contains(metricName, "н/с"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "NET_PROFIT"}
+	case strings.HasPrefix(metricName, "CAPEX") && !strings.Contains(metricName, "/"):
+		return &MetricConfig{IsSpecial: true, SpecialType: "CAPEX"}
 	}
 
 	for key, handler := range handlers {
@@ -236,10 +240,14 @@ func (p *CSVParser) applyMetricValue(config *MetricConfig, data *models.QuarterD
 		switch config.SpecialType {
 		case "PE":
 			data.PE = value
+		case "PS":
+			data.PS = value
 		case "DEBT":
 			data.Debt = value
 		case "NET_PROFIT":
 			data.NetProfit = value
+		case "CAPEX":
+			data.CAPEX = value
 		}
 	} else if config.Handler != nil {
 		config.Handler(data, value)
