@@ -1,0 +1,2 @@
+ALTER TABLE company_financials
+    ADD COLUMN IF NOT EXISTS opex NUMERIC(15,2);

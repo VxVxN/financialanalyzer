@@ -399,7 +399,7 @@ func createNormalizedLineChart(data []database.CompanyMetric, metric string, com
 
 func getTooltipFormatter(metric, unit string) string {
 	switch metric {
-	case "capitalization", "revenue", "net_profit", "ebitda", "debt", "capex":
+	case "capitalization", "revenue", "net_profit", "ebitda", "debt", "capex", "opex":
 		return `
             function(params) {
                 let result = params[0].name + '<br/>';
