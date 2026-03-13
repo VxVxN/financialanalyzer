@@ -154,7 +154,9 @@ func (p *CSVParser) getMetricHandlers() map[string]MetricHandler {
 		"Выручка":       func(d *models.QuarterData, v float64) { d.Revenue = v },
 		"EBITDA":        func(d *models.QuarterData, v float64) { d.EBITDA = v },
 		"ROE":           func(d *models.QuarterData, v float64) { d.ROE = v },
+		"ROA":           func(d *models.QuarterData, v float64) { d.ROA = v },
 		"Опер. расходы": func(d *models.QuarterData, v float64) { d.OPEX = v },
+		"Див доход":     func(d *models.QuarterData, v float64) { d.Dividends = v },
 	}
 }
 

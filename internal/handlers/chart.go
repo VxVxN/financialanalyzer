@@ -480,6 +480,10 @@ func formatMetricName(metric string) string {
 		return "P/S Ratio"
 	case "roe":
 		return "ROE (%)"
+	case "roa":
+		return "ROA (%)"
+	case "dividends":
+		return "Dividends (%)"
 	case "capitalization":
 		return "Market Cap"
 	case "debt":
@@ -491,7 +495,7 @@ func formatMetricName(metric string) string {
 
 func getMetricUnit(metric string) string {
 	switch metric {
-	case "roe":
+	case "roe", "roa", "dividends":
 		return "%"
 	default:
 		return ""

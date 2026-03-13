@@ -13,8 +13,10 @@ type QuarterData struct {
 	PE             float64
 	PS             float64
 	ROE            float64
+	ROA            float64
 	CAPEX          float64
 	OPEX           float64
+	Dividends      float64
 }
 
 func (q *QuarterData) IsEmpty() bool {
@@ -26,6 +28,8 @@ func (q *QuarterData) IsEmpty() bool {
 		q.PE == 0 &&
 		q.PS == 0 &&
 		q.ROE == 0 &&
+		q.ROA == 0 &&
 		q.CAPEX == 0 &&
-		q.OPEX == 0
+		q.OPEX == 0 &&
+		q.Dividends == 0
 }

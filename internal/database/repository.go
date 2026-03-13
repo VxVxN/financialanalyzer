@@ -20,8 +20,8 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 	query := `
-    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, ps, roe, capex, opex)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, ps, roe, roa, capex, opex, dividends)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
     ON CONFLICT (year, quarter, company) 
     DO UPDATE SET
         capitalization = COALESCE(EXCLUDED.capitalization, company_financials.capitalization),
@@ -32,8 +32,10 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
         pe = COALESCE(EXCLUDED.pe, company_financials.pe),
         ps = COALESCE(EXCLUDED.ps, company_financials.ps),
         roe = COALESCE(EXCLUDED.roe, company_financials.roe),
+        roa = COALESCE(EXCLUDED.roa, company_financials.roa),
         capex = COALESCE(EXCLUDED.capex, company_financials.capex),
-        opex = COALESCE(EXCLUDED.opex, company_financials.opex)
+        opex = COALESCE(EXCLUDED.opex, company_financials.opex),
+        dividends = COALESCE(EXCLUDED.dividends, company_financials.dividends)
         `
 
 	_, err := r.db.Exec(query,
@@ -49,8 +51,10 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 		nullIfZero(data.PE),
 		nullIfZero(data.PS),
 		nullIfZero(data.ROE),
+		nullIfZero(data.ROA),
 		nullIfZero(data.CAPEX),
 		nullIfZero(data.OPEX),
+		nullIfZero(data.Dividends),
 	)
 
 	return err

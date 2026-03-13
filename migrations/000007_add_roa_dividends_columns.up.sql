@@ -1,0 +1,3 @@
+ALTER TABLE company_financials
+    ADD COLUMN IF NOT EXISTS dividends NUMERIC(10,2),
+    ADD COLUMN IF NOT EXISTS roa NUMERIC(10,2);
