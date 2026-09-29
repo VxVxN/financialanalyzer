@@ -49,6 +49,8 @@ import (
 	"time"
 
 	"github.com/nwaples/rardecode/v2"
+
+	"github.com/VxVxN/financialanalyzer/internal/scraper/httpx"
 )
 
 const (
@@ -81,6 +83,7 @@ type Client struct {
 	UserAgent string
 	BaseURL   string
 	Delay     time.Duration
+	Retry     httpx.Policy // retries for transient failures (network, 429, 5xx)
 	lastReq   time.Time
 }
 
@@ -90,6 +93,7 @@ func NewClient() *Client {
 		UserAgent: defaultUserAgent,
 		BaseURL:   BaseURL,
 		Delay:     defaultDelay,
+		Retry:     httpx.DefaultPolicy,
 	}
 }
 
@@ -148,25 +152,16 @@ func (c *Client) download(ctx context.Context, form, archiveDate string) ([]byte
 	c.lastReq = time.Now()
 
 	url := fmt.Sprintf("%s/vfs/credit/forms/%s-%s.rar", c.BaseURL, form, archiveDate)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Accept", "application/rar, application/octet-stream, */*")
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	body, err := httpx.Get(ctx, c.HTTP, url, http.Header{
+		"User-Agent": {c.UserAgent},
+		"Accept":     {"application/rar, application/octet-stream, */*"},
+	}, c.Retry)
+	c.lastReq = time.Now() // pace from the last attempt, retries included
+	var se *httpx.StatusError
+	if errors.As(err, &se) && se.Code == http.StatusNotFound {
 		return nil, ErrNotPublished
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d for %s", resp.StatusCode, url)
-	}
-	return io.ReadAll(resp.Body)
+	return body, err
 }
 
 // ---- Archive & DBF parsing --------------------------------------------------

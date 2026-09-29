@@ -312,6 +312,7 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			Quarter:        "Q4",
 			Company:        company,
 			Category:       spec.Category,
+			Source:         models.SourceRSBU,
 			Capitalization: marketCap,
 			Revenue:        r.Revenue,
 			NetProfit:      r.NetProfit,
@@ -715,6 +716,7 @@ func bankRows(ctx context.Context, mx *moex.Client, s bankSpec, year int, cum ma
 			Quarter:   q,
 			Company:   s.Ticker,
 			Category:  s.Category,
+			Source:    models.SourceCBR102,
 			NetProfit: quarterProfit,
 		}
 		if q == "Q4" {

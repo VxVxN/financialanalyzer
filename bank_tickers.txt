@@ -8,7 +8,7 @@
 #   REGN     CBR registration number (the key into form 102, NOT the INN)
 #
 # Usage:   go run ./cmd/fetch            # fetches these plus the ГИР БО list
-#          FETCH_BANKS="SBER,VTBR" go run ./cmd/fetch   # subset
+#          FETCH_BANKS="T" go run ./cmd/fetch   # subset
 #
 # CAVEATS (inherent to the source — see internal/scraper/cbr docs):
 #   * Form 102 is RSBU of the bank legal entity, not consolidated IFRS, so
@@ -21,11 +21,4 @@
 #   * Per-quarter net profit is recovered by differencing the cumulative YTD
 #     archives; market cap, P/E and ROE are on the Q4 (full-year) row only.
 
-SBER  1481  banks   # ПАО Сбербанк (ordinary)
-SBERP 1481  banks   # ПАО Сбербанк (preferred — same bank, different cap)
-VTBR  1000  banks   # Банк ВТБ (ПАО)
-BSPB  436   banks   # ПАО "Банк "Санкт-Петербург" (ordinary)
-BSPBP 436   banks   # ПАО "Банк "Санкт-Петербург" (preferred)
-CBOM  1978  banks   # ПАО "Московский кредитный банк"
-SVCB  963   banks   # ПАО "Совкомбанк"
 T     2673  banks   # АО "ТБанк" (ex-Тинькофф; holding restructured, cap may not align)

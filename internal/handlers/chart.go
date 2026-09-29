@@ -15,6 +15,7 @@ import (
 	"github.com/go-echarts/go-echarts/v2/types"
 
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
+	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
 func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Request) {
@@ -55,8 +56,10 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	seriesByCompany := make(map[string]analytics.Series, len(companies))
+	quality := make(map[string]companyQuality, len(companies))
 	for _, c := range companies {
 		seriesByCompany[c] = analytics.SeriesFor(history[c], metric, period)
+		quality[c] = qualityFor(history[c], metric, period)
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -93,12 +96,12 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 	page := components.NewPage()
 	page.PageTitle = fmt.Sprintf("%s — Financial Analyzer", formatMetricName(metric))
 
-	lineChart := buildSeriesChart(seriesByCompany, companies, metric, period)
+	lineChart := buildSeriesChart(seriesByCompany, companies, metric, period, quality)
 	page.AddCharts(lineChart)
 	_ = page.Render(w)
 
 	fmt.Fprintf(w, `</div>`)
-	renderSeriesTable(w, seriesByCompany, companies, metric, theme)
+	renderSeriesTable(w, seriesByCompany, companies, metric, theme, quality)
 	fmt.Fprintf(w, `<script>
 function exportTableCSV() {
 	const table = document.querySelector('.data-table');
@@ -125,6 +128,48 @@ function exportTableCSV() {
 	fmt.Fprintf(w, `</body></html>`)
 }
 
+// companyQuality is what the chart page shows about how trustworthy a
+// company's figures are: where they came from and which points look suspicious.
+type companyQuality struct {
+	Sources []string                       // distinct models.Source* values
+	Flags   map[string][]analytics.Anomaly // Point label -> anomalies for this metric
+}
+
+func qualityFor(history []models.QuarterData, metric string, period analytics.Period) companyQuality {
+	return companyQuality{
+		Sources: analytics.Sources(history),
+		Flags:   analytics.AnomaliesByLabel(analytics.CheckHistory(history), metric, period),
+	}
+}
+
+// sourcesLabel renders sources as "RSBU (issuer), CSV import"; notes is the
+// matching explanation for a title attribute; comparable is false when any
+// source is not group-level IFRS.
+func sourcesLabel(sources []string) (label, notes string, comparable bool) {
+	if len(sources) == 0 {
+		sources = []string{""}
+	}
+	labels := make([]string, len(sources))
+	noteList := make([]string, len(sources))
+	comparable = true
+	for i, s := range sources {
+		labels[i] = analytics.SourceLabel(s)
+		noteList[i] = analytics.SourceLabel(s) + ": " + analytics.SourceNote(s)
+		if !analytics.IsComparable(s) {
+			comparable = false
+		}
+	}
+	return strings.Join(labels, ", "), strings.Join(noteList, "\n"), comparable
+}
+
+func anomalyMessages(anoms []analytics.Anomaly) string {
+	msgs := make([]string, len(anoms))
+	for i, a := range anoms {
+		msgs[i] = a.Message
+	}
+	return strings.Join(msgs, "\n")
+}
+
 func mergedLabels(seriesByCompany map[string]analytics.Series, companies []string) []string {
 	order := map[string]int{}
 	for _, c := range companies {
@@ -144,12 +189,18 @@ func mergedLabels(seriesByCompany map[string]analytics.Series, companies []strin
 	return labels
 }
 
-func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []string, metric string, period analytics.Period) *charts.Line {
+func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []string, metric string, period analytics.Period, quality map[string]companyQuality) *charts.Line {
 	line := charts.NewLine()
 
 	metricName := formatMetricName(metric)
 	unit := getMetricUnit(metric)
-	tooltipFormatter := getTooltipFormatter(metric, unit)
+	// Keyed by the escaped series name, which is what the tooltip receives.
+	sourceBySeries := make(map[string]string, len(companies))
+	for _, c := range companies {
+		label, _, _ := sourcesLabel(quality[c].Sources)
+		sourceBySeries[html.EscapeString(c)] = html.EscapeString(label) // tooltip renders HTML
+	}
+	tooltipFormatter := getTooltipFormatter(metric, unit, sourceBySeries)
 
 	subtitle := "Quarterly"
 	switch period {
@@ -253,6 +304,11 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 				values[i] = opts.LineData{Value: nil, Symbol: "none"}
 				continue
 			}
+			if len(quality[company].Flags[label]) > 0 {
+				// Suspicious point: a larger triangle, explained in the table below.
+				values[i] = opts.LineData{Value: v, Symbol: "triangle", SymbolSize: 14}
+				continue
+			}
 			values[i] = opts.LineData{Value: v, Symbol: "circle", SymbolSize: 8}
 		}
 		color := colors[idx%len(colors)]
@@ -278,7 +334,7 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 	return line
 }
 
-func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analytics.Series, companies []string, metric, theme string) {
+func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analytics.Series, companies []string, metric, theme string, quality map[string]companyQuality) {
 	labels := mergedLabels(seriesByCompany, companies)
 
 	bgPrimary := "#ffffff"
@@ -342,6 +398,11 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 		}
 		.data-table .pos { color: #3ba272; }
 		.data-table .neg { color: #ee6666; }
+		.data-table td.source { text-align: left; font-size: 12px; white-space: nowrap; cursor: help; }
+		.data-table td.source.warn::before { content: "⚠ "; color: #e6a23c; }
+		.data-table td.flag { background-color: rgba(230,162,60,0.18); cursor: help; }
+		.data-table td.flag::after { content: " ⚠"; color: #e6a23c; }
+		.table-legend { margin-top: 8px; font-size: 12px; opacity: 0.75; font-family: Arial, sans-serif; }
 		.table-container {
 			margin-top: 20px;
 			overflow-x: auto;
@@ -371,7 +432,8 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 		<table class="data-table">
 			<thead>
 				<tr>
-					<th>Company / Period</th>`,
+					<th>Company / Period</th>
+					<th>Source</th>`,
 		bgPrimary, textPrimary, shadowColor, bgButton, borderColor, textPrimary, borderColor, textPrimary, bgSecondary, bgButtonHover,
 		bgButton, textPrimary, borderColor, bgButtonHover)
 
@@ -393,23 +455,34 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 			continue
 		}
 		fmt.Fprintf(w, `<tr><td>%s</td>`, html.EscapeString(company))
+		srcLabel, srcNotes, comparable := sourcesLabel(quality[company].Sources)
+		srcClass := "source"
+		if !comparable {
+			srcClass += " warn"
+		}
+		fmt.Fprintf(w, `<td class="%s" title="%s">%s</td>`, srcClass, html.EscapeString(srcNotes), html.EscapeString(srcLabel))
+		flags := quality[company].Flags
 		for _, label := range labels {
 			v, ok := byLabel[label]
 			if !ok || math.IsNaN(v) {
 				fmt.Fprintf(w, `<td class="no-data">—</td>`)
 				continue
 			}
-			class := ""
+			var classes []string
 			if isPct {
 				if v > 0 {
-					class = "pos"
+					classes = append(classes, "pos")
 				} else if v < 0 {
-					class = "neg"
+					classes = append(classes, "neg")
 				}
 			}
 			classAttr := ""
-			if class != "" {
-				classAttr = ` class="` + class + `"`
+			if anoms := flags[label]; len(anoms) > 0 {
+				classes = append(classes, "flag")
+				classAttr = ` title="` + html.EscapeString(anomalyMessages(anoms)) + `"`
+			}
+			if len(classes) > 0 {
+				classAttr = ` class="` + strings.Join(classes, " ") + `"` + classAttr
 			}
 			if unit == "x" {
 				fmt.Fprintf(w, `<td%s>%.2fx</td>`, classAttr, v)
@@ -423,6 +496,8 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 	}
 
 	fmt.Fprintf(w, `</tbody></table></div>`)
+	fmt.Fprintf(w, `<div class="table-legend">⚠ Source: figures are not group IFRS and may not be comparable across companies. `+
+		`⚠ Cell / ▲ point: the value looks suspicious (hover for the reason).</div>`)
 }
 
 // humanFormat collapses large numbers to T/B/M/K. Used by the table for raw
@@ -442,7 +517,56 @@ func humanFormat(v float64) string {
 	return fmt.Sprintf("%.2f", v)
 }
 
-func getTooltipFormatter(metric, unit string) string {
+// getTooltipFormatter returns the ECharts tooltip function. sources maps each
+// (escaped) series name to its data-source label, appended after the name.
+func getTooltipFormatter(metric, unit string, sources map[string]string) string {
+	return strings.Replace(tooltipFormatterBody(metric, unit), "function(params) {",
+		"function(params) {\n\t\t\t\tconst src = "+jsStringMap(sources)+";\n"+
+			"\t\t\t\tconst srcOf = function(n) { return src[n] ? ' <span style=opacity:0.6>[' + src[n] + ']</span>' : ''; };", 1)
+}
+
+// jsStringMap renders m as a JS object literal for use inside a FuncOpts body.
+// go-echarts JSON-encodes FuncOpts and injects the result verbatim, so any
+// double quote or backslash in the code would come out escaped/doubled; the
+// literal therefore uses only single quotes and no escape sequences (see
+// jsString). Keys are sorted for deterministic output.
+func jsStringMap(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = "[" + jsString(k) + "]: " + jsString(m[k]) // computed key: jsString may be a call
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// jsString renders s as a JS string expression free of quotes, backslashes and
+// '<'. Plain text becomes '...'; anything else is percent-encoded and wrapped
+// in decodeURIComponent('...'), which also keeps it safe inside <script>.
+func jsString(s string) string {
+	const safe = " -_.,:()/+"
+	s = strings.ToValidUTF8(s, "\uFFFD") // decodeURIComponent throws on invalid UTF-8
+	var b strings.Builder
+	encoded := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(safe, c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+		encoded = true
+	}
+	if encoded {
+		return "decodeURIComponent('" + b.String() + "')"
+	}
+	return "'" + b.String() + "'"
+}
+
+func tooltipFormatterBody(metric, unit string) string {
 	if unit == "" {
 		// large absolute numbers (revenue, cap, debt, etc.)
 		return `
@@ -465,7 +589,7 @@ func getTooltipFormatter(metric, unit string) string {
 							formattedValue = value.toFixed(2);
 						}
 						result += params[i].marker + ' ' +
-								params[i].seriesName + ': ' +
+								params[i].seriesName + srcOf(params[i].seriesName) + ': ' +
 								formattedValue + '<br/>';
 					} else {
 						result += params[i].marker + ' ' +
@@ -482,7 +606,7 @@ func getTooltipFormatter(metric, unit string) string {
 			for(let i = 0; i < params.length; i++) {
 				if (params[i].value !== null && params[i].value !== undefined) {
 					result += params[i].marker + ' ' +
-							params[i].seriesName + ': ' +
+							params[i].seriesName + srcOf(params[i].seriesName) + ': ' +
 							params[i].value.toFixed(2) + '` + unit + `' + '<br/>';
 				} else {
 					result += params[i].marker + ' ' +

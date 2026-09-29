@@ -178,6 +178,7 @@ func (p *CSVParser) processMetricRow(
 			Quarter:  quarter,
 			Company:  companyName,
 			Category: category,
+			Source:   models.SourceCSV,
 		}
 
 		p.applyMetricValue(config, &data, value)

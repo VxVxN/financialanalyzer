@@ -27,12 +27,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/VxVxN/financialanalyzer/internal/scraper/httpx"
 )
 
 const (
@@ -50,6 +51,7 @@ type Client struct {
 	HTTP      *http.Client
 	UserAgent string
 	Delay     time.Duration
+	Retry     httpx.Policy // retries for transient failures (network, 429, 5xx)
 	lastReq   time.Time
 }
 
@@ -58,6 +60,7 @@ func NewClient() *Client {
 		HTTP:      &http.Client{Timeout: defaultTimeout},
 		UserAgent: defaultUserAgent,
 		Delay:     defaultDelay,
+		Retry:     httpx.DefaultPolicy,
 	}
 }
 
@@ -153,24 +156,13 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	}
 	c.lastReq = time.Now()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "ru,en;q=0.8")
-	req.Header.Set("Referer", BaseURL+"/")
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return io.ReadAll(resp.Body)
+	defer func() { c.lastReq = time.Now() }() // pace from the last attempt, retries included
+	return httpx.Get(ctx, c.HTTP, url, http.Header{
+		"User-Agent":      {c.UserAgent},
+		"Accept":          {"application/json, text/plain, */*"},
+		"Accept-Language": {"ru,en;q=0.8"},
+		"Referer":         {BaseURL + "/"},
+	}, c.Retry)
 }
 
 // ---- Parsing ----------------------------------------------------------------

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
 func TestParseQuarter(t *testing.T) {
@@ -111,6 +113,9 @@ func TestParseFullFile(t *testing.T) {
 
 	// The LTM column must be skipped: every record must be Q1 or Q2 of 2023.
 	for _, d := range data {
+		if d.Source != models.SourceCSV {
+			t.Errorf("source = %q, want %q", d.Source, models.SourceCSV)
+		}
 		if d.Company != "SBER" || d.Category != "banks" {
 			t.Errorf("unexpected company/category: %+v", d)
 		}

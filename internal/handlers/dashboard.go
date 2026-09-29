@@ -147,6 +147,16 @@ a:hover { text-decoration: underline; }
   font-size: 18px; margin: 32px 0 12px; color: var(--text-primary);
 }
 
+.quality {
+  background: var(--bg-secondary); border: 1px solid var(--warn); border-left-width: 4px;
+  border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; font-size: 14px;
+}
+.quality .title { font-weight: 600; margin-bottom: 6px; }
+.quality p { margin: 4px 0; color: var(--text-secondary); }
+.quality ul { margin: 6px 0 0; padding-left: 20px; }
+.quality li { margin: 2px 0; }
+.quality .period { font-variant-numeric: tabular-nums; color: var(--text-muted); margin-right: 6px; }
+
 .controls {
   display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
 }
@@ -226,7 +236,9 @@ a:hover { text-decoration: underline; }
 		return
 	}
 
-	renderDashboardHeader(w, snap)
+	sources := analytics.Sources(history)
+	renderDashboardHeader(w, snap, sources)
+	renderDataQuality(w, sources, analytics.CheckHistory(history))
 	renderKPIs(w, snap)
 	renderSparklines(w, history)
 	renderDashboardChart(w, history, theme)
@@ -320,13 +332,15 @@ func themeToggleLabel(theme string) string {
 	return "🌙 Dark"
 }
 
-func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot) {
+func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources []string) {
 	stars := scoreStars(s.Score)
+	srcLabel, srcNotes, _ := sourcesLabel(sources)
 	fmt.Fprintf(w, `<div class="header">
   <div>
     <h1>%s</h1>
     <div class="meta">
       <span class="pill">%s</span>
+      <span class="pill" title="%s">Source: %s</span>
       <span>Latest: %s</span>
     </div>
   </div>
@@ -338,9 +352,46 @@ func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot) {
 </div>`,
 		html.EscapeString(s.Company),
 		html.EscapeString(orDash(s.Category)),
+		html.EscapeString(srcNotes), html.EscapeString(srcLabel),
 		html.EscapeString(orDash(s.LastLabel)),
 		s.Score, stars,
 	)
+}
+
+// maxQualityItems caps the anomaly list so a long bad history stays readable.
+const maxQualityItems = 8
+
+// renderDataQuality warns when the figures come from a non-IFRS source or look
+// suspicious. It renders nothing for clean, comparable data.
+func renderDataQuality(w http.ResponseWriter, sources []string, anomalies []analytics.Anomaly) {
+	var caveats []string
+	for _, src := range sources {
+		if !analytics.IsComparable(src) {
+			caveats = append(caveats, "<b>"+html.EscapeString(analytics.SourceLabel(src))+"</b> — "+
+				html.EscapeString(analytics.SourceNote(src)))
+		}
+	}
+	if len(caveats) == 0 && len(anomalies) == 0 {
+		return
+	}
+	fmt.Fprint(w, `<div class="quality"><div class="title">⚠ Data quality</div>`)
+	for _, c := range caveats {
+		fmt.Fprintf(w, `<p>%s</p>`, c)
+	}
+	if len(anomalies) > 0 {
+		// Newest first: the latest periods matter most for the KPIs above.
+		fmt.Fprint(w, `<ul>`)
+		for i := len(anomalies) - 1; i >= 0 && len(anomalies)-i <= maxQualityItems; i-- {
+			a := anomalies[i]
+			fmt.Fprintf(w, `<li><span class="period">%s</span>%s</li>`,
+				html.EscapeString(a.Label), html.EscapeString(a.Message))
+		}
+		fmt.Fprint(w, `</ul>`)
+		if extra := len(anomalies) - maxQualityItems; extra > 0 {
+			fmt.Fprintf(w, `<p>…and %d more.</p>`, extra)
+		}
+	}
+	fmt.Fprint(w, `</div>`)
 }
 
 func scoreStars(score int) string {

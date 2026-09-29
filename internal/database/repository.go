@@ -30,10 +30,11 @@ func (r *Repository) Ping(ctx context.Context) error {
 
 func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 	query := `
-    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     ON CONFLICT (year, quarter, company) 
     DO UPDATE SET
+        source = COALESCE(EXCLUDED.source, company_financials.source),
         capitalization = COALESCE(EXCLUDED.capitalization, company_financials.capitalization),
         revenue = COALESCE(EXCLUDED.revenue, company_financials.revenue),
         net_profit = COALESCE(EXCLUDED.net_profit, company_financials.net_profit),
@@ -54,6 +55,7 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 		nullIfZero(data.Debt),
 		nullIfZero(data.PE),
 		nullIfZero(data.ROE),
+		nullIfEmpty(data.Source),
 	)
 
 	return err
@@ -61,6 +63,13 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
 
 func nullIfZero(val float64) interface{} {
 	if val == 0 {
+		return nil
+	}
+	return val
+}
+
+func nullIfEmpty(val string) interface{} {
+	if val == "" {
 		return nil
 	}
 	return val
@@ -98,7 +107,8 @@ func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, er
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
 			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
-			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0)
+			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0),
+			COALESCE(source, '')
 		FROM company_financials
 		WHERE company = $1
 		ORDER BY year,
@@ -122,7 +132,7 @@ func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, er
 		if err := rows.Scan(
 			&q.Year, &q.Quarter, &q.Company, &q.Category,
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
-			&q.EBITDA, &q.Debt, &q.PE, &q.ROE,
+			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}
@@ -147,7 +157,8 @@ func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]model
 	query := fmt.Sprintf(`
 		SELECT year, quarter, company, COALESCE(category, ''),
 			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
-			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0)
+			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0),
+			COALESCE(source, '')
 		FROM company_financials
 		WHERE company IN (%s)
 		ORDER BY company, year,
@@ -171,7 +182,7 @@ func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]model
 		if err := rows.Scan(
 			&q.Year, &q.Quarter, &q.Company, &q.Category,
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
-			&q.EBITDA, &q.Debt, &q.PE, &q.ROE,
+			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}

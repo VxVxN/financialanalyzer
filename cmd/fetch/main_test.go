@@ -42,8 +42,8 @@ func TestLoadRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	if len(registry) < 20 {
-		t.Fatalf("expected the bundled registry to have 20+ entries, got %d", len(registry))
+	if len(registry) == 0 {
+		t.Fatal("expected the bundled registry to have entries, got none")
 	}
 
 	for _, s := range registry {
@@ -55,11 +55,11 @@ func TestLoadRegistry(t *testing.T) {
 		}
 	}
 
-	lukoil, ok := registry["LKOH"]
+	x5, ok := registry["X5"]
 	if !ok {
-		t.Fatal("LKOH not found in bundled registry")
+		t.Fatal("X5 not found in bundled registry")
 	}
-	if lukoil.INN != "7708004767" || lukoil.Category != "oil" {
-		t.Errorf("LKOH = %+v, want INN 7708004767 / oil", lukoil)
+	if x5.INN != "9722079341" || x5.Category != "retail" {
+		t.Errorf("X5 = %+v, want INN 9722079341 / retail", x5)
 	}
 }

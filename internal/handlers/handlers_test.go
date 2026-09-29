@@ -76,6 +76,7 @@ func newTestServer(repo Repository) *chi.Mux {
 	r.Get("/api/categories", c.GetCategories)
 	r.Get("/api/companies-with-categories", c.GetCompaniesWithCategories)
 	r.Get("/chart/{metric}", c.ChartHandler)
+	r.Get("/company/{name}", c.DashboardHandler)
 	r.Get("/api/company-note", c.GetCompanyNote)
 	r.Post("/api/company-note", c.SaveCompanyNote)
 	r.Delete("/api/company-note", c.DeleteCompanyNote)
@@ -277,5 +278,73 @@ func TestIndex(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Errorf("empty index body")
+	}
+}
+
+// holdingRow mimics ПАО «КЦ ИКС 5» 2025 RSBU: net profit above revenue.
+var holdingRow = models.QuarterData{Year: 2025, Quarter: "Q4", Company: "X5", Category: "retail",
+	Source: models.SourceRSBU, Capitalization: 700, Revenue: 85.7, NetProfit: 124.5, PE: 5.6, ROE: 29.2}
+
+func TestChartShowsSourceAndFlags(t *testing.T) {
+	repo := &fakeRepo{history: map[string][]models.QuarterData{
+		"X5":   {holdingRow},
+		"SBER": {{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceSmartLab, Revenue: 100, NetProfit: 30, PE: 4}},
+	}}
+	rec := do(t, newTestServer(repo), http.MethodGet, "/chart/pe?companies=X5,SBER", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"<th>Source</th>",
+		`class="source warn"`, // X5: RSBU is not comparable
+		"RSBU (issuer)",
+		`<td class="source" `, // SBER: smart-lab is comparable, no warning
+		`class="flag"`,        // X5 2025-Q4 P/E cell flagged
+		"net profit exceeds revenue",
+		`"triangle"`, // flagged point on the chart
+		`const src = {['SBER']: 'smart-lab', ['X5']: 'RSBU (issuer)'}`, // tooltip source map
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("chart page missing %q", want)
+		}
+	}
+	// The flag only concerns metrics derived from the anomaly's inputs.
+	rec = do(t, newTestServer(repo), http.MethodGet, "/chart/debt?companies=X5", "")
+	if strings.Contains(rec.Body.String(), `class="flag"`) {
+		t.Error("debt chart must not flag the profit>revenue anomaly")
+	}
+}
+
+func TestDashboardDataQuality(t *testing.T) {
+	repo := &fakeRepo{companyHist: []models.QuarterData{holdingRow}}
+	rec := do(t, newTestServer(repo), http.MethodGet, "/company/X5", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Source: RSBU (issuer)", "Data quality", "2025-Q4", "net profit exceeds revenue"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+
+	clean := &fakeRepo{companyHist: []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER",
+		Source: models.SourceSmartLab, Revenue: 100, NetProfit: 30, PE: 4}}}
+	rec = do(t, newTestServer(clean), http.MethodGet, "/company/SBER", "")
+	if strings.Contains(rec.Body.String(), "Data quality") {
+		t.Error("clean IFRS data must not show the data-quality warning")
+	}
+}
+
+func TestJSStringMap(t *testing.T) {
+	got := jsStringMap(map[string]string{`a'b\c"</script>`: "RSBU (issuer)", "B": "ГИР"})
+	want := `{['B']: decodeURIComponent('%D0%93%D0%98%D0%A0'), ` +
+		`[decodeURIComponent('a%27b%5Cc%22%3C/script%3E')]: 'RSBU (issuer)'}`
+	if got != want {
+		t.Errorf("jsStringMap = %s, want %s", got, want)
+	}
+	if strings.ContainsAny(got, "\"\\<") {
+		t.Error("output must not contain double quotes, backslashes or '<'")
 	}
 }
