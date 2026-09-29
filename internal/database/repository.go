@@ -1,7 +1,9 @@
 package database
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,12 +11,21 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
+// ErrCompanyNotFound is returned by DeleteCompany when no rows match. Callers
+// match it with errors.Is rather than string-matching the error text.
+var ErrCompanyNotFound = errors.New("company not found")
+
 type Repository struct {
 	db *sql.DB
 }
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
+}
+
+// Ping verifies the database is reachable. Used by the readiness probe.
+func (r *Repository) Ping(ctx context.Context) error {
+	return r.db.PingContext(ctx)
 }
 
 func (r *Repository) SaveQuarterData(data models.QuarterData) error {
@@ -55,63 +66,121 @@ func nullIfZero(val float64) interface{} {
 	return val
 }
 
-type CompanyMetric struct {
-	Year    int
-	Quarter string
-	Company string
-	Value   float64
+// ExistingPeriods returns the set of "YEAR-QUARTER" keys already stored for a
+// company (e.g. "2023-Q4"), letting importers skip periods they have already
+// ingested instead of re-fetching them. The set is empty for an unknown company.
+func (r *Repository) ExistingPeriods(company string) (map[string]struct{}, error) {
+	rows, err := r.db.Query(
+		`SELECT year, quarter FROM company_financials WHERE company = $1`, company)
+	if err != nil {
+		return nil, fmt.Errorf("query existing periods for %s: %w", company, err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var (
+			year    int
+			quarter string
+		)
+		if err := rows.Scan(&year, &quarter); err != nil {
+			return nil, fmt.Errorf("scan existing period: %w", err)
+		}
+		out[fmt.Sprintf("%d-%s", year, quarter)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+	return out, nil
 }
 
-func (r *Repository) GetCompaniesMetric(companies []string, metric string) ([]CompanyMetric, error) {
-	placeholders := make([]string, len(companies))
-	args := make([]interface{}, len(companies))
-	for i, company := range companies {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = company
-	}
-
-	query := fmt.Sprintf(`
-		SELECT year, quarter, company, %s as value
+func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, error) {
+	query := `
+		SELECT year, quarter, company, COALESCE(category, ''),
+			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
+			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0)
 		FROM company_financials
-		WHERE company IN (%s)
-		ORDER BY year, 
+		WHERE company = $1
+		ORDER BY year,
 			CASE quarter
 				WHEN 'Q1' THEN 1
 				WHEN 'Q2' THEN 2
 				WHEN 'Q3' THEN 3
 				WHEN 'Q4' THEN 4
 			END
-	`, metric, strings.Join(placeholders, ","))
+	`
 
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.db.Query(query, company)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query metric %s: %w", metric, err)
+		return nil, fmt.Errorf("failed to query company history: %w", err)
 	}
 	defer rows.Close()
 
-	var result []CompanyMetric
+	var out []models.QuarterData
 	for rows.Next() {
-		var item CompanyMetric
-		var value sql.NullFloat64
-
-		if err := rows.Scan(&item.Year, &item.Quarter, &item.Company, &value); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+		var q models.QuarterData
+		if err := rows.Scan(
+			&q.Year, &q.Quarter, &q.Company, &q.Category,
+			&q.Capitalization, &q.Revenue, &q.NetProfit,
+			&q.EBITDA, &q.Debt, &q.PE, &q.ROE,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}
-
-		if value.Valid {
-			item.Value = value.Float64
-		} else {
-			item.Value = 0
-		}
-
-		result = append(result, item)
+		out = append(out, q)
 	}
-
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
+	return out, nil
+}
 
-	return result, nil
+func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]models.QuarterData, error) {
+	if len(companies) == 0 {
+		return map[string][]models.QuarterData{}, nil
+	}
+	placeholders := make([]string, len(companies))
+	args := make([]interface{}, len(companies))
+	for i, c := range companies {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = c
+	}
+	query := fmt.Sprintf(`
+		SELECT year, quarter, company, COALESCE(category, ''),
+			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
+			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0)
+		FROM company_financials
+		WHERE company IN (%s)
+		ORDER BY company, year,
+			CASE quarter
+				WHEN 'Q1' THEN 1
+				WHEN 'Q2' THEN 2
+				WHEN 'Q3' THEN 3
+				WHEN 'Q4' THEN 4
+			END
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query companies history: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]models.QuarterData, len(companies))
+	for rows.Next() {
+		var q models.QuarterData
+		if err := rows.Scan(
+			&q.Year, &q.Quarter, &q.Company, &q.Category,
+			&q.Capitalization, &q.Revenue, &q.NetProfit,
+			&q.EBITDA, &q.Debt, &q.PE, &q.ROE,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan history row: %w", err)
+		}
+		out[q.Company] = append(out[q.Company], q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+	return out, nil
 }
 
 func (r *Repository) GetAllCompanies() ([]string, error) {
@@ -203,7 +272,7 @@ func (r *Repository) DeleteCompany(company string) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("company %s not found", company)
+		return fmt.Errorf("%w: %s", ErrCompanyNotFound, company)
 	}
 
 	return nil

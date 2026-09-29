@@ -17,82 +17,53 @@ type GetNoteResponse struct {
 }
 
 func (controller *Controller) GetCompanyNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	company := r.URL.Query().Get("company")
-	company = strings.TrimSpace(company)
+	company := strings.TrimSpace(r.URL.Query().Get("company"))
 	if company == "" {
-		http.Error(w, "Company name is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "company name is required")
 		return
 	}
 
 	note, err := controller.repo.GetCompanyNote(company)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		controller.serverError(w, "failed to get company note", err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(GetNoteResponse{
-		Company: company,
-		Note:    note,
-	})
+	writeJSON(w, http.StatusOK, GetNoteResponse{Company: company, Note: note})
 }
 
 func (controller *Controller) SaveCompanyNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req SaveNoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	req.Company = strings.TrimSpace(req.Company)
 	if req.Company == "" {
-		http.Error(w, "Company name is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "company name is required")
 		return
 	}
 
-	err := controller.repo.SaveCompanyNote(req.Company, req.Note)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := controller.repo.SaveCompanyNote(req.Company, req.Note); err != nil {
+		controller.serverError(w, "failed to save company note", err)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Note saved successfully",
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Note saved successfully"})
 }
 
 func (controller *Controller) DeleteCompanyNote(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	company := r.URL.Query().Get("company")
-	company = strings.TrimSpace(company)
+	company := strings.TrimSpace(r.URL.Query().Get("company"))
 	if company == "" {
-		http.Error(w, "Company name is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "company name is required")
 		return
 	}
 
-	err := controller.repo.DeleteCompanyNote(company)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := controller.repo.DeleteCompanyNote(company); err != nil {
+		controller.serverError(w, "failed to delete company note", err)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Note deleted successfully",
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Note deleted successfully"})
 }

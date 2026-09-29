@@ -1,0 +1,31 @@
+# Bank ticker list for `cmd/fetch` — exchange-listed credit institutions whose
+# quarterly net profit comes from the Central Bank's form 102 archives
+# (https://www.cbr.ru/vfs/credit/forms/102-YYYYMMDD.rar). Banks file form 102
+# with the CBR, not ГИР БО, so they are fetched through a separate pipeline.
+#
+# Format:  TICKER  REGN  CATEGORY   (one per line, "#" starts a comment)
+#   TICKER   MOEX security id (also used for year-end market cap / P/E)
+#   REGN     CBR registration number (the key into form 102, NOT the INN)
+#
+# Usage:   go run ./cmd/fetch            # fetches these plus the ГИР БО list
+#          FETCH_BANKS="SBER,VTBR" go run ./cmd/fetch   # subset
+#
+# CAVEATS (inherent to the source — see internal/scraper/cbr docs):
+#   * Form 102 is RSBU of the bank legal entity, not consolidated IFRS, so
+#     figures differ from group/"market" numbers.
+#   * NET PROFIT and ROE are populated; ROE uses total regulatory capital
+#     (Basel III own funds, form 123 line "000") as the equity base, so it is
+#     approximate (regulatory capital, not balance-sheet equity).
+#   * Revenue/EBITDA/Debt have no clean form 102 line (smart-lab leaves them
+#     empty for banks too) and stay empty.
+#   * Per-quarter net profit is recovered by differencing the cumulative YTD
+#     archives; market cap, P/E and ROE are on the Q4 (full-year) row only.
+
+SBER  1481  banks   # ПАО Сбербанк (ordinary)
+SBERP 1481  banks   # ПАО Сбербанк (preferred — same bank, different cap)
+VTBR  1000  banks   # Банк ВТБ (ПАО)
+BSPB  436   banks   # ПАО "Банк "Санкт-Петербург" (ordinary)
+BSPBP 436   banks   # ПАО "Банк "Санкт-Петербург" (preferred)
+CBOM  1978  banks   # ПАО "Московский кредитный банк"
+SVCB  963   banks   # ПАО "Совкомбанк"
+T     2673  banks   # АО "ТБанк" (ex-Тинькофф; holding restructured, cap may not align)

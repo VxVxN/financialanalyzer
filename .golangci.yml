@@ -1,0 +1,34 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - misspell
+    - unconvert
+    - bodyclose
+  settings:
+    errcheck:
+      # These write to an http.ResponseWriter where a failed write cannot be
+      # meaningfully handled; checking every call adds noise.
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprint
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Deferred Close() on read paths (rows, files, response bodies) is the
+      # standard Go idiom; a failed close there is not actionable.
+      - linters:
+          - errcheck
+        text: 'Error return value of `[^`]*\.Close` is not checked'
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	financialanalyzer "github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 )
@@ -14,6 +15,10 @@ type Application struct {
 }
 
 func Init(cfg *config.Config) (*Application, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	db, err := database.NewConnection(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -27,7 +32,7 @@ func Init(cfg *config.Config) (*Application, error) {
 }
 
 func (app *Application) MigrateDB() error {
-	if err := database.RunMigrations(app.db); err != nil {
+	if err := database.RunMigrations(app.db, financialanalyzer.MigrationsFS); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 	return nil

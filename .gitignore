@@ -1,1 +1,16 @@
-.idea
+# IDE
+.idea/
+.vscode/
+
+# Build artifacts
+/bin/
+*.exe
+
+# Test & coverage output
+coverage.out
+coverage.html
+*.test
+
+# Local environment overrides
+.env
+.env.local

@@ -1,0 +1,71 @@
+# Ticker list for `cmd/fetch` — liquid MOEX names whose annual RSBU is actually
+# published in ГИР БО (bo.nalog.gov.ru) and has non-zero parent revenue.
+#
+# Format:  TICKER  INN  CATEGORY   (one per line, "#" starts a comment)
+# Usage:   FETCH_TICKERS_FILE=fetch_tickers.txt go run ./cmd/fetch
+#
+# Each row was verified against the live ГИР БО + MOEX ISS APIs on 2026-05-26:
+# the INN resolves to the listed issuer and its latest report carries revenue.
+#
+# CAVEATS (inherent to the source — see CLAUDE.md / package docs):
+#   * Figures are ANNUAL, unconsolidated RSBU (parent legal entity), NOT IFRS,
+#     so P/E and ROE differ from group-level/"market" numbers, sometimes a lot.
+#   * Rows land at Q4 of each year (no quarterly breakdown exists in ГИР БО).
+#   * EBITDA is not populated (no single RSBU line for it).
+#
+# NOTE on the "comment" date suffix: some issuers stopped publishing after 2022
+# (latest report = 2022); their earlier history is still ingested.
+
+# --- Oil & gas ---
+LKOH  7708004767  oil       # ПАО "ЛУКОЙЛ"
+GAZP  7736050003  oil       # ПАО "Газпром"
+NVTK  6316031581  oil       # ПАО "НОВАТЭК" (latest 2021)
+TATN  1644003838  oil       # ПАО "Татнефть" (ordinary)
+TATNP 1644003838  oil       # ПАО "Татнефть" (preferred — same issuer, diff. cap)
+SIBN  5504036333  oil       # ПАО "Газпром нефть" (latest 2021)
+
+# --- Metals & mining ---
+NLMK  4823006703  metals    # ПАО "НЛМК"
+RASP  4214002316  metals    # ПАО "Распадская" (latest 2022)
+SELG  1402047184  metals    # ПАО "Селигдар"
+UGLD  7424024375  metals    # ПАО "ЮГК" (latest 2022)
+
+# --- Chemicals ---
+PHOR  7736216869  chem      # ПАО "ФосАгро"
+AKRN  5321029508  chem      # ПАО "Акрон"
+KZOS  1658008723  chem      # ПАО "Казаньоргсинтез"
+NKNC  1651000010  chem      # ПАО "Нижнекамскнефтехим"
+
+# --- Power generation / grids ---
+IRAO  2320109650  power     # ПАО "Интер РАО"
+MSNG  7705035012  power     # ПАО "Мосэнерго" (latest 2022)
+OGKB  2607018122  power     # ПАО "ОГК-2" (latest 2022)
+TGKA  7841312071  power     # ПАО "ТГК-1" (latest 2022)
+UPRO  7203162698  power     # ПАО "Форвард Энерго" (ex-Юнипро, latest 2022)
+LSNGP 7803002209  power     # ПАО "Россети Ленэнерго" (preferred LSNGP / ord. LSNG)
+
+# --- Telecom ---
+MTSS  7740000076  telecom   # ПАО "МТС"
+
+# --- Transport ---
+AFLT  7712040126  transport # ПАО "Аэрофлот"
+
+# --- Developers ---
+PIKK  7713011336  develop   # ПАО "ПИК СЗ"
+
+# ============================================================================
+# NOT AVAILABLE via this pipeline — do not expect data for these:
+#
+#  Banks / financials (report to the Central Bank, not ГИР БО):
+#    SBER VTBR TCSG SVCB BSPB CBOM MOEX
+#
+#  Closed RSBU publication (sanctions-related secrecy — ГИР БО returns nothing):
+#    ROSN SNGS SNGSP BANE TRNFP GMKN MAGN CHMF PLZL ALRS MTLR RTKM HYDR AFKS
+#
+#  Holding companies with ~zero parent-entity revenue (data exists but useless,
+#  the real revenue sits in subsidiaries):
+#    MGNT  (revenue is in АО "Тандер")
+#
+#  Foreign / re-domiciled holdcos that don't file Russian RSBU:
+#    OZON FIXP RUAL ENPG
+# ============================================================================

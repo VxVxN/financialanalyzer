@@ -1,17 +1,12 @@
 package handlers
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import "net/http"
 
 func (controller *Controller) GetCompanies(w http.ResponseWriter, r *http.Request) {
 	companies, err := controller.repo.GetAllCompanies()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		controller.serverError(w, "failed to list companies", err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(companies)
+	writeJSON(w, http.StatusOK, companies)
 }

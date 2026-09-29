@@ -98,11 +98,17 @@ func (p *CSVParser) processRecords(records [][]string) ([]models.QuarterData, er
 	return results, nil
 }
 
+// extractCompanyNameAndCategory derives the company and category from the file
+// name, which is expected to be "<COMPANY>_<CATEGORY>.csv". A missing category
+// yields an empty string rather than panicking on a malformed name.
 func (p *CSVParser) extractCompanyNameAndCategory() (string, string) {
 	filename := path.Base(p.filePath)
 	filename = strings.TrimSuffix(filename, filepath.Ext(filename))
-	splitedFilename := strings.Split(filename, "_")
-	return splitedFilename[0], splitedFilename[1]
+	company, category, found := strings.Cut(filename, "_")
+	if !found {
+		return filename, ""
+	}
+	return company, category
 }
 
 func (p *CSVParser) shouldSkipMetric(metricName string) bool {

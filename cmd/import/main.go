@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	financialanalyzer "github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/parser"
@@ -35,13 +36,17 @@ func main() {
 }
 
 func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	db, err := database.NewConnection(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer db.Close()
 
-	if err := database.RunMigrations(db); err != nil {
+	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 

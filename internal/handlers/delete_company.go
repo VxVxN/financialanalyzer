@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/VxVxN/financialanalyzer/internal/database"
 )
 
 type DeleteCompanyRequest struct {
@@ -11,35 +14,27 @@ type DeleteCompanyRequest struct {
 }
 
 func (controller *Controller) DeleteCompany(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req DeleteCompanyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	req.Company = strings.TrimSpace(req.Company)
 	if req.Company == "" {
-		http.Error(w, "Company name is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "company name is required")
 		return
 	}
 
 	err := controller.repo.DeleteCompany(req.Company)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, err.Error(), http.StatusNotFound)
+		if errors.Is(err, database.ErrCompanyNotFound) {
+			writeJSONError(w, http.StatusNotFound, "company not found")
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		controller.serverError(w, "failed to delete company", err)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "Company deleted successfully",
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Company deleted successfully"})
 }
