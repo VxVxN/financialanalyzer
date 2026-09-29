@@ -1,5 +1,5 @@
 // Package httpx is the shared GET-with-retry helper used by the scraper
-// clients (girbo, moex, cbr, smartlab). Each client keeps its own rate limit
+// clients (girbo, moex, cbr). Each client keeps its own rate limit
 // and headers; httpx only adds bounded retries with exponential backoff for
 // transient failures — network errors, timeouts, 429 and 5xx — so one flaky
 // response no longer drops a whole company-year.

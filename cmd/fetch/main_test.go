@@ -1,8 +1,12 @@
 package main
 
 import (
+	"errors"
+	"math"
 	"strings"
 	"testing"
+
+	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
 func TestResolveSpec(t *testing.T) {
@@ -61,5 +65,55 @@ func TestLoadRegistry(t *testing.T) {
 	}
 	if x5.INN != "9722079341" || x5.Category != "retail" {
 		t.Errorf("X5 = %+v, want INN 9722079341 / retail", x5)
+	}
+}
+
+func TestPERatioAndROE(t *testing.T) {
+	f := models.Float
+	eq := func(got *float64, want float64) bool {
+		return got != nil && math.Abs(*got-want) < 1e-9
+	}
+
+	if got := peRatio(f(1000), f(100)); !eq(got, 10) {
+		t.Errorf("peRatio(1000,100) = %v, want 10", got)
+	}
+	for name, got := range map[string]*float64{
+		"no cap":      peRatio(nil, f(100)),
+		"no profit":   peRatio(f(1000), nil),
+		"zero profit": peRatio(f(1000), f(0)),
+		"loss":        peRatio(f(1000), f(-5)),
+	} {
+		if got != nil {
+			t.Errorf("peRatio %s = %v, want nil", name, *got)
+		}
+	}
+
+	if got := roePercent(f(20), f(100)); !eq(got, 20) {
+		t.Errorf("roePercent(20,100) = %v, want 20", got)
+	}
+	if got := roePercent(f(0), f(100)); !eq(got, 0) {
+		t.Errorf("roePercent(0,100) = %v, want reported 0", got)
+	}
+	for name, got := range map[string]*float64{
+		"no profit":       roePercent(nil, f(100)),
+		"no equity":       roePercent(f(20), nil),
+		"zero equity":     roePercent(f(20), f(0)),
+		"negative equity": roePercent(f(20), f(-1)),
+	} {
+		if got != nil {
+			t.Errorf("roePercent %s = %v, want nil", name, *got)
+		}
+	}
+}
+
+func TestCapitalization(t *testing.T) {
+	if got := capitalization(500, nil); got == nil || *got != 500 {
+		t.Errorf("capitalization(500) = %v, want 500", got)
+	}
+	if got := capitalization(0, errors.New("boom")); got != nil {
+		t.Errorf("capitalization on error = %v, want nil", *got)
+	}
+	if got := capitalization(0, nil); got != nil {
+		t.Errorf("capitalization(0) = %v, want nil", *got)
 	}
 }

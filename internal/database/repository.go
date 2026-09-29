@@ -48,24 +48,17 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
 		data.Quarter,
 		data.Company,
 		data.Category,
-		nullIfZero(data.Capitalization),
-		nullIfZero(data.Revenue),
-		nullIfZero(data.NetProfit),
-		nullIfZero(data.EBITDA),
-		nullIfZero(data.Debt),
-		nullIfZero(data.PE),
-		nullIfZero(data.ROE),
+		data.Capitalization,
+		data.Revenue,
+		data.NetProfit,
+		data.EBITDA,
+		data.Debt,
+		data.PE,
+		data.ROE,
 		nullIfEmpty(data.Source),
 	)
 
 	return err
-}
-
-func nullIfZero(val float64) interface{} {
-	if val == 0 {
-		return nil
-	}
-	return val
 }
 
 func nullIfEmpty(val string) interface{} {
@@ -106,8 +99,7 @@ func (r *Repository) ExistingPeriods(ctx context.Context, company string) (map[s
 func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]models.QuarterData, error) {
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
-			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
-			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0),
+			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
 			COALESCE(source, '')
 		FROM company_financials
 		WHERE company = $1
@@ -156,8 +148,7 @@ func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string
 	}
 	query := fmt.Sprintf(`
 		SELECT year, quarter, company, COALESCE(category, ''),
-			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
-			COALESCE(ebitda, 0), COALESCE(debt, 0), COALESCE(pe, 0), COALESCE(roe, 0),
+			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
 			COALESCE(source, '')
 		FROM company_financials
 		WHERE company IN (%s)

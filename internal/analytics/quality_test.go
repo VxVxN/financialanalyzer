@@ -7,10 +7,15 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
+var f = models.Float
+
+func withoutRevenue(q models.QuarterData) models.QuarterData { q.Revenue = nil; return q }
+func withoutCap(q models.QuarterData) models.QuarterData     { q.Capitalization = nil; return q }
+
 func TestCheckRow(t *testing.T) {
 	row := func(capz, rev, np, pe, roe float64) models.QuarterData {
 		return models.QuarterData{Year: 2025, Quarter: "Q4", Company: "X",
-			Capitalization: capz, Revenue: rev, NetProfit: np, PE: pe, ROE: roe}
+			Capitalization: f(capz), Revenue: f(rev), NetProfit: f(np), PE: f(pe), ROE: f(roe)}
 	}
 	tests := []struct {
 		name string
@@ -31,8 +36,13 @@ func TestCheckRow(t *testing.T) {
 		}},
 		// ПАО «КЦ ИКС 5» 2025: revenue 85.7, profit 124.5 — only the profit>revenue rule fires.
 		{"holding (X5-like)", row(700, 85.7, 124.5, 5.6, 29.2), [][]string{{"revenue", "net_profit", "pe", "roe"}}},
-		{"bank without revenue", row(7000, 0, 1500, 4.7, 24), nil},
-		{"no cap: revenue/cap rule skipped", row(0, 0.1, 0.05, 0, 5), nil},
+		{"bank: revenue not reported", withoutRevenue(row(7000, 0, 1500, 4.7, 24)), nil},
+		{"no cap: revenue/cap rule skipped", withoutCap(row(0, 0.1, 0.05, 0, 5)), nil},
+		// A reported zero revenue is a real figure: a pure holding with no sales.
+		{"holding with zero revenue", row(900, 0, 30, 30, 20), [][]string{
+			{"revenue", "capitalization"},
+			{"revenue", "net_profit", "pe", "roe"},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,8 +63,8 @@ func TestCheckRow(t *testing.T) {
 
 func TestAnomaliesByLabel(t *testing.T) {
 	hist := []models.QuarterData{
-		{Year: 2024, Quarter: "Q4", Revenue: 60, NetProfit: 95},         // holding rule
-		{Year: 2023, Quarter: "Q2", PE: 300, Revenue: 10, NetProfit: 1}, // P/E only
+		{Year: 2024, Quarter: "Q4", Revenue: f(60), NetProfit: f(95)},            // holding rule
+		{Year: 2023, Quarter: "Q2", PE: f(300), Revenue: f(10), NetProfit: f(1)}, // P/E only
 	}
 	anoms := CheckHistory(hist)
 	if len(anoms) != 2 || anoms[0].Label != "2023-Q2" {

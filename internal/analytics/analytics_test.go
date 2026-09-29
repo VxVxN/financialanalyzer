@@ -10,7 +10,8 @@ import (
 // makeHistory builds a contiguous quarterly history starting at (startYear, Q1)
 // where each quarter's slice is the corresponding row in `values`. Each row
 // is {capitalization, revenue, net_profit, ebitda, debt, pe, roe}. Use 0 for
-// "no data" — IsEmpty filters out rows that are entirely zero.
+// "no data": zeros are stored as unreported (nil) metrics, which keeps the
+// fixtures terse. Use makeRow directly to test a reported zero.
 func makeHistory(company string, startYear int, values [][7]float64) []models.QuarterData {
 	quarters := []string{"Q1", "Q2", "Q3", "Q4"}
 	var out []models.QuarterData
@@ -20,16 +21,23 @@ func makeHistory(company string, startYear int, values [][7]float64) []models.Qu
 			Quarter:        quarters[i%4],
 			Company:        company,
 			Category:       "test",
-			Capitalization: v[0],
-			Revenue:        v[1],
-			NetProfit:      v[2],
-			EBITDA:         v[3],
-			Debt:           v[4],
-			PE:             v[5],
-			ROE:            v[6],
+			Capitalization: zeroAsNil(v[0]),
+			Revenue:        zeroAsNil(v[1]),
+			NetProfit:      zeroAsNil(v[2]),
+			EBITDA:         zeroAsNil(v[3]),
+			Debt:           zeroAsNil(v[4]),
+			PE:             zeroAsNil(v[5]),
+			ROE:            zeroAsNil(v[6]),
 		})
 	}
 	return out
+}
+
+func zeroAsNil(v float64) *float64 {
+	if v == 0 {
+		return nil
+	}
+	return models.Float(v)
 }
 
 func approx(a, b, eps float64) bool {
@@ -249,5 +257,31 @@ func TestComputeScore_AllBad(t *testing.T) {
 	}
 	if got := computeScore(s); got != 0 {
 		t.Fatalf("all-bad score should be 0, got %d", got)
+	}
+}
+
+func TestReportedZeroIsNotMissing(t *testing.T) {
+	zero, missing := models.Float(0), (*float64)(nil)
+	h := []models.QuarterData{
+		{Year: 2024, Quarter: "Q3", Company: "X", Debt: models.Float(50), Revenue: models.Float(10)},
+		{Year: 2024, Quarter: "Q4", Company: "X", Debt: zero, Revenue: missing},
+	}
+
+	q := QuarterlySeries(h, "debt")
+	if q[1].Value != 0 {
+		t.Errorf("quarterly debt Q4 = %v, want reported 0", q[1].Value)
+	}
+	if r := QuarterlySeries(h, "revenue"); !math.IsNaN(r[1].Value) {
+		t.Errorf("quarterly revenue Q4 = %v, want NaN (not reported)", r[1].Value)
+	}
+	// Stock metric TTM carries the latest reported value — the zero, not 50.
+	if ttm := TTMSeries(h, "debt"); ttm[1].Value != 0 {
+		t.Errorf("TTM debt Q4 = %v, want 0", ttm[1].Value)
+	}
+	if a := AnnualSeries(h, "debt"); a[0].Value != 0 {
+		t.Errorf("annual debt 2024 = %v, want 0", a[0].Value)
+	}
+	if snap := BuildSnapshot(h); snap.Debt != 0 {
+		t.Errorf("snapshot debt = %v, want 0 (debt-free company)", snap.Debt)
 	}
 }

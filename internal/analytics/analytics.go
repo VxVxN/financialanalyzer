@@ -111,24 +111,25 @@ func formatYear(y int) string {
 	return string(out)
 }
 
+// rawValue returns a stored metric, or NaN when it was not reported.
 func rawValue(q models.QuarterData, metric string) float64 {
 	switch metric {
 	case "capitalization":
-		return q.Capitalization
+		return models.ValueOrNaN(q.Capitalization)
 	case "revenue":
-		return q.Revenue
+		return models.ValueOrNaN(q.Revenue)
 	case "net_profit":
-		return q.NetProfit
+		return models.ValueOrNaN(q.NetProfit)
 	case "ebitda":
-		return q.EBITDA
+		return models.ValueOrNaN(q.EBITDA)
 	case "debt":
-		return q.Debt
+		return models.ValueOrNaN(q.Debt)
 	case "pe":
-		return q.PE
+		return models.ValueOrNaN(q.PE)
 	case "roe":
-		return q.ROE
+		return models.ValueOrNaN(q.ROE)
 	}
-	return 0
+	return math.NaN()
 }
 
 // SortHistory orders history chronologically (year, quarter).
@@ -144,22 +145,17 @@ func SortHistory(h []models.QuarterData) []models.QuarterData {
 	return out
 }
 
-// QuarterlySeries returns the raw metric values per quarter (zero values
-// become NaN so charts can skip them).
+// QuarterlySeries returns the raw metric values per quarter (unreported
+// values are NaN so charts can skip them; a reported zero stays zero).
 func QuarterlySeries(history []models.QuarterData, metric string) Series {
 	hist := SortHistory(history)
 	out := make(Series, 0, len(hist))
 	for _, q := range hist {
-		v := rawValue(q, metric)
-		val := v
-		if v == 0 {
-			val = math.NaN()
-		}
 		out = append(out, Point{
 			Label: qLabel(q.Year, q.Quarter),
 			Year:  q.Year,
 			Index: q.Year*10 + quarterIdx(q.Quarter),
-			Value: val,
+			Value: rawValue(q, metric),
 		})
 	}
 	return out
@@ -189,7 +185,7 @@ func TTMSeries(history []models.QuarterData, metric string) Series {
 			present := 0
 			for j := i - 3; j <= i; j++ {
 				val := rawValue(hist[j], metric)
-				if val != 0 {
+				if !math.IsNaN(val) {
 					sum += val
 					present++
 				}
@@ -200,7 +196,7 @@ func TTMSeries(history []models.QuarterData, metric string) Series {
 			}
 		} else {
 			val := rawValue(q, metric)
-			if val != 0 {
+			if !math.IsNaN(val) {
 				v = val
 				ok = true
 			}
@@ -245,7 +241,7 @@ func AnnualSeries(history []models.QuarterData, metric string) Series {
 				present := 0
 				for _, q := range quarters {
 					v := rawValue(q, metric)
-					if v != 0 {
+					if !math.IsNaN(v) {
 						sum += v
 						present++
 					}
@@ -255,10 +251,10 @@ func AnnualSeries(history []models.QuarterData, metric string) Series {
 				}
 			}
 		} else {
-			// take latest non-zero quarter of the year
+			// take the latest reported quarter of the year
 			for i := len(quarters) - 1; i >= 0; i-- {
 				v := rawValue(quarters[i], metric)
-				if v != 0 {
+				if !math.IsNaN(v) {
 					val = v
 					break
 				}
@@ -448,13 +444,6 @@ type Snapshot struct {
 	Score          int // 0-100 composite long-term-investor score
 }
 
-func nanIfZero(v float64) float64 {
-	if v == 0 {
-		return math.NaN()
-	}
-	return v
-}
-
 func lastNonNaN(s Series) float64 {
 	if p, ok := LatestValid(s); ok {
 		return p.Value
@@ -491,10 +480,10 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	snap.Category = last.Category
 	snap.LastLabel = qLabel(last.Year, last.Quarter)
 
-	snap.Capitalization = nanIfZero(last.Capitalization)
-	snap.Debt = nanIfZero(last.Debt)
-	snap.PE = nanIfZero(last.PE)
-	snap.ROE = nanIfZero(last.ROE)
+	snap.Capitalization = models.ValueOrNaN(last.Capitalization)
+	snap.Debt = models.ValueOrNaN(last.Debt)
+	snap.PE = models.ValueOrNaN(last.PE)
+	snap.ROE = models.ValueOrNaN(last.ROE)
 
 	snap.Revenue = lastNonNaN(TTMSeries(hist, "revenue"))
 	snap.NetProfit = lastNonNaN(TTMSeries(hist, "net_profit"))

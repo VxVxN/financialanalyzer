@@ -7,7 +7,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Go application that ingests Russian-language quarterly financial data and serves an interactive web UI for cross-company metric comparison. Three binaries share `internal/`:
 
 - `cmd/import` — one-shot CSV ingestion (set `CSV_PATH`, run, exits).
-- `cmd/scrape` — pulls quarterly financials directly from smart-lab.ru for a list of tickers (see "Smart-lab scraper" below). NOTE: smart-lab is now paywalled; `cmd/fetch` is the free replacement.
 - `cmd/fetch` — builds financials from free primary sources: annual RSBU from ГИР БО + year-end market cap from MOEX ISS, computing P/E and ROE itself (see "Primary-source fetch" below); listed banks come from the CBR's quarterly form 102 archives (see "Bank fetch").
 - `cmd/plot` — HTTP server (default `:8088`) that renders the UI and chart pages.
 
@@ -21,12 +20,6 @@ go run ./cmd/plot
 
 # Import a CSV file (filename encodes company + category, see "CSV format" below)
 CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
-
-# Scrape smart-lab.ru — explicit ticker:category list
-SCRAPE_TICKERS="SBER:banks,LKOH:oil,GAZP:oil" go run ./cmd/scrape
-
-# Scrape smart-lab.ru — re-fetch all tickers already in the DB
-go run ./cmd/scrape
 
 # Fetch from free primary sources (ГИР БО + MOEX ISS). Ticker INN/category are
 # resolved from the bundled registry (fetch_tickers.txt), so a request can be
@@ -48,38 +41,31 @@ FETCH_BANKS="T" FETCH_BANK_FROM_YEAR=2009 go run ./cmd/fetch
 # Build
 go build ./...
 
-# Tests (none exist yet; standard invocation)
+# Tests. The repository integration tests in internal/database skip unless
+# TEST_DATABASE_DSN points at a THROWAWAY Postgres (they truncate its tables).
 go test ./...
+TEST_DATABASE_DSN="host=127.0.0.1 port=55432 user=test dbname=postgres sslmode=disable" go test ./internal/database/
 ```
 
-Both binaries must run from the repo root — `RunMigrations` loads `file://migrations` and `IndexHandler` loads `templates/index.html` as relative paths.
+Migrations and templates are embedded (`embed.go`: `financialanalyzer.MigrationsFS` / `TemplatesFS`), so binaries run from any working directory.
 
-Config is env-var only (`internal/config/config.go`): `PORT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`, `CSV_PATH`. Defaults target a local Postgres (`localhost:5432`, user `postgres`, password `password`, db `postgres`). The scraper additionally reads `SCRAPE_TICKERS` or `SCRAPE_TICKERS_FILE` (both optional — see below).
+Config is env-var only (`internal/config/config.go`): `PORT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`, `CSV_PATH`, `AUTH_USER`, `AUTH_PASSWORD`. Defaults target a local Postgres (`localhost:5432`, user `postgres`, password `password`, db `postgres`). `AUTH_USER`/`AUTH_PASSWORD` must be set together (`Validate` rejects one without the other).
 
 ## Architecture
 
-**Data model.** `company_financials` is the single fact table, keyed by `(year, quarter, company)` with a `category` column and one column per metric (capitalization, revenue, net_profit, ebitda, debt, pe, roe). A `source` column (`models.Source*`: `rsbu`, `cbr_102`, `csv`, `smartlab`; NULL for legacy rows) records which pipeline wrote the row; every loader must set `QuarterData.Source`, and the upsert keeps the existing source when the new one is empty. `company_notes` holds free-text notes keyed by company. `SaveQuarterData` does an upsert that uses `COALESCE(EXCLUDED.x, existing.x)` so a row imported with only some metrics filled in won't wipe previously-imported metrics for the same quarter.
+**Data model.** `company_financials` is the single fact table, keyed by `(year, quarter, company)` with a `category` column and one column per metric (capitalization, revenue, net_profit, ebitda, debt, pe, roe). Metric fields in `models.QuarterData` are `*float64`: **nil = not reported (NULL), non-nil zero = a real zero** (e.g. a debt-free company). Loaders set only what they know — the zero value is safe, because nil never overwrites a stored value. Build values with `models.Float(v)`; analytics reads them via `models.ValueOrNaN` (NaN is its missing-value convention, so a reported 0 stays 0 in series and snapshots). A `source` column (`models.Source*`: `rsbu`, `cbr_102`, `csv`; `smartlab` survives only on legacy rows from the removed scraper; NULL for older rows) records which pipeline wrote the row; every loader must set `QuarterData.Source`, and the upsert keeps the existing source when the new one is empty. `company_notes` holds free-text notes keyed by company. `SaveQuarterData` does an upsert that uses `COALESCE(EXCLUDED.x, existing.x)` so a row imported with only some metrics filled in won't wipe previously-imported metrics for the same quarter (a consequence: a wrong stored value can be corrected, but not cleared back to NULL, by re-importing). Rows written before the pointer change stored reported zeros as NULL; re-run the loader (`FETCH_FORCE=1` for `cmd/fetch`) to fill them in. All repository methods take a `context.Context` first (handlers pass `r.Context()`).
 
 **CSV ingestion (`internal/parser/csv_parser.go`).** Input is semicolon-delimited with the header row containing quarter labels like `2023-Q1`; `LTM` columns are skipped. Metric rows are matched in two ways:
 - Exact prefix match against a handler map (`Капитализация`, `Выручка`, `EBITDA`, `ROE`).
 - Substring match for "special" metrics with disambiguation rules (`P/E`, `Долг` but not `Чистый долг`, `Чистая прибыль` but not the `н/с` variant).
 
-Company name and category are parsed from the **filename**: `<COMPANY>_<CATEGORY>.csv` (split on `_`). Numeric values are normalized by stripping spaces, `%`, quotes, and converting `,` → `.`.
+Company name and category are parsed from the **filename**: `<COMPANY>_<CATEGORY>.csv` (split on `_`). Numeric values are normalized by stripping spaces, `%`, quotes, and converting `,` → `.`. Any value that parses to 0 is treated as **no data** (aggregator exports use 0 as a placeholder, e.g. a bank's revenue or a loss quarter's P/E) — honest zeros come only from the primary sources.
 
-**HTTP layer (`cmd/plot/main.go`, `internal/handlers/`).** Routes are registered in `main.go`; each handler is a method on `Controller` (one file per route in `internal/handlers/`). `Controller` holds only `*database.Repository`. `/chart/{metric}` returns a self-contained HTML page (embedded CSS + go-echarts JS + a data table) and supports `?theme=dark|light` and `?companies=A,B,C`. The index page (`templates/index.html`) is loaded fresh on each request — edits don't require restart.
+**HTTP layer (`cmd/plot/main.go`, `internal/handlers/`).** Routes are registered in `newRouter` in `main.go` (tested in `cmd/plot/main_test.go` without a DB); each handler is a method on `Controller` (one file per route in `internal/handlers/`). `Controller` depends on the consumer-side `handlers.Repository` interface. State-changing routes (`DELETE /api/companies`, `POST`/`DELETE /api/company-note`) sit in a group behind `handlers.RequireBasicAuth` (only when `AUTH_USER`/`AUTH_PASSWORD` are set; the browser shows its native login dialog) and `handlers.RequireJSONBody` (always; a body must be `application/json`, which forces a CORS preflight and blocks cross-site form CSRF). Any new mutating route belongs in that group. `/chart/{metric}` returns a self-contained HTML page (embedded CSS + go-echarts JS + a data table) and supports `?theme=dark|light` and `?companies=A,B,C`. The index page (`templates/index.html`) is loaded fresh on each request — edits don't require restart.
 
-**Adding a metric** requires changes in several places that must stay in sync: `models.QuarterData` (field + `IsEmpty`), a migration to add the column, the `SaveQuarterData` upsert, parser handlers/special-type switch in `csv_parser.go`, the `metrics` slice in `handlers/index.go`, and `formatMetricName`/`getMetricUnit`/`getTooltipFormatter` in `handlers/chart.go`.
+**Adding a metric** requires changes in several places that must stay in sync: `models.QuarterData` (`*float64` field + `IsEmpty`), `rawValue` in `analytics/analytics.go`, a migration to add the column, the `SaveQuarterData` upsert, parser handlers/special-type switch in `csv_parser.go`, the `metrics` slice in `handlers/index.go`, and `formatMetricName`/`getMetricUnit`/`getTooltipFormatter` in `handlers/chart.go`.
 
-**Smart-lab scraper (`internal/scraper/smartlab/`, `cmd/scrape/`).** Pulls `https://smart-lab.ru/q/{TICKER}/f/q/` and parses the `<table class="simple-little-table financials">` block. Metric rows are identified by their stable `field="..."` attribute: `market_cap`, `revenue`, `net_income`, `ebitda`, `debt`, `p_e`, `roe`. Quarter labels come from `tr.header_row` (format `2024Q4`); the trailing LTM column is dropped. Cell values are stored verbatim (matching the CSV convention — monetary fields in billions of RUB). Banks won't have Revenue/EBITDA/Debt populated — that's expected.
-
-Ticker list resolution order in `cmd/scrape`:
-1. `SCRAPE_TICKERS="SBER:banks,LKOH:oil"` — comma-separated `TICKER:CATEGORY` pairs.
-2. `SCRAPE_TICKERS_FILE=/path/to/list.txt` — one `TICKER CATEGORY` per line, `#` comments allowed.
-3. Fallback: re-scrape every company already in `company_financials` (category preserved).
-
-The scraper is polite by default: ~1.2 s between requests, custom User-Agent, single-threaded. The fixture at `internal/scraper/smartlab/testdata/LKOH.html` is the regression test against the real page structure — refresh it (re-curl the URL) if smart-lab changes the markup.
-
-**Primary-source fetch (`internal/scraper/girbo/`, `internal/scraper/moex/`, `cmd/fetch/`).** Free replacement for the smart-lab scraper, sourcing the same `QuarterData` fields from primary data instead of a paywalled aggregator:
+**Primary-source fetch (`internal/scraper/girbo/`, `internal/scraper/moex/`, `cmd/fetch/`).** Free replacement for the removed smart-lab scraper (smart-lab became paywalled), sourcing `QuarterData` fields from primary data:
 
 - `girbo` pulls annual RSBU statements from ГИР БО (`bo.nalog.gov.ru`). Flow: `SearchByINN` (`/advanced-search/organizations/search?query={inn}` — note the API wraps the matched value in `<strong>` tags, which `parseSearch` strips) → `ListReports` (`/nbo/organizations/{id}/bfo` returns every year with a real report `id`; the `publication` field is a status code, not an id) → details (`/nbo/bfo/{reportID}/details` → `financialResult.current2110` revenue, `current2400` net profit, `balance.current1300` equity, `current1410+current1510` borrowings). Source is in **thousands of RUB**, converted to **billions**.
 - `moex` reconstructs market cap from MOEX ISS as `CLOSE × ISSUESIZE` (no historical-cap endpoint exists): `ISSUESIZE` from `/iss/securities/{SECID}.json`, year-end `CLOSE` from the EOD history endpoint. Returns billions of RUB.
@@ -91,6 +77,6 @@ Inherent limitations (documented in package docs): ГИР БО is **annual-only*
 
 **Data quality (`internal/analytics/quality.go`).** `CheckRow`/`CheckHistory` flag suspicious figures: P/E > 200 (negative P/E = a loss, not flagged), |ROE| > 100%, revenue < 1% of market cap, and net profit > revenue (the signature of a holding company's standalone RSBU, where income is subsidiaries' dividends). Each `Anomaly` lists the raw metrics it concerns; `Concerns`/`AnomaliesByLabel` map it onto derived metrics and chart labels. `IsComparable` treats `rsbu`/`cbr_102` as not comparable across companies; `csv`/`smartlab` and legacy NULL sources are neutral. `source` is row-level, last writer wins (see `models.QuarterData`). The chart page shows a Source column, highlights flagged cells (hover = reason) and draws flagged points as triangles; the dashboard shows a "Data quality" block. Note: code inside go-echarts `opts.FuncOpts` is JSON-encoded and injected verbatim, so it must not contain double quotes or backslashes — use `jsStringMap`/`jsString` in `handlers/chart.go` for dynamic strings.
 
-**HTTP retries (`internal/scraper/httpx/`).** All scraper clients (girbo, moex, cbr, smartlab) fetch through `httpx.Get`, which retries transport errors, 429 and 5xx with exponential backoff (`httpx.DefaultPolicy`: 3 attempts, 1s/2s, honours `Retry-After`, and gives up instead of retrying early when it exceeds `MaxDelay`); clients reset their rate-limit clock after the last attempt; other statuses return an `*httpx.StatusError` immediately (cbr maps 404 to `ErrNotPublished`). Each client's `Retry` field overrides the policy (tests use millisecond delays). Rate limiting (`Delay`) stays per client.
+**HTTP retries (`internal/scraper/httpx/`).** All scraper clients (girbo, moex, cbr) fetch through `httpx.Get`, which retries transport errors, 429 and 5xx with exponential backoff (`httpx.DefaultPolicy`: 3 attempts, 1s/2s, honours `Retry-After`, and gives up instead of retrying early when it exceeds `MaxDelay`); clients reset their rate-limit clock after the last attempt; other statuses return an `*httpx.StatusError` immediately (cbr maps 404 to `ErrNotPublished`). Each client's `Retry` field overrides the policy (tests use millisecond delays). Rate limiting (`Delay`) stays per client.
 
 **Migrations.** Standard `golang-migrate` numbered up/down files in `migrations/`. Migrations run automatically on every startup of any binary; new migrations take effect with no separate step.

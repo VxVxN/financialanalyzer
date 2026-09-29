@@ -66,7 +66,7 @@ func TestParseDetails(t *testing.T) {
 	//   debt 1410+1510 = 62 480 604 + 708 222 745 -> 770.703349
 	checks := []struct {
 		name string
-		got  float64
+		got  *float64
 		want float64
 	}{
 		{"revenue", rep.Revenue, 3453.224535},
@@ -75,7 +75,11 @@ func TestParseDetails(t *testing.T) {
 		{"debt", rep.Debt, 770.703349},
 	}
 	for _, c := range checks {
-		if math.Abs(c.got-c.want) > 1e-6 {
+		if c.got == nil {
+			t.Errorf("%s = nil, want %v", c.name, c.want)
+			continue
+		}
+		if math.Abs(*c.got-c.want) > 1e-6 {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
 	}
@@ -88,5 +92,34 @@ func TestParseDetailsEmpty(t *testing.T) {
 	}
 	if ok {
 		t.Errorf("expected empty payload to be unusable, got %+v", rep)
+	}
+}
+
+func TestParseDetailsAbsentVersusZero(t *testing.T) {
+	// Revenue reported, equity an explicit zero, 1410 absent and 1510 present:
+	// absent lines stay nil, zeros stay zero, and debt sums what is present.
+	body := []byte(`[{"balance":{"current1300":0,"current1510":2000000},
+		"financialResult":{"current2110":5000000,"current2400":null}}]`)
+	rep, ok, err := parseDetails(body, 2024)
+	if err != nil || !ok {
+		t.Fatalf("parseDetails: ok=%v err=%v", ok, err)
+	}
+	if rep.Revenue == nil || *rep.Revenue != 5 {
+		t.Errorf("revenue = %v, want 5", rep.Revenue)
+	}
+	if rep.NetProfit != nil {
+		t.Errorf("net profit = %v, want nil (null in payload)", *rep.NetProfit)
+	}
+	if rep.Equity == nil || *rep.Equity != 0 {
+		t.Errorf("equity = %v, want reported zero", rep.Equity)
+	}
+	if rep.Debt == nil || *rep.Debt != 2 {
+		t.Errorf("debt = %v, want 2 (1510 only)", rep.Debt)
+	}
+
+	noDebt := []byte(`[{"balance":{},"financialResult":{"current2110":1000000}}]`)
+	rep, _, _ = parseDetails(noDebt, 2024)
+	if rep.Debt != nil {
+		t.Errorf("debt = %v, want nil when both borrowing lines are absent", *rep.Debt)
 	}
 }

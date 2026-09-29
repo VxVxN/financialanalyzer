@@ -117,10 +117,10 @@ func (p *CSVParser) shouldSkipMetric(metricName string) bool {
 
 func (p *CSVParser) getMetricHandlers() map[string]MetricHandler {
 	return map[string]MetricHandler{
-		"Капитализация": func(d *models.QuarterData, v float64) { d.Capitalization = v },
-		"Выручка":       func(d *models.QuarterData, v float64) { d.Revenue = v },
-		"EBITDA":        func(d *models.QuarterData, v float64) { d.EBITDA = v },
-		"ROE":           func(d *models.QuarterData, v float64) { d.ROE = v },
+		"Капитализация": func(d *models.QuarterData, v float64) { d.Capitalization = &v },
+		"Выручка":       func(d *models.QuarterData, v float64) { d.Revenue = &v },
+		"EBITDA":        func(d *models.QuarterData, v float64) { d.EBITDA = &v },
+		"ROE":           func(d *models.QuarterData, v float64) { d.ROE = &v },
 	}
 }
 
@@ -198,22 +198,33 @@ func (p *CSVParser) parseValue(valueStr string) (float64, error) {
 	valueStr = strings.ReplaceAll(valueStr, "\"", "")
 	valueStr = strings.ReplaceAll(valueStr, "%", "")
 
-	if valueStr == "" || valueStr == "-" || valueStr == "0.00" {
+	if valueStr == "" || valueStr == "-" {
 		return 0, fmt.Errorf("empty or invalid value")
 	}
 
-	return strconv.ParseFloat(valueStr, 64)
+	v, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return 0, err
+	}
+	// Aggregator exports (smart-lab style) fill cells they have no figure for
+	// with 0 — a bank's revenue, the P/E of a loss-making quarter — so in CSV a
+	// zero, however it is formatted, means "no data" and is not stored. Honest
+	// zeros come from the primary sources, which distinguish absent from zero.
+	if v == 0 {
+		return 0, fmt.Errorf("zero is a placeholder for no data")
+	}
+	return v, nil
 }
 
 func (p *CSVParser) applyMetricValue(config *MetricConfig, data *models.QuarterData, value float64) {
 	if config.IsSpecial {
 		switch config.SpecialType {
 		case "PE":
-			data.PE = value
+			data.PE = &value
 		case "DEBT":
-			data.Debt = value
+			data.Debt = &value
 		case "NET_PROFIT":
-			data.NetProfit = value
+			data.NetProfit = &value
 		}
 	} else if config.Handler != nil {
 		config.Handler(data, value)

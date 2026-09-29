@@ -306,6 +306,7 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			// Missing market cap is non-fatal: keep the RSBU figures, skip P/E.
 			logger.Warn("Capitalization unavailable", "ticker", spec.Ticker, "year", r.Year, "error", err)
 		}
+		capPtr := capitalization(marketCap, err)
 
 		out = append(out, models.QuarterData{
 			Year:           r.Year,
@@ -313,32 +314,42 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			Company:        company,
 			Category:       spec.Category,
 			Source:         models.SourceRSBU,
-			Capitalization: marketCap,
+			Capitalization: capPtr,
 			Revenue:        r.Revenue,
 			NetProfit:      r.NetProfit,
 			Debt:           r.Debt,
-			PE:             peRatio(marketCap, r.NetProfit),
+			PE:             peRatio(capPtr, r.NetProfit),
 			ROE:            roePercent(r.NetProfit, r.Equity),
 		})
 	}
 	return out, nil
 }
 
-// peRatio returns capitalization / net profit, or 0 when it is undefined
-// (no cap, or non-positive earnings).
-func peRatio(capitalization, netProfit float64) float64 {
-	if capitalization == 0 || netProfit <= 0 {
-		return 0
+// capitalization turns a MOEX market-cap lookup into a metric: nil when the
+// lookup failed or returned nothing, so the row stores NULL rather than 0.
+func capitalization(v float64, err error) *float64 {
+	if err != nil || v <= 0 {
+		return nil
 	}
-	return capitalization / netProfit
+	return &v
 }
 
-// roePercent returns net profit / equity as a percentage, or 0 when undefined.
-func roePercent(netProfit, equity float64) float64 {
-	if equity <= 0 {
-		return 0
+// peRatio returns capitalization / net profit, or nil when it is undefined
+// (no cap, no profit figure, or non-positive earnings).
+func peRatio(capitalization, netProfit *float64) *float64 {
+	if capitalization == nil || netProfit == nil || *netProfit <= 0 {
+		return nil
 	}
-	return netProfit / equity * 100
+	return models.Float(*capitalization / *netProfit)
+}
+
+// roePercent returns net profit / equity as a percentage, or nil when undefined
+// (either figure missing, or non-positive equity).
+func roePercent(netProfit, equity *float64) *float64 {
+	if netProfit == nil || equity == nil || *equity <= 0 {
+		return nil
+	}
+	return models.Float(*netProfit / *equity * 100)
 }
 
 // ---- Ticker resolution ------------------------------------------------------
@@ -660,7 +671,7 @@ func fetchYearCumulatives(ctx context.Context, cb *cbr.Client, year int, logger 
 
 // fetchYearCapital downloads the form 123 archive for a year-end and returns
 // REGN -> regulatory capital (billions). Missing/unpublished capital yields a
-// nil map (ROE is then left at 0); a canceled context also yields nil.
+// nil map (ROE is then left unset/NULL); a canceled context also yields nil.
 func fetchYearCapital(ctx context.Context, cb *cbr.Client, year int, logger *slog.Logger) map[int]float64 {
 	date, _ := cbr.ArchiveDate(year, "Q4") // year-end balance = (year+1)-01-01
 	capital, err := cb.FetchCapital(ctx, date)
@@ -717,16 +728,19 @@ func bankRows(ctx context.Context, mx *moex.Client, s bankSpec, year int, cum ma
 			Company:   s.Ticker,
 			Category:  s.Category,
 			Source:    models.SourceCBR102,
-			NetProfit: quarterProfit,
+			NetProfit: models.Float(quarterProfit),
 		}
 		if q == "Q4" {
 			marketCap, err := mx.CapitalizationAt(ctx, s.Ticker, year)
 			if err != nil {
 				logger.Warn("Capitalization unavailable", "ticker", s.Ticker, "year", year, "error", err)
 			}
-			row.Capitalization = marketCap
-			row.PE = peRatio(marketCap, cur)           // annual P/E uses full-year profit
-			row.ROE = roePercent(cur, capital[s.Regn]) // full-year profit / year-end capital
+			row.Capitalization = capitalization(marketCap, err)
+			annual := models.Float(cur)
+			row.PE = peRatio(row.Capitalization, annual) // annual P/E uses full-year profit
+			if c, ok := capital[s.Regn]; ok {
+				row.ROE = roePercent(annual, &c) // full-year profit / year-end capital
+			}
 		}
 
 		if row.IsEmpty() {

@@ -19,8 +19,8 @@ tables.
   score with a transparent breakdown, a trend explorer, and free-text notes.
 - **Derived analytics** — net/EBITDA margins, Debt/EBITDA, revenue & net-profit
   YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
-- **Three ingestion paths** — CSV import, the smart-lab.ru scraper (legacy), and
-  a free primary-source fetcher (ГИР БО + MOEX ISS).
+- **Two ingestion paths** — CSV import and a free primary-source fetcher
+  (ГИР БО + MOEX ISS for companies, CBR forms 102/123 for banks).
 - **Self-contained binaries** — migrations and templates are embedded, so every
   binary runs from any working directory with nothing on disk beside it.
 - **Light/dark themes** on every page.
@@ -31,7 +31,6 @@ tables.
 cmd/
   plot    HTTP server (UI + chart/dashboard pages + JSON API)
   import  one-shot CSV ingestion
-  scrape  smart-lab.ru scraper (paywalled now; see cmd/fetch)
   fetch   free primary-source fetcher (ГИР БО RSBU + MOEX market cap)
 internal/
   application  composition root (wires config → db → repo)
@@ -40,7 +39,7 @@ internal/
   handlers     chi HTTP handlers (one file per route)
   analytics    metric derivation (margins, growth, TTM/annual, score)
   parser       semicolon-CSV parser
-  scraper/     girbo, moex, smartlab data sources
+  scraper/     girbo, moex, cbr data sources + shared httpx retries
   version      build metadata stamped via -ldflags
 migrations/    golang-migrate SQL (embedded into the binaries)
 templates/     server-rendered HTML (embedded)
@@ -49,7 +48,9 @@ templates/     server-rendered HTML (embedded)
 The data model is a single fact table `company_financials`, keyed by
 `(year, quarter, company)` with one column per metric, plus a `company_notes`
 table. Writes use a `COALESCE`-based upsert so a partial import never wipes
-previously-stored metrics. All entrypoints run migrations on startup.
+previously-stored metrics. An unreported metric is stored as `NULL`; a reported
+zero from a primary source (e.g. no debt) is stored as `0` (CSV zeros are
+treated as placeholders and skipped). All entrypoints run migrations on startup.
 
 ## Quick start
 
@@ -83,14 +84,12 @@ CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
 # Fetch from free primary sources — entries are TICKER:INN:CATEGORY
 FETCH_TICKERS="LKOH:7708004767:oil,MGNT:2309085638:retail" go run ./cmd/fetch
 FETCH_TICKERS_FILE=/path/to/list.txt go run ./cmd/fetch
-
-# Scrape smart-lab.ru (legacy; now paywalled)
-SCRAPE_TICKERS="SBER:banks,LKOH:oil" go run ./cmd/scrape
 ```
 
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
-P/E and ROE diverge from IFRS aggregators; banks are absent (they report to the
-Central Bank) and EBITDA is left empty. See package docs for details.
+P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
+102/123 archives (`FETCH_BANKS`, registry `bank_tickers.txt`), and EBITDA is left
+empty. See package docs for details.
 
 ## Configuration
 
@@ -106,8 +105,11 @@ All configuration is via environment variables (`internal/config`):
 | `DB_NAME`     | `postgres`    | Database name                            |
 | `DB_SSLMODE`  | `disable`     | `lib/pq` sslmode                         |
 | `CSV_PATH`    | _(empty)_     | CSV file path for `cmd/import`           |
+| `AUTH_USER`   | _(empty)_     | Basic Auth user for write endpoints      |
+| `AUTH_PASSWORD` | _(empty)_   | Basic Auth password (set with `AUTH_USER`) |
 
-The server logs a warning if the default database password is in use. See
+The server logs a warning if the default database password is in use, or if
+`AUTH_USER`/`AUTH_PASSWORD` are unset (write endpoints are then open). See
 [`.env.example`](.env.example).
 
 ## HTTP endpoints
@@ -118,15 +120,17 @@ The server logs a warning if the default database password is in use. See
 | GET    | `/chart/{metric}`                 | Chart + table page (`?companies=`, `?theme=`, `?period=`) |
 | GET    | `/company/{name}`                 | Single-company dashboard             |
 | GET    | `/api/companies`                  | List companies                       |
-| DELETE | `/api/companies`                  | Delete a company                     |
+| DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |
 | GET    | `/api/companies-with-categories`  | Companies with their category        |
-| GET/POST/DELETE | `/api/company-note`      | Read / save / delete a company note  |
+| GET/POST/DELETE | `/api/company-note`      | Read / save 🔒 / delete 🔒 a company note |
 | GET    | `/healthz`                        | Liveness probe                       |
 | GET    | `/readyz`                         | Readiness probe (checks the DB)      |
 | GET    | `/version`                        | Build metadata                       |
 
-API errors use a uniform `{"error": "..."}` envelope.
+API errors use a uniform `{"error": "..."}` envelope. 🔒 endpoints require
+HTTP Basic Auth when `AUTH_USER`/`AUTH_PASSWORD` are set, and always require a
+JSON body (`Content-Type: application/json`) when they carry one.
 
 ## Development
 
@@ -138,6 +142,10 @@ make cover       # tests with coverage summary
 make race        # tests with the race detector
 make lint        # golangci-lint (v2)
 make build       # build all binaries into ./bin with version stamping
+
+# Repository integration tests (skipped by default) need a throwaway Postgres:
+TEST_DATABASE_DSN="host=127.0.0.1 port=5433 user=test dbname=test sslmode=disable" \
+  go test ./internal/database/
 ```
 
 Build metadata is stamped via `-ldflags` (see the `Makefile`) and exposed at

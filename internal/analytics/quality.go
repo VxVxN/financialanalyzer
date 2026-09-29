@@ -38,21 +38,29 @@ func CheckRow(q models.QuarterData) []Anomaly {
 		})
 	}
 
+	// Unreported metrics are NaN, and every comparison with NaN is false, so
+	// a missing figure never triggers a check.
+	pe, roe := models.ValueOrNaN(q.PE), models.ValueOrNaN(q.ROE)
+	revenue, capitalization := models.ValueOrNaN(q.Revenue), models.ValueOrNaN(q.Capitalization)
+	netProfit := models.ValueOrNaN(q.NetProfit)
+
 	// Negative P/E just means a loss-making period — normal, not suspicious.
-	if q.PE > maxSanePE {
-		add(fmt.Sprintf("P/E %.0f is above %.0f — earnings near zero or not the group's", q.PE, maxSanePE), "pe")
+	if pe > maxSanePE {
+		add(fmt.Sprintf("P/E %.0f is above %.0f — earnings near zero or not the group's", pe, maxSanePE), "pe")
 	}
-	if q.ROE > maxSaneROE || q.ROE < -maxSaneROE {
-		add(fmt.Sprintf("ROE %.0f%% is beyond ±%.0f%%", q.ROE, maxSaneROE), "roe")
+	if roe > maxSaneROE || roe < -maxSaneROE {
+		add(fmt.Sprintf("ROE %.0f%% is beyond ±%.0f%%", roe, maxSaneROE), "roe")
 	}
-	if q.Revenue > 0 && q.Capitalization > 0 && q.Revenue < q.Capitalization*minRevenueCapRatio {
+	// A reported zero revenue counts: a holding with no sales is exactly the
+	// case this check is for.
+	if revenue >= 0 && capitalization > 0 && revenue < capitalization*minRevenueCapRatio {
 		add(fmt.Sprintf("revenue is below %.0f%% of market cap — likely holding-level figures", minRevenueCapRatio*100),
 			"revenue", "capitalization")
 	}
 	// A parent company living on dividends from subsidiaries books them below
 	// revenue, so its net profit can exceed revenue. For an operating company
 	// that essentially never happens.
-	if q.Revenue > 0 && q.NetProfit > q.Revenue {
+	if revenue >= 0 && netProfit > revenue {
 		add("net profit exceeds revenue — income is likely dividends from subsidiaries (holding-level figures)",
 			"revenue", "net_profit", "pe", "roe")
 	}

@@ -66,12 +66,13 @@ func NewClient() *Client {
 
 // AnnualReport is one year of parsed RSBU figures, in billions of RUB
 // (Equity is also billions; it backs the ROE calculation done by the caller).
+// A nil field means the line is absent from the filing; zero is a reported zero.
 type AnnualReport struct {
 	Year      int
-	Revenue   float64 // line 2110
-	NetProfit float64 // line 2400
-	Equity    float64 // line 1300 (capital and reserves)
-	Debt      float64 // lines 1410 + 1510 (long- + short-term borrowings)
+	Revenue   *float64 // line 2110
+	NetProfit *float64 // line 2400
+	Equity    *float64 // line 1300 (capital and reserves)
+	Debt      *float64 // lines 1410 + 1510 (long- + short-term borrowings)
 }
 
 // FetchAnnual resolves an INN to its organization, then returns one
@@ -249,9 +250,9 @@ func parseDetails(body []byte, year int) (AnnualReport, bool, error) {
 		Revenue:   bln(it.FinancialResult.Current2110),
 		NetProfit: bln(it.FinancialResult.Current2400),
 		Equity:    bln(it.Balance.Current1300),
-		Debt:      bln(it.Balance.Current1410) + bln(it.Balance.Current1510),
+		Debt:      sumBln(it.Balance.Current1410, it.Balance.Current1510),
 	}
-	if rep.Revenue == 0 && rep.NetProfit == 0 {
+	if nilOrZero(rep.Revenue) && nilOrZero(rep.NetProfit) {
 		return AnnualReport{}, false, nil
 	}
 	return rep, true, nil
@@ -265,10 +266,28 @@ func stripTags(s string) string {
 	return tagRe.ReplaceAllString(s, "")
 }
 
-// bln converts a thousands-of-RUB pointer field to billions of RUB; nil -> 0.
-func bln(v *float64) float64 {
+// bln converts a thousands-of-RUB pointer field to billions of RUB, keeping
+// nil (line absent) distinct from a reported zero.
+func bln(v *float64) *float64 {
 	if v == nil {
-		return 0
+		return nil
 	}
-	return *v / thousandToBillion
+	b := *v / thousandToBillion
+	return &b
 }
+
+// sumBln adds thousands-of-RUB lines into billions; nil only if all are absent.
+func sumBln(vs ...*float64) *float64 {
+	var sum *float64
+	for _, v := range vs {
+		if b := bln(v); b != nil {
+			if sum == nil {
+				sum = new(float64)
+			}
+			*sum += *b
+		}
+	}
+	return sum
+}
+
+func nilOrZero(v *float64) bool { return v == nil || *v == 0 }

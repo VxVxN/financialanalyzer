@@ -239,7 +239,7 @@ func TestChartEscapesCompanyName(t *testing.T) {
 	xss := `<script>alert(1)</script>`
 	repo := &fakeRepo{
 		history: map[string][]models.QuarterData{
-			xss: {{Year: 2023, Quarter: "Q1", Company: xss, Revenue: 100}},
+			xss: {{Year: 2023, Quarter: "Q1", Company: xss, Revenue: models.Float(100)}},
 		},
 	}
 	r := newTestServer(repo)
@@ -255,7 +255,7 @@ func TestChartEscapesCompanyName(t *testing.T) {
 func TestChartHasCSVExport(t *testing.T) {
 	repo := &fakeRepo{
 		history: map[string][]models.QuarterData{
-			"SBER": {{Year: 2023, Quarter: "Q1", Company: "SBER", Revenue: 100}},
+			"SBER": {{Year: 2023, Quarter: "Q1", Company: "SBER", Revenue: models.Float(100)}},
 		},
 	}
 	r := newTestServer(repo)
@@ -285,12 +285,12 @@ func TestIndex(t *testing.T) {
 
 // holdingRow mimics ПАО «КЦ ИКС 5» 2025 RSBU: net profit above revenue.
 var holdingRow = models.QuarterData{Year: 2025, Quarter: "Q4", Company: "X5", Category: "retail",
-	Source: models.SourceRSBU, Capitalization: 700, Revenue: 85.7, NetProfit: 124.5, PE: 5.6, ROE: 29.2}
+	Source: models.SourceRSBU, Capitalization: models.Float(700), Revenue: models.Float(85.7), NetProfit: models.Float(124.5), PE: models.Float(5.6), ROE: models.Float(29.2)}
 
 func TestChartShowsSourceAndFlags(t *testing.T) {
 	repo := &fakeRepo{history: map[string][]models.QuarterData{
 		"X5":   {holdingRow},
-		"SBER": {{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceSmartLab, Revenue: 100, NetProfit: 30, PE: 4}},
+		"SBER": {{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceSmartLab, Revenue: models.Float(100), NetProfit: models.Float(30), PE: models.Float(4)}},
 	}}
 	rec := do(t, newTestServer(repo), http.MethodGet, "/chart/pe?companies=X5,SBER", "")
 	if rec.Code != http.StatusOK {
@@ -332,7 +332,7 @@ func TestDashboardDataQuality(t *testing.T) {
 	}
 
 	clean := &fakeRepo{companyHist: []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER",
-		Source: models.SourceSmartLab, Revenue: 100, NetProfit: 30, PE: 4}}}
+		Source: models.SourceSmartLab, Revenue: models.Float(100), NetProfit: models.Float(30), PE: models.Float(4)}}}
 	rec = do(t, newTestServer(clean), http.MethodGet, "/company/SBER", "")
 	if strings.Contains(rec.Body.String(), "Data quality") {
 		t.Error("clean IFRS data must not show the data-quality warning")

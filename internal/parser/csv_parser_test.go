@@ -124,3 +124,24 @@ func TestParseFullFile(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTreatsZeroAsNoData(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "ZERO_test.csv")
+	// Every spelling of zero is an aggregator placeholder; only Q4 has data.
+	content := "Метрика;2023-Q1;2023-Q2;2023-Q3;2023-Q4\n" +
+		"Долг;0;0.00;0,0;5\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := NewCSVParser(file).Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(data) != 1 {
+		t.Fatalf("rows = %d, want 1 (zeros skipped): %+v", len(data), data)
+	}
+	if data[0].Quarter != "Q4" || data[0].Debt == nil || *data[0].Debt != 5 {
+		t.Errorf("row = %+v, want Q4 with debt 5", data[0])
+	}
+}
