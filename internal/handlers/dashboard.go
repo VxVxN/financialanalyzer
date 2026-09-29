@@ -27,12 +27,16 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 		theme = "light"
 	}
 
-	history, err := controller.repo.GetCompanyHistory(company)
+	history, err := controller.repo.GetCompanyHistory(r.Context(), company)
 	if err != nil {
 		controller.htmlServerError(w, "failed to load company history", err)
 		return
 	}
-	note, _ := controller.repo.GetCompanyNote(company)
+	// A missing note must not break the dashboard; log and render without it.
+	note, err := controller.repo.GetCompanyNote(r.Context(), company)
+	if err != nil {
+		controller.logger.Warn("failed to load company note", "company", company, "error", err)
+	}
 	snap := analytics.BuildSnapshot(history)
 
 	pal := paletteFor(theme)

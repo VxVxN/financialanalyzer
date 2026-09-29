@@ -22,6 +22,11 @@ type Config struct {
 	DBSSLMode  string
 
 	CSVPath string
+
+	// AuthUser/AuthPassword enable HTTP Basic Auth on the web server's
+	// state-changing endpoints. Both empty disables auth (dev only).
+	AuthUser     string
+	AuthPassword string
 }
 
 func LoadConfig() *Config {
@@ -34,6 +39,9 @@ func LoadConfig() *Config {
 		DBName:     getEnv("DB_NAME", "postgres"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 		CSVPath:    getEnv("CSV_PATH", ""),
+
+		AuthUser:     getEnv("AUTH_USER", ""),
+		AuthPassword: getEnv("AUTH_PASSWORD", ""),
 	}
 }
 
@@ -55,6 +63,9 @@ func (c *Config) Validate() error {
 	if c.DBName == "" {
 		return fmt.Errorf("DB_NAME must not be empty")
 	}
+	if (c.AuthUser == "") != (c.AuthPassword == "") {
+		return fmt.Errorf("AUTH_USER and AUTH_PASSWORD (cmd/plot Basic Auth) must be set together")
+	}
 	return nil
 }
 
@@ -62,6 +73,11 @@ func (c *Config) Validate() error {
 // default. Callers log a warning so insecure deployments are visible.
 func (c *Config) UsesDefaultPassword() bool {
 	return c.DBPassword == defaultDBPassword
+}
+
+// AuthEnabled reports whether Basic Auth credentials are configured.
+func (c *Config) AuthEnabled() bool {
+	return c.AuthUser != "" && c.AuthPassword != ""
 }
 
 func getEnv(key, defaultValue string) string {

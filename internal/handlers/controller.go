@@ -14,15 +14,15 @@ import (
 // uses *database.Repository.
 type Repository interface {
 	Ping(ctx context.Context) error
-	GetAllCompanies() ([]string, error)
-	GetAllCategories() ([]string, error)
-	GetAllCompaniesWithCategories() ([]database.CompanyWithCategory, error)
-	GetCompaniesHistory(companies []string) (map[string][]models.QuarterData, error)
-	GetCompanyHistory(company string) ([]models.QuarterData, error)
-	DeleteCompany(company string) error
-	GetCompanyNote(company string) (string, error)
-	SaveCompanyNote(company, note string) error
-	DeleteCompanyNote(company string) error
+	GetAllCompanies(ctx context.Context) ([]string, error)
+	GetAllCategories(ctx context.Context) ([]string, error)
+	GetAllCompaniesWithCategories(ctx context.Context) ([]database.CompanyWithCategory, error)
+	GetCompaniesHistory(ctx context.Context, companies []string) (map[string][]models.QuarterData, error)
+	GetCompanyHistory(ctx context.Context, company string) ([]models.QuarterData, error)
+	DeleteCompany(ctx context.Context, company string) error
+	GetCompanyNote(ctx context.Context, company string) (string, error)
+	SaveCompanyNote(ctx context.Context, company, note string) error
+	DeleteCompanyNote(ctx context.Context, company string) error
 }
 
 type Controller struct {

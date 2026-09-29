@@ -3,7 +3,7 @@ package handlers
 import "net/http"
 
 func (controller *Controller) GetCategories(w http.ResponseWriter, r *http.Request) {
-	categories, err := controller.repo.GetAllCategories()
+	categories, err := controller.repo.GetAllCategories(r.Context())
 	if err != nil {
 		controller.serverError(w, "failed to list categories", err)
 		return

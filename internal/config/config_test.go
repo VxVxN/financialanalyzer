@@ -65,3 +65,28 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateAuthPairing(t *testing.T) {
+	base := func() *Config {
+		return &Config{Port: 8088, DBHost: "h", DBPort: "5432", DBUser: "u", DBName: "d"}
+	}
+
+	c := base()
+	if err := c.Validate(); err != nil || c.AuthEnabled() {
+		t.Fatalf("no auth: err=%v enabled=%v, want nil/false", err, c.AuthEnabled())
+	}
+
+	c = base()
+	c.AuthUser, c.AuthPassword = "admin", "s3cret"
+	if err := c.Validate(); err != nil || !c.AuthEnabled() {
+		t.Fatalf("full auth: err=%v enabled=%v, want nil/true", err, c.AuthEnabled())
+	}
+
+	for _, half := range []struct{ user, pass string }{{"admin", ""}, {"", "s3cret"}} {
+		c = base()
+		c.AuthUser, c.AuthPassword = half.user, half.pass
+		if err := c.Validate(); err == nil {
+			t.Errorf("user=%q pass=%q: expected error for half-configured auth", half.user, half.pass)
+		}
+	}
+}

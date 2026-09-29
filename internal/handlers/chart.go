@@ -42,14 +42,14 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 		companies = strings.Split(companiesParam, ",")
 	} else {
 		var err error
-		companies, err = controller.repo.GetAllCompanies()
+		companies, err = controller.repo.GetAllCompanies(r.Context())
 		if err != nil {
 			controller.htmlServerError(w, "failed to list companies for chart", err)
 			return
 		}
 	}
 
-	history, err := controller.repo.GetCompaniesHistory(companies)
+	history, err := controller.repo.GetCompaniesHistory(r.Context(), companies)
 	if err != nil {
 		controller.htmlServerError(w, "failed to load chart history", err)
 		return

@@ -26,7 +26,7 @@ func (controller *Controller) DeleteCompany(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err := controller.repo.DeleteCompany(req.Company)
+	err := controller.repo.DeleteCompany(r.Context(), req.Company)
 	if err != nil {
 		if errors.Is(err, database.ErrCompanyNotFound) {
 			writeJSONError(w, http.StatusNotFound, "company not found")

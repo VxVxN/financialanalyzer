@@ -264,7 +264,7 @@ func fetchOne(ctx context.Context, repo *database.Repository, bo *girbo.Client, 
 	}
 
 	for _, r := range rows {
-		if err := repo.SaveQuarterData(r); err != nil {
+		if err := repo.SaveQuarterData(ctx, r); err != nil {
 			logger.Warn("Save failed", "ticker", spec.Ticker, "year", r.Year, "error", err)
 			continue
 		}
@@ -289,7 +289,7 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 
 	var existing map[string]struct{}
 	if !force {
-		existing, err = repo.ExistingPeriods(company)
+		existing, err = repo.ExistingPeriods(ctx, company)
 		if err != nil {
 			return nil, fmt.Errorf("existing periods: %w", err)
 		}
@@ -583,7 +583,7 @@ func fetchBanks(ctx context.Context, repo *database.Repository, specs []bankSpec
 	existing := make(map[string]map[string]struct{}, len(specs))
 	if !force {
 		for _, s := range specs {
-			set, err := repo.ExistingPeriods(s.Ticker)
+			set, err := repo.ExistingPeriods(ctx, s.Ticker)
 			if err != nil {
 				logger.Warn("Existing periods lookup failed", "ticker", s.Ticker, "error", err)
 			}
@@ -614,7 +614,7 @@ func fetchBanks(ctx context.Context, repo *database.Repository, specs []bankSpec
 
 		for _, s := range specs {
 			for _, r := range bankRows(ctx, mx, s, year, cum, capital, existing[s.Ticker], logger) {
-				if err := repo.SaveQuarterData(r); err != nil {
+				if err := repo.SaveQuarterData(ctx, r); err != nil {
 					logger.Warn("Save failed", "ticker", s.Ticker, "year", r.Year, "quarter", r.Quarter, "error", err)
 					continue
 				}

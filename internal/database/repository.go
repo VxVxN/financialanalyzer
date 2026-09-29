@@ -28,7 +28,7 @@ func (r *Repository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
 }
 
-func (r *Repository) SaveQuarterData(data models.QuarterData) error {
+func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterData) error {
 	query := `
     INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -43,7 +43,7 @@ func (r *Repository) SaveQuarterData(data models.QuarterData) error {
         pe = COALESCE(EXCLUDED.pe, company_financials.pe),
         roe = COALESCE(EXCLUDED.roe, company_financials.roe)`
 
-	_, err := r.db.Exec(query,
+	_, err := r.db.ExecContext(ctx, query,
 		data.Year,
 		data.Quarter,
 		data.Company,
@@ -78,8 +78,8 @@ func nullIfEmpty(val string) interface{} {
 // ExistingPeriods returns the set of "YEAR-QUARTER" keys already stored for a
 // company (e.g. "2023-Q4"), letting importers skip periods they have already
 // ingested instead of re-fetching them. The set is empty for an unknown company.
-func (r *Repository) ExistingPeriods(company string) (map[string]struct{}, error) {
-	rows, err := r.db.Query(
+func (r *Repository) ExistingPeriods(ctx context.Context, company string) (map[string]struct{}, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT year, quarter FROM company_financials WHERE company = $1`, company)
 	if err != nil {
 		return nil, fmt.Errorf("query existing periods for %s: %w", company, err)
@@ -103,7 +103,7 @@ func (r *Repository) ExistingPeriods(company string) (map[string]struct{}, error
 	return out, nil
 }
 
-func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, error) {
+func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]models.QuarterData, error) {
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
 			COALESCE(capitalization, 0), COALESCE(revenue, 0), COALESCE(net_profit, 0),
@@ -120,7 +120,7 @@ func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, er
 			END
 	`
 
-	rows, err := r.db.Query(query, company)
+	rows, err := r.db.QueryContext(ctx, query, company)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query company history: %w", err)
 	}
@@ -144,7 +144,7 @@ func (r *Repository) GetCompanyHistory(company string) ([]models.QuarterData, er
 	return out, nil
 }
 
-func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]models.QuarterData, error) {
+func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string) (map[string][]models.QuarterData, error) {
 	if len(companies) == 0 {
 		return map[string][]models.QuarterData{}, nil
 	}
@@ -170,7 +170,7 @@ func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]model
 			END
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query companies history: %w", err)
 	}
@@ -194,8 +194,8 @@ func (r *Repository) GetCompaniesHistory(companies []string) (map[string][]model
 	return out, nil
 }
 
-func (r *Repository) GetAllCompanies() ([]string, error) {
-	rows, err := r.db.Query(`
+func (r *Repository) GetAllCompanies(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT company 
 		FROM company_financials 
 		WHERE company IS NOT NULL AND company != ''
@@ -222,10 +222,10 @@ func (r *Repository) GetAllCompanies() ([]string, error) {
 	return companies, nil
 }
 
-func (r *Repository) GetAllCategories() ([]string, error) {
+func (r *Repository) GetAllCategories(ctx context.Context) ([]string, error) {
 	query := `SELECT DISTINCT category FROM company_financials WHERE category IS NOT NULL AND category != '' ORDER BY category`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error getting categories: %w", err)
 	}
@@ -239,6 +239,9 @@ func (r *Repository) GetAllCategories() ([]string, error) {
 		}
 		categories = append(categories, category)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating categories: %w", err)
+	}
 
 	return categories, nil
 }
@@ -248,10 +251,10 @@ type CompanyWithCategory struct {
 	Category string `json:"category"`
 }
 
-func (r *Repository) GetAllCompaniesWithCategories() ([]CompanyWithCategory, error) {
+func (r *Repository) GetAllCompaniesWithCategories(ctx context.Context) ([]CompanyWithCategory, error) {
 	query := `SELECT DISTINCT company, category FROM company_financials ORDER BY company`
 
-	rows, err := r.db.Query(query)
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error getting companies with categories: %w", err)
 	}
@@ -265,14 +268,17 @@ func (r *Repository) GetAllCompaniesWithCategories() ([]CompanyWithCategory, err
 		}
 		companies = append(companies, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating companies with categories: %w", err)
+	}
 
 	return companies, nil
 }
 
-func (r *Repository) DeleteCompany(company string) error {
+func (r *Repository) DeleteCompany(ctx context.Context, company string) error {
 	query := `DELETE FROM company_financials WHERE company = $1`
 
-	result, err := r.db.Exec(query, company)
+	result, err := r.db.ExecContext(ctx, query, company)
 	if err != nil {
 		return fmt.Errorf("error deleting company %s: %w", company, err)
 	}
@@ -296,13 +302,13 @@ type CompanyNote struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (r *Repository) GetCompanyNote(company string) (string, error) {
+func (r *Repository) GetCompanyNote(ctx context.Context, company string) (string, error) {
 	query := `SELECT note FROM company_notes WHERE company = $1`
 
 	var note sql.NullString
-	err := r.db.QueryRow(query, company).Scan(&note)
+	err := r.db.QueryRowContext(ctx, query, company).Scan(&note)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", fmt.Errorf("error getting company note: %w", err)
@@ -314,7 +320,7 @@ func (r *Repository) GetCompanyNote(company string) (string, error) {
 	return "", nil
 }
 
-func (r *Repository) SaveCompanyNote(company, note string) error {
+func (r *Repository) SaveCompanyNote(ctx context.Context, company, note string) error {
 	query := `
         INSERT INTO company_notes (company, note, updated_at)
         VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -324,7 +330,7 @@ func (r *Repository) SaveCompanyNote(company, note string) error {
             updated_at = CURRENT_TIMESTAMP
     `
 
-	_, err := r.db.Exec(query, company, note)
+	_, err := r.db.ExecContext(ctx, query, company, note)
 	if err != nil {
 		return fmt.Errorf("error saving company note: %w", err)
 	}
@@ -332,10 +338,10 @@ func (r *Repository) SaveCompanyNote(company, note string) error {
 	return nil
 }
 
-func (r *Repository) DeleteCompanyNote(company string) error {
+func (r *Repository) DeleteCompanyNote(ctx context.Context, company string) error {
 	query := `DELETE FROM company_notes WHERE company = $1`
 
-	_, err := r.db.Exec(query, company)
+	_, err := r.db.ExecContext(ctx, query, company)
 	if err != nil {
 		return fmt.Errorf("error deleting company note: %w", err)
 	}

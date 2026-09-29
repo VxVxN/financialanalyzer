@@ -23,7 +23,7 @@ func (controller *Controller) GetCompanyNote(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	note, err := controller.repo.GetCompanyNote(company)
+	note, err := controller.repo.GetCompanyNote(r.Context(), company)
 	if err != nil {
 		controller.serverError(w, "failed to get company note", err)
 		return
@@ -45,7 +45,7 @@ func (controller *Controller) SaveCompanyNote(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := controller.repo.SaveCompanyNote(req.Company, req.Note); err != nil {
+	if err := controller.repo.SaveCompanyNote(r.Context(), req.Company, req.Note); err != nil {
 		controller.serverError(w, "failed to save company note", err)
 		return
 	}
@@ -60,7 +60,7 @@ func (controller *Controller) DeleteCompanyNote(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := controller.repo.DeleteCompanyNote(company); err != nil {
+	if err := controller.repo.DeleteCompanyNote(r.Context(), company); err != nil {
 		controller.serverError(w, "failed to delete company note", err)
 		return
 	}

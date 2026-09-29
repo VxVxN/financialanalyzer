@@ -37,32 +37,34 @@ type fakeRepo struct {
 }
 
 func (f *fakeRepo) Ping(ctx context.Context) error { return f.pingErr }
-func (f *fakeRepo) GetAllCompanies() ([]string, error) {
+func (f *fakeRepo) GetAllCompanies(_ context.Context) ([]string, error) {
 	return f.companies, f.companiesErr
 }
-func (f *fakeRepo) GetAllCategories() ([]string, error) { return f.categories, nil }
-func (f *fakeRepo) GetAllCompaniesWithCategories() ([]database.CompanyWithCategory, error) {
+func (f *fakeRepo) GetAllCategories(_ context.Context) ([]string, error) { return f.categories, nil }
+func (f *fakeRepo) GetAllCompaniesWithCategories(_ context.Context) ([]database.CompanyWithCategory, error) {
 	return f.withCats, nil
 }
-func (f *fakeRepo) GetCompaniesHistory(companies []string) (map[string][]models.QuarterData, error) {
+func (f *fakeRepo) GetCompaniesHistory(_ context.Context, companies []string) (map[string][]models.QuarterData, error) {
 	return f.history, f.historyErr
 }
-func (f *fakeRepo) GetCompanyHistory(company string) ([]models.QuarterData, error) {
+func (f *fakeRepo) GetCompanyHistory(_ context.Context, company string) ([]models.QuarterData, error) {
 	return f.companyHist, nil
 }
-func (f *fakeRepo) DeleteCompany(company string) error {
+func (f *fakeRepo) DeleteCompany(_ context.Context, company string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
 	f.deleted = append(f.deleted, company)
 	return nil
 }
-func (f *fakeRepo) GetCompanyNote(company string) (string, error) { return f.note, f.noteErr }
-func (f *fakeRepo) SaveCompanyNote(company, note string) error {
+func (f *fakeRepo) GetCompanyNote(_ context.Context, company string) (string, error) {
+	return f.note, f.noteErr
+}
+func (f *fakeRepo) SaveCompanyNote(_ context.Context, company, note string) error {
 	f.savedCompany, f.savedNote = company, note
 	return nil
 }
-func (f *fakeRepo) DeleteCompanyNote(company string) error { return nil }
+func (f *fakeRepo) DeleteCompanyNote(_ context.Context, company string) error { return nil }
 
 func newTestServer(repo Repository) *chi.Mux {
 	c := NewController(repo, slog.New(slog.DiscardHandler))

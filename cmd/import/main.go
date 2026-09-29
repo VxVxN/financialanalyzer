@@ -63,7 +63,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := repo.SaveQuarterData(item); err != nil {
+			if err := repo.SaveQuarterData(ctx, item); err != nil {
 				logger.Warn("Failed to save quarter data",
 					"company", item.Company,
 					"year", item.Year,
