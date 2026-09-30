@@ -1,0 +1,14 @@
+# Securities whose MOEX secid changed. MOEX keeps the old trading history under
+# the old secid, so without this a renamed company has no historical close for
+# the years before the rename. cmd/fetch prices those years' market caps under
+# the old secid instead, on that secid's own (frozen) ISSUESIZE — the share
+# count at the time of the rename.
+#
+# Format:  SECID  OLD_SECID [OLDER_SECID...]   ("#" starts a comment)
+#   SECID      current secid (the ticker the company is stored under)
+#   OLD_SECID  former secids of the same security, newest first
+#
+# Only rename the same share (same ISIN). A different instrument (e.g. a GDR
+# replaced by local shares) has a different share count and must not be listed.
+
+T  TCSG   # ТКС Холдинг -> Т-Технологии (ISIN RU000A107UL4), T trades from 2024

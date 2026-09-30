@@ -38,3 +38,10 @@ var BankRegistry string
 //
 //go:embed share_splits.txt
 var SplitRegistry string
+
+// RenameRegistry is the bundled "SECID OLD_SECID..." list (ticker_renames.txt)
+// of renamed MOEX securities; cmd/fetch prices years before a rename under the
+// old secid.
+//
+//go:embed ticker_renames.txt
+var RenameRegistry string

@@ -206,6 +206,12 @@ func TestExtraSplitsRegistryLoads(t *testing.T) {
 	}
 }
 
+func TestRenameRegistryLoads(t *testing.T) {
+	if p := predecessors["T"]; len(p) != 1 || p[0] != "TCSG" {
+		t.Errorf("bundled T predecessors = %v", p)
+	}
+}
+
 func TestStoredSpecs(t *testing.T) {
 	registry := map[string]tickerSpec{
 		"LKOH": {"LKOH", "7708004767", "oil"},

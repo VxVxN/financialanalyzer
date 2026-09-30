@@ -2,6 +2,7 @@ package moex
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -212,6 +213,67 @@ func TestCapitalizationAtUndoesSplits(t *testing.T) {
 	}
 	if want := 5347 * 15.8e6 / 1e9; math.Abs(got-want) > 1e-9 {
 		t.Errorf("cap = %v, want %v (without the split: %v)", got, want, 5347*126.4e6/1e9)
+	}
+}
+
+// TestCapitalizationAtFallsBackToPredecessor prices a year the renamed secid
+// (T) never traded under its former secid (TCSG), on TCSG's own share count.
+func TestCapitalizationAtFallsBackToPredecessor(t *testing.T) {
+	empty := `{"history":{"columns":["TRADEDATE","CLOSE"],"data":[]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/iss/statistics/engines/stock/splits/"):
+			_, _ = w.Write([]byte(noSplits))
+		case r.URL.Path == "/iss/securities/TCSG.json":
+			_, _ = w.Write([]byte(`{"description":{"columns":["name","title","value"],"data":[["ISSUESIZE","","199305492"]]}}`))
+		case r.URL.Path == "/iss/securities/T.json":
+			_, _ = w.Write([]byte(`{"description":{"columns":["name","title","value"],"data":[["ISSUESIZE","","2682747860"]]}}`))
+		case strings.HasSuffix(r.URL.Path, "/securities/TCSG.json") && r.URL.Query().Get("from") == "2023-12-01":
+			_, _ = w.Write([]byte(`{"history":{"columns":["TRADEDATE","CLOSE"],"data":[["2023-12-29",3210.5]]}}`))
+		case strings.HasSuffix(r.URL.Path, "/securities/T.json") && r.URL.Query().Get("from") == "2024-12-01":
+			_, _ = w.Write([]byte(`{"history":{"columns":["TRADEDATE","CLOSE"],"data":[["2024-12-30",2752.2]]}}`))
+		default:
+			_, _ = w.Write([]byte(empty))
+		}
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.Predecessors = map[string][]string{"T": {"TCSG"}}
+
+	got, err := c.CapitalizationAt(context.Background(), "T", 2023)
+	if err != nil {
+		t.Fatalf("CapitalizationAt 2023: %v", err)
+	}
+	if want := 3210.5 * 199305492 / 1e9; math.Abs(got-want) > 1e-9 {
+		t.Errorf("2023 cap = %v, want %v (TCSG close x TCSG shares)", got, want)
+	}
+
+	got, err = c.CapitalizationAt(context.Background(), "T", 2024)
+	if err != nil {
+		t.Fatalf("CapitalizationAt 2024: %v", err)
+	}
+	if want := 2752.2 * 2682747860 / 1e9; math.Abs(got-want) > 1e-9 {
+		t.Errorf("2024 cap = %v, want %v (own close wins)", got, want)
+	}
+
+	if got, err = c.CapitalizationAt(context.Background(), "T", 2018); err != nil || got != 0 {
+		t.Errorf("2018 cap = %v, %v; want 0, nil (listed under neither)", got, err)
+	}
+}
+
+func TestParseRenameRegistry(t *testing.T) {
+	reg, err := ParseRenameRegistry("# comment\nt tcsg  # TCS Holding\nX A B\n")
+	if err != nil {
+		t.Fatalf("ParseRenameRegistry: %v", err)
+	}
+	if fmt.Sprint(reg) != fmt.Sprint(map[string][]string{"T": {"TCSG"}, "X": {"A", "B"}}) {
+		t.Errorf("registry = %v", reg)
+	}
+	for _, bad := range []string{"T", "T TCSG\nT OLD"} {
+		if _, err := ParseRenameRegistry(bad); err == nil {
+			t.Errorf("ParseRenameRegistry(%q) = nil error", bad)
+		}
 	}
 }
 

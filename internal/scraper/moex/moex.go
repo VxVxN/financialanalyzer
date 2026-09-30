@@ -14,7 +14,10 @@
 // so the count at a past date is rebuilt by undoing the splits since then:
 // MOEX's split list (/iss/statistics/engines/stock/splits/{SECID}) plus
 // Client.ExtraSplits for splits it misses. Additional issues and buybacks are
-// not tracked, so caps across those remain approximate.
+// not tracked, so caps across those remain approximate. A renamed security
+// (TCSG -> T) keeps its old history under the old secid; Client.Predecessors
+// lets CapitalizationAt price those years there, on the old secid's own
+// (frozen) ISSUESIZE, which is the share count at the time of the rename.
 package moex
 
 import (
@@ -50,6 +53,11 @@ type Client struct {
 	// ExtraSplits adds splits MOEX's list lacks, keyed by upper-case secid
 	// (cmd/fetch fills it from the bundled share_splits.txt).
 	ExtraSplits map[string][]Split
+	// Predecessors lists a secid's former secids, newest first (cmd/fetch
+	// fills it from the bundled ticker_renames.txt). CapitalizationAt falls
+	// back to them for years the current secid has no December close, each
+	// priced on its own share count and splits.
+	Predecessors map[string][]string
 	// Logger receives warnings (a registry split MOEX now lists, a quote
 	// priced without split data); nil discards them.
 	Logger *slog.Logger
@@ -107,8 +115,23 @@ func NewClient() *Client {
 // given year, in billions of RUB. It takes the last available closing price in
 // December of that year and multiplies by the current shares outstanding.
 // Returns (0, nil) when the exchange has no December trades for that year
-// (e.g. the security was not yet listed).
+// (e.g. the security was not yet listed) under secid or any of its
+// Predecessors.
 func (c *Client) CapitalizationAt(ctx context.Context, secid string, year int) (float64, error) {
+	cp, err := c.capitalizationAt(ctx, secid, year)
+	if err != nil || cp != 0 {
+		return cp, err
+	}
+	for _, old := range c.Predecessors[strings.ToUpper(secid)] {
+		if cp, err = c.capitalizationAt(ctx, old, year); err != nil || cp != 0 {
+			return cp, err
+		}
+	}
+	return 0, nil
+}
+
+// capitalizationAt is CapitalizationAt for exactly secid, without fallbacks.
+func (c *Client) capitalizationAt(ctx context.Context, secid string, year int) (float64, error) {
 	from := fmt.Sprintf("%04d-12-01", year)
 	till := fmt.Sprintf("%04d-12-31", year)
 	body, err := c.history(ctx, secid, from, till)
@@ -297,6 +320,29 @@ func ParseSplitRegistry(text string) (map[string][]Split, error) {
 		}
 		secid := strings.ToUpper(f[0])
 		out[secid] = append(out[secid], Split{TradeDate: f[1], Before: before, After: after})
+	}
+	return out, nil
+}
+
+// ParseRenameRegistry parses "SECID OLD_SECID [OLDER_SECID...]" lines ("#"
+// starts a comment) into Predecessors form.
+func ParseRenameRegistry(text string) (map[string][]string, error) {
+	out := make(map[string][]string)
+	for i, line := range strings.Split(text, "\n") {
+		if j := strings.IndexByte(line, '#'); j >= 0 {
+			line = line[:j]
+		}
+		f := strings.Fields(strings.ToUpper(line))
+		if len(f) == 0 {
+			continue
+		}
+		if len(f) < 2 {
+			return nil, fmt.Errorf("line %d: want SECID OLD_SECID..., got %q", i+1, line)
+		}
+		if _, dup := out[f[0]]; dup {
+			return nil, fmt.Errorf("line %d: duplicate secid %s", i+1, f[0])
+		}
+		out[f[0]] = f[1:]
 	}
 	return out, nil
 }

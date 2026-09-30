@@ -311,10 +311,22 @@ var extraSplits = func() map[string][]moex.Split {
 	return m
 }()
 
-// newMoexClient returns a MOEX client that knows the bundled extra splits.
+// predecessors are the bundled former secids of renamed securities
+// (ticker_renames.txt). A malformed embedded file panics at startup.
+var predecessors = func() map[string][]string {
+	m, err := moex.ParseRenameRegistry(financialanalyzer.RenameRegistry)
+	if err != nil {
+		panic(fmt.Sprintf("ticker_renames.txt: %v", err))
+	}
+	return m
+}()
+
+// newMoexClient returns a MOEX client that knows the bundled extra splits and
+// renamed secids.
 func newMoexClient(logger *slog.Logger) *moex.Client {
 	c := moex.NewClient()
 	c.ExtraSplits = extraSplits
+	c.Predecessors = predecessors
 	c.Logger = logger
 	return c
 }
