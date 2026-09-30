@@ -126,6 +126,14 @@ func (p *CSVParser) getMetricHandlers() map[string]MetricHandler {
 
 func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]MetricHandler) *MetricConfig {
 	switch {
+	// Total dividends for the year, billions of RUB, entered in the Q4 column.
+	// A prefix match keeps per-share ("Дивиденд, руб/акцию") and yield ("Див
+	// доход") rows of aggregator exports out; rejecting "/" and "%" keeps out
+	// ratios such as "Дивиденды/прибыль, %", and "акци" per-share variants
+	// such as "Дивиденды на акцию, руб".
+	case strings.HasPrefix(metricName, "Дивиденды") &&
+		!strings.ContainsAny(metricName, "/%") && !strings.Contains(metricName, "акци"):
+		return &MetricConfig{IsSpecial: true, SpecialType: "DIVIDENDS"}
 	case strings.Contains(metricName, "P/E"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "PE"}
 	case strings.Contains(metricName, "Долг") && !strings.Contains(metricName, "Чистый"):
@@ -168,7 +176,17 @@ func (p *CSVParser) processMetricRow(
 			continue
 		}
 
-		value, err := p.parseValue(record[colIdx])
+		parse := p.parseValue
+		if config.IsSpecial && config.SpecialType == "DIVIDENDS" {
+			// Dividends are the year's total on Q4; other columns (often
+			// zero-filled in quarterly exports) would create bogus rows.
+			if quarter != "Q4" {
+				continue
+			}
+			// A hand-entered dividends row means what it says: 0 = no payout.
+			parse = p.parseNumber
+		}
+		value, err := parse(record[colIdx])
 		if err != nil {
 			continue
 		}
@@ -191,18 +209,9 @@ func (p *CSVParser) processMetricRow(
 	return results, nil
 }
 
+// parseValue parses a cell, treating zero as "no data" (see below).
 func (p *CSVParser) parseValue(valueStr string) (float64, error) {
-	valueStr = strings.TrimSpace(valueStr)
-	valueStr = strings.ReplaceAll(valueStr, ",", ".")
-	valueStr = strings.ReplaceAll(valueStr, " ", "")
-	valueStr = strings.ReplaceAll(valueStr, "\"", "")
-	valueStr = strings.ReplaceAll(valueStr, "%", "")
-
-	if valueStr == "" || valueStr == "-" {
-		return 0, fmt.Errorf("empty or invalid value")
-	}
-
-	v, err := strconv.ParseFloat(valueStr, 64)
+	v, err := p.parseNumber(valueStr)
 	if err != nil {
 		return 0, err
 	}
@@ -216,6 +225,22 @@ func (p *CSVParser) parseValue(valueStr string) (float64, error) {
 	return v, nil
 }
 
+// parseNumber normalizes and parses a cell; empty and "-" are errors, zero is
+// a value.
+func (p *CSVParser) parseNumber(valueStr string) (float64, error) {
+	valueStr = strings.TrimSpace(valueStr)
+	valueStr = strings.ReplaceAll(valueStr, ",", ".")
+	valueStr = strings.ReplaceAll(valueStr, " ", "")
+	valueStr = strings.ReplaceAll(valueStr, "\"", "")
+	valueStr = strings.ReplaceAll(valueStr, "%", "")
+
+	if valueStr == "" || valueStr == "-" {
+		return 0, fmt.Errorf("empty or invalid value")
+	}
+
+	return strconv.ParseFloat(valueStr, 64)
+}
+
 func (p *CSVParser) applyMetricValue(config *MetricConfig, data *models.QuarterData, value float64) {
 	if config.IsSpecial {
 		switch config.SpecialType {
@@ -225,6 +250,8 @@ func (p *CSVParser) applyMetricValue(config *MetricConfig, data *models.QuarterD
 			data.Debt = &value
 		case "NET_PROFIT":
 			data.NetProfit = &value
+		case "DIVIDENDS":
+			data.Dividends = &value
 		}
 	} else if config.Handler != nil {
 		config.Handler(data, value)

@@ -124,6 +124,8 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 	r.Get("/api/categories", controller.GetCategories)
 	r.Get("/chart/{metric}", controller.ChartHandler)
 	r.Get("/company/{name}", controller.DashboardHandler)
+	r.Get("/screener", controller.ScreenerHandler)
+	r.Get("/api/screener", controller.ScreenerAPI)
 	r.Get("/api/company-note", controller.GetCompanyNote)
 
 	// State-changing endpoints: Basic Auth when configured, and JSON-only

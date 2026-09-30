@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screener — Financial Analyzer</title>
+    <script>
+        // Apply the saved theme before first paint (shared with the index page).
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem('theme'); } catch (e) {}
+            if (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
+    <style>
+        :root {
+            --bg-page: #fafbfc;
+            --bg-surface: #ffffff;
+            --bg-muted: #f4f5f7;
+            --bg-hover: #eef0f3;
+            --border: #e6e8eb;
+            --border-strong: #d4d7dc;
+            --text-1: #0d121c;
+            --text-2: #3d4453;
+            --text-3: #6b7280;
+            --accent: #4f46e5;
+            --accent-bg: #eef0ff;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+        }
+        [data-theme="dark"] {
+            --bg-page: #0b0e15;
+            --bg-surface: #11151d;
+            --bg-muted: #1a2030;
+            --bg-hover: #232a3a;
+            --border: #242a38;
+            --border-strong: #313a4f;
+            --text-1: #f0f2f5;
+            --text-2: #c5cad4;
+            --text-3: #8a93a3;
+            --accent: #7c7af6;
+            --accent-bg: #1d1f3e;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--bg-page); color: var(--text-1);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+            font-size: 14px;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 24px 16px; }
+        .topline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        h1 { margin: 8px 0 4px; font-size: 24px; }
+        .sub { color: var(--text-3); margin: 0 0 16px; }
+        button, select, input {
+            font: inherit; color: var(--text-1); background: var(--bg-surface);
+            border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px;
+        }
+        button { cursor: pointer; }
+        button:hover { background: var(--bg-hover); }
+
+        .filters {
+            display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end;
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 12px;
+        }
+        .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
+        .filters .range { display: flex; gap: 4px; }
+        .filters .range input { width: 72px; }
+        .filters .check { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+        .count { color: var(--text-3); font-size: 13px; margin: 0 0 8px; }
+
+        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface); }
+        table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: right; }
+        th:first-child, td:first-child, th.left, td.left { text-align: left; }
+        th {
+            position: sticky; top: 0; background: var(--bg-muted); color: var(--text-2);
+            font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+        }
+        th:hover { color: var(--text-1); }
+        th .arrow { color: var(--accent); margin-left: 4px; }
+        tbody tr:hover { background: var(--bg-hover); }
+        td.na { color: var(--text-3); }
+        .neg { color: var(--danger); }
+        .pos { color: var(--success); }
+        .flag { color: var(--warning); font-weight: 600; }
+        .muted { color: var(--text-3); font-size: 12px; }
+        .pill {
+            display: inline-block; padding: 1px 8px; border-radius: 10px;
+            background: var(--bg-muted); color: var(--text-2); font-size: 12px;
+        }
+        .pill.warn { background: var(--accent-bg); color: var(--warning); }
+        .empty { padding: 32px; text-align: center; color: var(--text-3); }
+        .legend { color: var(--text-3); font-size: 12px; margin-top: 10px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="topline">
+        <a href="/">← Comparison</a>
+        <button id="themeToggle" type="button">Theme</button>
+    </div>
+    <h1>Screener</h1>
+    <p class="sub">All companies side by side. Click a column to sort; valuation uses the latest exchange close where a quote is stored.</p>
+
+    <div class="filters">
+        <label>Search
+            <input id="q" type="search" placeholder="Ticker…">
+        </label>
+        <label>Category
+            <select id="category">
+                <option value="">All</option>
+                {{range .Categories}}<option value="{{.}}">{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>P/E
+            <span class="range"><input id="pe_min" type="number" step="any" placeholder="min"><input id="pe_max" type="number" step="any" placeholder="max"></span>
+        </label>
+        <label>P/B
+            <span class="range"><input id="pb_min" type="number" step="any" placeholder="min"><input id="pb_max" type="number" step="any" placeholder="max"></span>
+        </label>
+        <label>Div. yield, %
+            <span class="range"><input id="div_yield_min" type="number" step="any" placeholder="min"><input id="div_yield_max" type="number" step="any" placeholder="max"></span>
+        </label>
+        <label>ROE, %
+            <span class="range"><input id="roe_min" type="number" step="any" placeholder="min"><input id="roe_max" type="number" step="any" placeholder="max"></span>
+        </label>
+        <label class="check"><input id="comparable" type="checkbox"> Comparable figures only</label>
+        <label class="check"><input id="noflags" type="checkbox"> No data-quality flags</label>
+        <button id="reset" type="button">Reset</button>
+    </div>
+
+    <p class="count" id="count"></p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr id="head"></tr></thead>
+            <tbody id="body"></tbody>
+        </table>
+    </div>
+    <p class="legend">
+        <b>Valuation</b>: “live” = market cap at the latest close (date shown; closes older than 30 days are ignored) over trailing earnings
+        (period after “E”) / latest equity / latest dividends — multiples on fundamentals older than 18 months are left blank;
+        otherwise the values stored for the latest period. A loss gives no P/E.
+        <b>Comparable</b>: standalone RSBU / CBR figures (holding-level, not consolidated) are not comparable across companies.
+        <b>Flags</b>: data-quality anomalies in the company's history — open the dashboard for details.
+    </p>
+</div>
+
+<script>
+    const ROWS = {{.Rows}} || [];
+    const SOURCE_LABELS = {{.SourceLabels}};
+
+    // Column spec: key, header, kind (text|money|ratio|pct|int), and how to render.
+    const COLUMNS = [
+        { key: 'company', label: 'Company', kind: 'text' },
+        { key: 'category', label: 'Category', kind: 'text', cls: 'left' },
+        { key: 'capitalization', label: 'Market cap, bln', kind: 'money' },
+        { key: 'pe', label: 'P/E', kind: 'ratio' },
+        { key: 'pb', label: 'P/B', kind: 'ratio' },
+        { key: 'div_yield', label: 'Div. yield', kind: 'pct' },
+        { key: 'roe', label: 'ROE', kind: 'pct' },
+        { key: 'net_margin', label: 'Net margin', kind: 'pct' },
+        { key: 'debt_ebitda', label: 'Debt/EBITDA', kind: 'ratio' },
+        { key: 'revenue_yoy', label: 'Revenue YoY', kind: 'pct', signed: true },
+        { key: 'net_profit_yoy', label: 'Profit YoY', kind: 'pct', signed: true },
+        { key: 'score', label: 'Score', kind: 'int' },
+        { key: 'anomalies', label: 'Flags', kind: 'int' },
+        { key: 'valuation', label: 'Valuation', kind: 'text', cls: 'left' },
+        { key: 'source', label: 'Source', kind: 'text', cls: 'left' },
+    ];
+
+    let sortKey = 'capitalization';
+    let sortDir = -1; // -1 = descending
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function sourceText(row) {
+        const labels = (row.sources && row.sources.length ? row.sources : ['']).map((s) => SOURCE_LABELS[s] || s);
+        return labels.join(', ');
+    }
+    function valuationText(row) {
+        const earnings = row.earnings_period ? ' · E ' + row.earnings_period : '';
+        return (row.current ? 'live · ' + row.price_date : 'stored · ' + (row.last_period || '—')) + earnings;
+    }
+    function sortValue(row, key) {
+        if (key === 'source') return sourceText(row);
+        if (key === 'valuation') return row.current ? 'a' + row.price_date : 'b' + (row.last_period || '');
+        return row[key];
+    }
+
+    function fmt(col, v) {
+        if (v === null || v === undefined) return null;
+        switch (col.kind) {
+            case 'money': return v.toLocaleString('en-US', { maximumFractionDigits: v >= 100 ? 0 : 1 });
+            case 'ratio': return v.toFixed(2) + (col.key === 'debt_ebitda' ? 'x' : '');
+            case 'pct': return (col.signed && v > 0 ? '+' : '') + v.toFixed(1) + '%';
+            case 'int': return String(v);
+            default: return String(v);
+        }
+    }
+
+    function renderHead() {
+        $('head').innerHTML = COLUMNS.map((c) => {
+            const arrow = c.key === sortKey ? '<span class="arrow">' + (sortDir < 0 ? '▼' : '▲') + '</span>' : '';
+            return '<th class="' + (c.cls || '') + '" data-key="' + c.key + '">' + esc(c.label) + arrow + '</th>';
+        }).join('');
+    }
+
+    function num(id) {
+        const v = Number($(id).value.trim());
+        // An empty or unparseable box is no bound (NaN would reject every row).
+        return $(id).value.trim() === '' || Number.isNaN(v) ? null : v;
+    }
+    function inRange(v, lo, hi) {
+        if (lo === null && hi === null) return true;
+        if (v === null || v === undefined) return false; // unknown fails an active bound
+        return (lo === null || v >= lo) && (hi === null || v <= hi);
+    }
+
+    function filtered() {
+        const q = $('q').value.trim().toLowerCase();
+        const cat = $('category').value;
+        const onlyComparable = $('comparable').checked;
+        const noFlags = $('noflags').checked;
+        return ROWS.filter((r) =>
+            (!q || r.company.toLowerCase().includes(q)) &&
+            (!cat || r.category === cat) &&
+            (!onlyComparable || r.comparable) &&
+            (!noFlags || r.anomalies === 0) &&
+            ['pe', 'pb', 'div_yield', 'roe'].every((k) => inRange(r[k], num(k + '_min'), num(k + '_max')))
+        );
+    }
+
+    function render() {
+        const rows = filtered().slice().sort((a, b) => {
+            const va = sortValue(a, sortKey), vb = sortValue(b, sortKey);
+            const na = va === null || va === undefined, nb = vb === null || vb === undefined;
+            if (na || nb) return na === nb ? 0 : (na ? 1 : -1); // unknown always last
+            if (typeof va === 'string') return sortDir * va.localeCompare(vb);
+            return sortDir * (va - vb);
+        });
+        renderHead();
+        $('count').textContent = rows.length + ' of ' + ROWS.length + ' companies';
+        if (!rows.length) {
+            $('body').innerHTML = '<tr><td class="empty" colspan="' + COLUMNS.length + '">No companies match the filters.</td></tr>';
+            return;
+        }
+        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        $('body').innerHTML = rows.map((r) => '<tr>' + COLUMNS.map((c) => {
+            if (c.key === 'company') {
+                return '<td class="left"><a href="/company/' + encodeURIComponent(r.company) + '?theme=' + theme + '">' + esc(r.company) + '</a></td>';
+            }
+            if (c.key === 'category') return '<td class="left">' + esc(r.category || '—') + '</td>';
+            if (c.key === 'valuation') {
+                const title = r.stale ? ' title="Fundamentals are too old to value at today\'s price"' : '';
+                return '<td class="left muted' + (r.stale ? ' flag' : '') + '"' + title + '>' + esc(valuationText(r)) + '</td>';
+            }
+            if (c.key === 'source') {
+                return '<td class="left"><span class="pill' + (r.comparable ? '' : ' warn') + '">' + esc(sourceText(r)) + '</span></td>';
+            }
+            if (c.key === 'anomalies') {
+                return r.anomalies ? '<td class="flag" title="Data-quality flags">' + r.anomalies + '</td>' : '<td class="na">0</td>';
+            }
+            const text = fmt(c, r[c.key]);
+            if (text === null) return '<td class="na">—</td>';
+            let cls = '';
+            if (c.signed || c.key === 'pe' || c.key === 'roe') cls = r[c.key] < 0 ? 'neg' : (c.signed && r[c.key] > 0 ? 'pos' : '');
+            return '<td class="' + cls + '">' + esc(text) + '</td>';
+        }).join('') + '</tr>').join('');
+    }
+
+    $('head').addEventListener('click', (e) => {
+        const th = e.target.closest('th');
+        if (!th) return;
+        const key = th.dataset.key;
+        if (key === sortKey) sortDir = -sortDir;
+        else { sortKey = key; sortDir = (key === 'company' || key === 'category') ? 1 : -1; }
+        render();
+    });
+    document.querySelectorAll('.filters input, .filters select').forEach((el) => el.addEventListener('input', render));
+    $('reset').addEventListener('click', () => {
+        document.querySelectorAll('.filters input').forEach((el) => { if (el.type === 'checkbox') el.checked = false; else el.value = ''; });
+        $('category').value = '';
+        render();
+    });
+    $('themeToggle').addEventListener('click', () => {
+        const dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        else document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
+        render(); // company links carry the theme
+    });
+
+    render();
+</script>
+</body>
+</html>

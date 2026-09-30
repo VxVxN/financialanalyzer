@@ -148,11 +148,12 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	force := os.Getenv("FETCH_FORCE") != ""
+	quotesOnly := os.Getenv("FETCH_QUOTES_ONLY") != ""
 	start := time.Now()
 	var okTotal, rowTotal int
 	var failed []string
 
-	if len(specs) > 0 {
+	if len(specs) > 0 && !quotesOnly {
 		concurrency := envInt("FETCH_CONCURRENCY", defaultConcurrency)
 		if concurrency > len(specs) {
 			concurrency = len(specs)
@@ -164,7 +165,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		failed = append(failed, fail...)
 	}
 
-	if len(bankSpecs) > 0 && ctx.Err() == nil {
+	if len(bankSpecs) > 0 && !quotesOnly && ctx.Err() == nil {
 		fromYear := envInt("FETCH_BANK_FROM_YEAR", defaultBankFromYear)
 		toYear := time.Now().Year()
 		logger.Info("Fetching banks (ЦБ форма 102)", "tickers", len(bankSpecs), "years", fmt.Sprintf("%d-%d", fromYear, toYear), "force", force)
@@ -172,6 +173,34 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		okTotal += ok
 		rowTotal += rows
 		failed = append(failed, fail...)
+	}
+
+	// Latest prices for current valuation: cheap (two ISS calls per ticker),
+	// so they are refreshed on every run; FETCH_QUOTES_ONLY does just this.
+	if ctx.Err() == nil {
+		companies := make([]string, 0, len(specs)+len(bankSpecs))
+		for _, sp := range specs {
+			companies = append(companies, strings.ToUpper(sp.Ticker))
+		}
+		for _, b := range bankSpecs {
+			companies = append(companies, strings.ToUpper(b.Ticker))
+		}
+		// A full run also prices companies that only came from CSV; a name
+		// that is not a MOEX secid just fails its quote. Stored names are
+		// kept as-is: quotes are keyed by the exact company name.
+		if fetchEverything {
+			if dbCompanies, err := app.Repo.GetAllCompanies(ctx); err != nil {
+				logger.Warn("Quotes: cannot list stored companies", "error", err)
+			} else {
+				companies = uniqueNames(append(companies, dbCompanies...))
+			}
+		}
+		saved, qFailed := fetchQuotes(ctx, app.Repo, moex.NewClient(), companies, time.Now(), logger)
+		logger.Info("Quotes updated", "saved", saved, "failed", len(qFailed))
+		if len(qFailed) > 0 {
+			sort.Strings(qFailed)
+			logger.Info("Failed quotes", "list", strings.Join(qFailed, ","))
+		}
 	}
 
 	logger.Info("Fetch done",
@@ -184,6 +213,71 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		logger.Info("Failed tickers", "list", strings.Join(failed, ","))
 	}
 	return nil
+}
+
+// uniqueNames drops duplicate names, keeping first order.
+func uniqueNames(names []string) []string {
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	return out
+}
+
+// quoteStore is the slice of the repository fetchQuotes needs (a fake in tests).
+type quoteStore interface {
+	ExistingPeriods(ctx context.Context, company string) (map[string]struct{}, error)
+	SaveMarketQuote(ctx context.Context, q models.MarketQuote) error
+}
+
+// quoteSource is the MOEX call fetchQuotes needs (a fake in tests).
+type quoteSource interface {
+	LatestQuote(ctx context.Context, secid string, now time.Time) (moex.Quote, error)
+}
+
+// fetchQuotes stores the latest close for each company (the ticker doubles as
+// the MOEX secid). Companies without financial rows are skipped — a quote
+// alone has nothing to value. Failures are per ticker and non-fatal.
+func fetchQuotes(ctx context.Context, repo quoteStore, mx quoteSource, companies []string, now time.Time, logger *slog.Logger) (saved int, failed []string) {
+	for _, company := range companies {
+		if ctx.Err() != nil {
+			break
+		}
+		periods, err := repo.ExistingPeriods(ctx, company)
+		if err != nil {
+			logger.Warn("Quote skipped: existing periods", "ticker", company, "error", err)
+			failed = append(failed, company)
+			continue
+		}
+		if len(periods) == 0 {
+			continue
+		}
+		q, err := mx.LatestQuote(ctx, company, now)
+		if err != nil {
+			logger.Warn("Quote unavailable", "ticker", company, "error", err)
+			failed = append(failed, company)
+			continue
+		}
+		date, err := time.Parse(time.DateOnly, q.Date)
+		if err != nil {
+			logger.Warn("Quote has a bad trade date", "ticker", company, "date", q.Date)
+			failed = append(failed, company)
+			continue
+		}
+		mq := models.MarketQuote{Company: company, Price: q.Price, Capitalization: q.Capitalization, PriceDate: date}
+		if err := repo.SaveMarketQuote(ctx, mq); err != nil {
+			logger.Warn("Quote not saved", "ticker", company, "error", err)
+			failed = append(failed, company)
+			continue
+		}
+		saved++
+	}
+	return saved, failed
 }
 
 // fetchResult is one ticker's outcome, sent back from a worker to the collector.
@@ -307,7 +401,6 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			logger.Warn("Capitalization unavailable", "ticker", spec.Ticker, "year", r.Year, "error", err)
 		}
 		capPtr := capitalization(marketCap, err)
-		dividends := dividendsTotal(ctx, mx, spec.Ticker, r.Year, logger)
 
 		out = append(out, models.QuarterData{
 			Year:           r.Year,
@@ -322,21 +415,9 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			PE:             peRatio(capPtr, r.NetProfit),
 			ROE:            roePercent(r.NetProfit, r.Equity),
 			Equity:         r.Equity,
-			Dividends:      dividends,
 		})
 	}
 	return out, nil
-}
-
-// dividendsTotal looks up a year's dividends (billions of RUB). A failure is
-// non-fatal — the row keeps its other figures and dividends stay unset.
-func dividendsTotal(ctx context.Context, mx *moex.Client, ticker string, year int, logger *slog.Logger) *float64 {
-	v, err := mx.DividendsTotal(ctx, ticker, year)
-	if err != nil {
-		logger.Warn("Dividends unavailable", "ticker", ticker, "year", year, "error", err)
-		return nil
-	}
-	return v
 }
 
 // capitalization turns a MOEX market-cap lookup into a metric: nil when the
@@ -756,7 +837,6 @@ func bankRows(ctx context.Context, mx *moex.Client, s bankSpec, year int, cum ma
 				row.Equity = &c                          // regulatory capital stands in for equity
 				row.ROE = roePercent(annual, row.Equity) // full-year profit / year-end capital
 			}
-			row.Dividends = dividendsTotal(ctx, mx, s.Ticker, year, logger)
 		}
 
 		if row.IsEmpty() {

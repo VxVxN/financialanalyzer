@@ -38,6 +38,11 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 		controller.logger.Warn("failed to load company note", "company", company, "error", err)
 	}
 	snap := analytics.BuildSnapshot(history)
+	// Like the note, a missing quote only hides the current-valuation block.
+	quote, hasQuote, err := controller.repo.GetMarketQuote(r.Context(), company)
+	if err != nil {
+		controller.logger.Warn("failed to load market quote", "company", company, "error", err)
+	}
 
 	pal := paletteFor(theme)
 
@@ -150,6 +155,7 @@ a:hover { text-decoration: underline; }
 .section-title {
   font-size: 18px; margin: 32px 0 12px; color: var(--text-primary);
 }
+.stale-note { color: var(--text-secondary); font-size: 14px; margin: 0 0 20px; }
 
 .quality {
   background: var(--bg-secondary); border: 1px solid var(--warn); border-left-width: 4px;
@@ -243,6 +249,13 @@ a:hover { text-decoration: underline; }
 	sources := analytics.Sources(history)
 	renderDashboardHeader(w, snap, sources)
 	renderDataQuality(w, sources, analytics.CheckHistory(history))
+	switch {
+	case hasQuote && analytics.QuoteIsFresh(quote, controller.now()):
+		renderCurrent(w, analytics.BuildCurrent(history, quote))
+	case hasQuote && quote.Capitalization > 0:
+		fmt.Fprintf(w, `<div class="section-title">Current valuation</div><p class="stale-note">Last stored close is from %s — too old to value against (refresh with <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
+			html.EscapeString(quote.PriceDate.Format("2006-01-02")))
+	}
 	renderKPIs(w, snap)
 	renderSparklines(w, history)
 	renderDashboardChart(w, history, theme)
@@ -404,26 +417,67 @@ func scoreStars(score int) string {
 	return strings.Repeat("★", full) + strings.Repeat("☆", empty)
 }
 
+// renderCurrent shows valuation at the latest exchange close, each multiple
+// annotated with the period its fundamental comes from.
+func renderCurrent(w http.ResponseWriter, c analytics.Current) {
+	fmt.Fprintf(w, `<div class="section-title">Current valuation · close %s</div>`, html.EscapeString(c.PriceDate))
+	sub := func(prefix, label string) string {
+		if label == "" {
+			return ""
+		}
+		return prefix + " " + label
+	}
+	renderKPICards(w, []kpiCard{
+		{name: "Market Cap (now)", value: fmtMoney(c.Capitalization)},
+		{name: "P/E (now)", value: fmtRatio(c.PE), sub: sub("TTM earnings to", c.EarningsLabel)},
+		{name: "P/B (now)", value: fmtRatio(c.PB), sub: sub("equity", c.EquityLabel)},
+		{name: "Dividend Yield (now)", value: fmtPct(c.DivYield), sub: sub("dividends", c.DividendsLabel)},
+	})
+}
+
+// periodNote names the period a stock figure came from when it is not the
+// company's latest period ("" otherwise, to keep the common case quiet).
+func periodNote(s analytics.Snapshot, label string) string {
+	if label == "" || label == s.LastLabel {
+		return ""
+	}
+	return "as of " + label
+}
+
+// joinSub joins non-empty KPI sub-lines.
+func joinSub(parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
 func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 	cards := []kpiCard{
-		{name: "Market Cap", value: fmtMoney(s.Capitalization)},
+		{name: "Market Cap", value: fmtMoney(s.Capitalization), sub: periodNote(s, s.CapLabel)},
 		{name: "Revenue (TTM)", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("YoY", s.RevenueYoY)},
 		{name: "Net Profit (TTM)", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("YoY", s.NetProfitYoY)},
 		{name: "EBITDA (TTM)", value: fmtMoney(s.EBITDA)},
 		{name: "Net Margin", value: fmtPct(s.NetMargin)},
 		{name: "EBITDA Margin", value: fmtPct(s.EBITDAMargin)},
-		{name: "ROE", value: fmtPct(s.ROE)},
-		{name: "P/E", value: fmtRatio(s.PE), sub: peComment(s.PE)},
+		{name: "ROE", value: fmtPct(s.ROE), sub: periodNote(s, s.ROELabel)},
+		{name: "P/E", value: fmtRatio(s.PE), sub: joinSub(peComment(s.PE), periodNote(s, s.PELabel))},
 		{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
 		{name: "Dividend Yield", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
-		{name: "Debt", value: fmtMoney(s.Debt)},
+		{name: "Debt", value: fmtMoney(s.Debt), sub: periodNote(s, s.DebtLabel)},
 		{name: "Debt / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
 		{name: "Revenue CAGR (3Y)", value: fmtPct(s.RevenueCAGR3Y)},
 		{name: "Net Profit CAGR (3Y)", value: fmtPct(s.NetProfitCAGR3)},
 		{name: "Revenue CAGR (5Y)", value: fmtPct(s.RevenueCAGR5Y)},
 		{name: "Net Profit CAGR (5Y)", value: fmtPct(s.NetProfitCAGR5)},
 	}
+	renderKPICards(w, cards)
+}
 
+func renderKPICards(w http.ResponseWriter, cards []kpiCard) {
 	fmt.Fprintf(w, `<div class="kpi-grid">`)
 	for _, c := range cards {
 		emptyCls := ""
@@ -470,8 +524,10 @@ func renderSparklines(w http.ResponseWriter, history []models.QuarterData) {
 		latest, latestOK := analytics.LatestValid(series)
 		var deltaText, deltaClass string
 		if latestOK {
-			if prev, ok := findValuePastLag(series, 4); ok && prev != 0 {
-				delta := (latest.Value/prev - 1) * 100
+			// Same quarter a calendar year earlier, found by date rather
+			// than position so gaps and annual-only rows pair correctly.
+			if prev, ok := analytics.YearAgo(series, latest, analytics.PeriodTTM, 1); ok && prev.Value != 0 {
+				delta := (latest.Value/prev.Value - 1) * 100
 				deltaClass = "pos"
 				sign := "+"
 				if delta < 0 {
@@ -494,26 +550,6 @@ func renderSparklines(w http.ResponseWriter, history []models.QuarterData) {
 </div>`, html.EscapeString(sp.name), html.EscapeString(valueStr), deltaClass, html.EscapeString(deltaText), svg)
 	}
 	fmt.Fprintf(w, `</div>`)
-}
-
-// findValuePastLag returns the most recent valid value that is `lag` points
-// before the most recent valid value in the series.
-func findValuePastLag(s analytics.Series, lag int) (float64, bool) {
-	last := -1
-	for i := len(s) - 1; i >= 0; i-- {
-		if !math.IsNaN(s[i].Value) {
-			last = i
-			break
-		}
-	}
-	if last < 0 || last-lag < 0 {
-		return 0, false
-	}
-	v := s[last-lag].Value
-	if math.IsNaN(v) {
-		return 0, false
-	}
-	return v, true
 }
 
 func buildSparklineSVG(s analytics.Series) string {

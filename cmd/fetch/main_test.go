@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
+	"github.com/VxVxN/financialanalyzer/internal/scraper/moex"
 )
 
 func TestResolveSpec(t *testing.T) {
@@ -115,5 +120,63 @@ func TestCapitalization(t *testing.T) {
 	}
 	if got := capitalization(0, nil); got != nil {
 		t.Errorf("capitalization(0) = %v, want nil", *got)
+	}
+}
+
+type fakeQuoteStore struct {
+	periods map[string]int
+	saved   []models.MarketQuote
+}
+
+func (f *fakeQuoteStore) ExistingPeriods(_ context.Context, company string) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	for i := 0; i < f.periods[company]; i++ {
+		out[fmt.Sprintf("%d-Q4", 2020+i)] = struct{}{}
+	}
+	return out, nil
+}
+
+func (f *fakeQuoteStore) SaveMarketQuote(_ context.Context, q models.MarketQuote) error {
+	f.saved = append(f.saved, q)
+	return nil
+}
+
+type fakeQuoteSource map[string]moex.Quote
+
+func (f fakeQuoteSource) LatestQuote(_ context.Context, secid string, _ time.Time) (moex.Quote, error) {
+	q, ok := f[secid]
+	if !ok {
+		return moex.Quote{}, errors.New("no trades")
+	}
+	return q, nil
+}
+
+func TestFetchQuotes(t *testing.T) {
+	store := &fakeQuoteStore{periods: map[string]int{"SBER": 3, "LOST": 2}}
+	src := fakeQuoteSource{
+		"SBER": {Price: 274.65, Date: "2026-09-29", Capitalization: 5929},
+		"NEW":  {Price: 1, Date: "2026-09-29", Capitalization: 1},
+	}
+	logger := slog.New(slog.DiscardHandler)
+
+	saved, failed := fetchQuotes(context.Background(), store, src, []string{"SBER", "NEW", "LOST"}, time.Now(), logger)
+	if saved != 1 || len(store.saved) != 1 {
+		t.Fatalf("saved = %d (%v), want 1", saved, store.saved)
+	}
+	got := store.saved[0]
+	if got.Company != "SBER" || got.Capitalization != 5929 || got.PriceDate.Format(time.DateOnly) != "2026-09-29" {
+		t.Errorf("saved quote = %+v", got)
+	}
+	// NEW has no financial rows (skipped silently); LOST has rows but no quote.
+	if len(failed) != 1 || failed[0] != "LOST" {
+		t.Errorf("failed = %v, want [LOST]", failed)
+	}
+}
+
+func TestUniqueNames(t *testing.T) {
+	got := uniqueNames([]string{"SBER", "LKOH", "SBER", "Sber", "T"})
+	want := []string{"SBER", "LKOH", "Sber", "T"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("uniqueNames = %v, want %v", got, want)
 	}
 }

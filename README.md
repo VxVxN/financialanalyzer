@@ -15,6 +15,9 @@ tables.
 
 - **Cross-company comparison** — overlay any metric for any set of companies on a
   single interactive chart (`/chart/{metric}`), with a data table underneath.
+- **Screener** (`/screener`) — every company in one sortable, filterable table:
+  current P/E, P/B and dividend yield at the latest exchange close, ROE,
+  margins, leverage, growth, score and data-quality flags.
 - **Single-company dashboard** (`/company/{name}`) — KPIs, sparklines, a quality
   score with a transparent breakdown, a trend explorer, and free-text notes.
 - **Derived analytics** — net/EBITDA margins, Debt/EBITDA, P/B, dividend yield,
@@ -85,7 +88,14 @@ CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
 # Fetch from free primary sources — entries are TICKER:INN:CATEGORY
 FETCH_TICKERS="LKOH:7708004767:oil,MGNT:2309085638:retail" go run ./cmd/fetch
 FETCH_TICKERS_FILE=/path/to/list.txt go run ./cmd/fetch
+
+# Refresh only the latest exchange closes (current P/E etc.)
+FETCH_QUOTES_ONLY=1 go run ./cmd/fetch
 ```
+
+Dividends have no free exchange API, so they come from CSV: a row starting with
+`Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
+means "no payout").
 
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
@@ -120,6 +130,8 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/`                               | Comparison UI                        |
 | GET    | `/chart/{metric}`                 | Chart + table page (`?companies=`, `?theme=`, `?period=`) |
 | GET    | `/company/{name}`                 | Single-company dashboard             |
+| GET    | `/screener`                       | Cross-company screener               |
+| GET    | `/api/screener`                   | Screener rows as JSON (null = no data) |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |

@@ -12,10 +12,6 @@
 // Values are returned in billions of RUB to match the rest of the codebase
 // (the CSV/smart-lab convention). Shares count is the current ISSUESIZE, so
 // caps for years with since-changed share counts are approximate.
-//
-// Dividends come from /iss/securities/{SECID}/dividends.json (per-share value
-// by registry close date). A year's total is the sum of its record-date
-// payouts times ISSUESIZE — the same current-share-count approximation.
 package moex
 
 import (
@@ -47,13 +43,9 @@ type Client struct {
 	Retry     httpx.Policy // retries for transient failures (network, 429, 5xx)
 	lastReq   time.Time
 
-	// Per-secid caches: both values are requested once per ticker but used for
-	// every year. A failed dividends lookup is cached too, so an outage costs
-	// one retry cycle per ticker, not one per year. A Client is not safe for
-	// concurrent use.
-	issueSize    map[string]float64
-	dividends    map[string]DividendHistory
-	dividendsErr map[string]error
+	// Per-secid cache: ISSUESIZE is requested once per ticker but used for
+	// every year. A Client is not safe for concurrent use.
+	issueSize map[string]float64
 }
 
 func NewClient() *Client {
@@ -116,80 +108,45 @@ func (c *Client) IssueSize(ctx context.Context, secid string) (float64, error) {
 	return v, nil
 }
 
-// DividendHistory is a security's per-share dividend record, bucketed by the
-// calendar year of the registry close (record) date.
-type DividendHistory struct {
-	perShare  map[int]float64 // RUB per share, summed per year
-	unknown   map[int]bool    // years with a non-RUB or unparseable payout
-	firstYear int             // earliest record-date year; 0 = no records
+// quoteLookback is how far back LatestQuote searches for a trading day; it
+// spans long holidays (the New Year break) and short trading suspensions.
+const quoteLookback = 14 * 24 * time.Hour
+
+// Quote is a security's latest close and the market cap it implies.
+type Quote struct {
+	Price          float64 // RUB per share
+	Date           string  // trade date of Price, "YYYY-MM-DD"
+	Capitalization float64 // Price x current ISSUESIZE, billions of RUB
 }
 
-// PerShare returns the RUB paid per share for record dates in year. ok is false
-// when the figure is unknown: no history at all, a year before the history
-// starts (MOEX coverage, not proof of no payout), or a payout that is non-RUB or
-// has no parseable amount. A year the history covers without payouts returns
-// (0, true) — a real zero, as trustworthy as ISS's completeness.
-func (h DividendHistory) PerShare(year int) (float64, bool) {
-	if h.firstYear == 0 || year < h.firstYear || h.unknown[year] {
-		return 0, false
-	}
-	return h.perShare[year], true
-}
-
-// Dividends returns the dividend history of secid (cached per client).
-func (c *Client) Dividends(ctx context.Context, secid string) (DividendHistory, error) {
-	secid = strings.ToUpper(secid)
-	if h, ok := c.dividends[secid]; ok {
-		return h, nil
-	}
-	if err, ok := c.dividendsErr[secid]; ok {
-		return DividendHistory{}, err
-	}
-	url := fmt.Sprintf("%s/iss/securities/%s/dividends.json?iss.meta=off", c.BaseURL, secid)
-	body, err := c.get(ctx, url)
-	if err == nil {
-		var h DividendHistory
-		if h, err = ParseDividends(body); err == nil {
-			if c.dividends == nil {
-				c.dividends = make(map[string]DividendHistory)
-			}
-			c.dividends[secid] = h
-			return h, nil
-		}
-	}
-	// A canceled context is not a property of the ticker; don't cache it.
-	if ctx.Err() == nil {
-		if c.dividendsErr == nil {
-			c.dividendsErr = make(map[string]error)
-		}
-		c.dividendsErr[secid] = err
-	}
-	return DividendHistory{}, err
-}
-
-// DividendsTotal returns the dividends of secid with record dates in year, in
-// billions of RUB (per-share sum x current ISSUESIZE). It returns nil when the
-// year's figure is unknown (see DividendHistory.PerShare) and a pointer to 0
-// for a year the history covers without payouts.
-func (c *Client) DividendsTotal(ctx context.Context, secid string, year int) (*float64, error) {
-	h, err := c.Dividends(ctx, secid)
-	if err != nil {
-		return nil, fmt.Errorf("dividends %s: %w", secid, err)
-	}
-	perShare, ok := h.PerShare(year)
-	if !ok {
-		return nil, nil
-	}
+// LatestQuote returns the last close of secid in the two weeks up to now. It
+// uses the same EOD history endpoint as CapitalizationAt, so the price is the
+// last completed session's close, not an intraday quote.
+func (c *Client) LatestQuote(ctx context.Context, secid string, now time.Time) (Quote, error) {
 	shares, err := c.IssueSize(ctx, secid)
 	if err != nil {
-		return nil, fmt.Errorf("issue size %s: %w", secid, err)
+		return Quote{}, fmt.Errorf("issue size %s: %w", secid, err)
 	}
 	if shares == 0 {
-		return nil, fmt.Errorf("issue size %s: zero", secid)
+		return Quote{}, fmt.Errorf("issue size %s: zero", secid)
+	}
+	url := fmt.Sprintf("%s/iss/history/engines/stock/markets/shares/boards/%s/securities/%s.json"+
+		"?iss.meta=off&iss.only=history&from=%s&till=%s",
+		c.BaseURL, c.Board, strings.ToUpper(secid),
+		now.Add(-quoteLookback).Format(time.DateOnly), now.Format(time.DateOnly))
+	body, err := c.get(ctx, url)
+	if err != nil {
+		return Quote{}, err
+	}
+	price, date, err := ParseLastCloseDated(body)
+	if err != nil {
+		return Quote{}, err
+	}
+	if price == 0 || date == "" {
+		return Quote{}, fmt.Errorf("no trades for %s in the last %d days", secid, int(quoteLookback.Hours()/24))
 	}
 	const rubPerBillion = 1e9
-	total := perShare * shares / rubPerBillion
-	return &total, nil
+	return Quote{Price: price, Date: date, Capitalization: price * shares / rubPerBillion}, nil
 }
 
 // LastClose returns the most recent closing price for secid in [from, till]
@@ -278,97 +235,45 @@ func ParseIssueSize(body []byte) (float64, error) {
 	return 0, fmt.Errorf("ISSUESIZE not found in description")
 }
 
-// ParseDividends reads a /iss/securities/{SECID}/dividends.json "dividends"
-// block (columns include registryclosedate "YYYY-MM-DD", value, currencyid).
-func ParseDividends(body []byte) (DividendHistory, error) {
-	b, err := decodeBlock(body, "dividends")
-	if err != nil {
-		return DividendHistory{}, err
-	}
-	dateCol, valCol, curCol := b.col("registryclosedate"), b.col("value"), b.col("currencyid")
-	if dateCol < 0 || valCol < 0 {
-		return DividendHistory{}, fmt.Errorf("dividends block missing registryclosedate/value columns")
-	}
-	if err := checkComplete(body, "dividends", len(b.Data)); err != nil {
-		return DividendHistory{}, err
-	}
-	h := DividendHistory{perShare: map[int]float64{}, unknown: map[int]bool{}}
-	for _, row := range b.Data {
-		if len(row) <= dateCol || len(row) <= valCol {
-			continue
-		}
-		date := asString(row[dateCol])
-		if len(date) < 4 {
-			continue
-		}
-		year, err := strconv.Atoi(date[:4])
-		if err != nil {
-			continue
-		}
-		if h.firstYear == 0 || year < h.firstYear {
-			h.firstYear = year
-		}
-		// A payout without an amount (declared, not yet filled in) makes the
-		// year unknown rather than silently zero.
-		v, ok := asFloat(row[valCol])
-		if !ok {
-			h.unknown[year] = true
-			continue
-		}
-		if curCol >= 0 && len(row) > curCol {
-			if cur := asString(row[curCol]); cur != "" && cur != "RUB" && cur != "SUR" {
-				h.unknown[year] = true
-				continue
-			}
-		}
-		h.perShare[year] += v
-	}
-	return h, nil
-}
-
-// checkComplete fails when an ISS "<block>.cursor" block reports more rows
-// than were returned — a paginated response read as if it were complete would
-// turn every later year into a false zero.
-func checkComplete(body []byte, block string, got int) error {
-	cur, err := decodeBlock(body, block+".cursor")
-	if err != nil {
-		return nil // no cursor block: the response is the whole list
-	}
-	col := cur.col("TOTAL")
-	if col < 0 || len(cur.Data) == 0 || len(cur.Data[0]) <= col {
-		return nil
-	}
-	if total, ok := asFloat(cur.Data[0][col]); ok && int(total) > got {
-		return fmt.Errorf("%s: paginated response (%d of %d rows)", block, got, int(total))
-	}
-	return nil
-}
-
 // ParseLastClose returns the last non-empty CLOSE (or LEGALCLOSEPRICE) value in
 // a history block, in chronological (API) order. Returns 0 when the block is
 // empty (no trades in the requested window).
 func ParseLastClose(body []byte) (float64, error) {
+	v, _, err := ParseLastCloseDated(body)
+	return v, err
+}
+
+// ParseLastCloseDated is ParseLastClose plus the TRADEDATE ("YYYY-MM-DD") of
+// the close it returns ("" when the block is empty or has no date column).
+func ParseLastCloseDated(body []byte) (float64, string, error) {
 	b, err := decodeBlock(body, "history")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	closeCol := b.col("CLOSE")
 	if closeCol < 0 {
 		closeCol = b.col("LEGALCLOSEPRICE")
 	}
 	if closeCol < 0 {
-		return 0, fmt.Errorf("history block missing CLOSE column")
+		return 0, "", fmt.Errorf("history block missing CLOSE column")
 	}
-	var last float64
+	dateCol := b.col("TRADEDATE")
+	var (
+		last float64
+		date string
+	)
 	for _, row := range b.Data {
 		if len(row) <= closeCol {
 			continue
 		}
 		if v, ok := asFloat(row[closeCol]); ok {
 			last = v
+			if dateCol >= 0 && len(row) > dateCol {
+				date = asString(row[dateCol])
+			}
 		}
 	}
-	return last, nil
+	return last, date, nil
 }
 
 func asString(v interface{}) string {

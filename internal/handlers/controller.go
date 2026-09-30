@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/models"
@@ -23,11 +24,14 @@ type Repository interface {
 	GetCompanyNote(ctx context.Context, company string) (string, error)
 	SaveCompanyNote(ctx context.Context, company, note string) error
 	DeleteCompanyNote(ctx context.Context, company string) error
+	GetMarketQuote(ctx context.Context, company string) (models.MarketQuote, bool, error)
+	GetMarketQuotes(ctx context.Context) (map[string]models.MarketQuote, error)
 }
 
 type Controller struct {
 	repo   Repository
 	logger *slog.Logger
+	now    func() time.Time // clock for quote freshness; tests pin it
 }
 
 func NewController(repo Repository, logger *slog.Logger) *Controller {
@@ -37,6 +41,7 @@ func NewController(repo Repository, logger *slog.Logger) *Controller {
 	return &Controller{
 		repo:   repo,
 		logger: logger,
+		now:    time.Now,
 	}
 }
 

@@ -3,8 +3,10 @@ package database_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -31,7 +33,7 @@ func openTestDB(t *testing.T) *database.Repository {
 	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.Exec(`TRUNCATE company_financials, company_notes`); err != nil {
+	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return database.NewRepository(db)
@@ -131,4 +133,121 @@ func TestRepositoryHonoursCanceledContext(t *testing.T) {
 	if _, err := repo.GetAllCompanies(ctx); err == nil {
 		t.Fatal("GetAllCompanies with a canceled context: want error, got nil")
 	}
+}
+
+func TestMarketQuotes(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+
+	if _, ok, err := repo.GetMarketQuote(ctx, "SBER"); err != nil || ok {
+		t.Fatalf("missing quote: ok=%v err=%v", ok, err)
+	}
+	day := func(d int) time.Time { return time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC) }
+	for _, q := range []models.MarketQuote{
+		{Company: "SBER", Price: 270, Capitalization: 5800, PriceDate: day(28)},
+		{Company: "SBER", Price: 274.65, Capitalization: 5928.85, PriceDate: day(29)}, // replaces
+	} {
+		if err := repo.SaveMarketQuote(ctx, q); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+	q, ok, err := repo.GetMarketQuote(ctx, "SBER")
+	if err != nil || !ok || q.Price != 274.65 || q.Capitalization != 5928.85 || !q.PriceDate.Equal(day(29)) {
+		t.Fatalf("quote = %+v ok=%v err=%v", q, ok, err)
+	}
+	all, err := repo.GetMarketQuotes(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("quotes = %v err=%v", all, err)
+	}
+
+	// Deleting the company drops its quote too.
+	if err := repo.SaveQuarterData(ctx, models.QuarterData{Year: 2025, Quarter: "Q4", Company: "SBER",
+		Category: "banks", NetProfit: models.Float(1)}); err != nil {
+		t.Fatalf("save row: %v", err)
+	}
+	if err := repo.DeleteCompany(ctx, "SBER"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, ok, _ := repo.GetMarketQuote(ctx, "SBER"); ok {
+		t.Error("quote survived DeleteCompany")
+	}
+	// An orphaned quote (no financial rows) can still be deleted.
+	_ = repo.SaveMarketQuote(ctx, models.MarketQuote{Company: "GAZP", Price: 1, Capitalization: 1, PriceDate: day(29)})
+	if err := repo.DeleteCompany(ctx, "GAZP"); err != nil {
+		t.Errorf("delete orphan quote: %v", err)
+	}
+	if _, ok, _ := repo.GetMarketQuote(ctx, "GAZP"); ok {
+		t.Error("orphaned quote survived DeleteCompany")
+	}
+	// A company with neither rows nor quote is not found.
+	if err := repo.DeleteCompany(ctx, "NOPE"); !errors.Is(err, database.ErrCompanyNotFound) {
+		t.Errorf("delete unknown: err = %v, want ErrCompanyNotFound", err)
+	}
+}
+
+func TestSaveQuarterDataSourceSemantics(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	f := models.Float
+	save := func(q models.QuarterData) {
+		t.Helper()
+		q.Year, q.Quarter, q.Category = 2024, "Q4", "test"
+		if err := repo.SaveQuarterData(ctx, q); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+
+	// Annual RSBU figures, then a CSV row carrying only dividends: the row
+	// must stay "rsbu" so its flows keep meaning "the whole year".
+	save(models.QuarterData{Company: "ANNUAL", Source: models.SourceRSBU, Revenue: f(100), NetProfit: f(10)})
+	save(models.QuarterData{Company: "ANNUAL", Source: models.SourceCSV, Dividends: f(4)})
+	got := history(t, repo, "ANNUAL")
+	if got.Source != models.SourceRSBU {
+		t.Errorf("source = %q, want rsbu (a dividends-only row must not relabel flows)", got.Source)
+	}
+	assertMetric(t, "dividends", got.Dividends, f(4))
+	assertMetric(t, "revenue", got.Revenue, f(100))
+
+	// Quarterly CSV flows, then RSBU annual flows without EBITDA: the source
+	// switches and the CSV single-quarter flows are replaced, not merged.
+	save(models.QuarterData{Company: "SWITCH", Source: models.SourceCSV, Revenue: f(30), NetProfit: f(3), EBITDA: f(6), Debt: f(50)})
+	save(models.QuarterData{Company: "SWITCH", Source: models.SourceRSBU, Revenue: f(120), NetProfit: f(12)})
+	got = history(t, repo, "SWITCH")
+	if got.Source != models.SourceRSBU {
+		t.Errorf("source = %q, want rsbu", got.Source)
+	}
+	assertMetric(t, "revenue", got.Revenue, f(120))
+	assertMetric(t, "ebitda", got.EBITDA, nil) // quarterly EBITDA dropped
+	assertMetric(t, "debt", got.Debt, f(50))   // stock metrics still merge
+
+	// Quarterly-to-quarterly source changes (smartlab -> csv, legacy NULL ->
+	// csv) merge: a partial CSV must not wipe the other flows.
+	save(models.QuarterData{Company: "MERGEQ", Source: models.SourceSmartLab, Revenue: f(30), NetProfit: f(3), EBITDA: f(6)})
+	save(models.QuarterData{Company: "MERGEQ", Source: models.SourceCSV, Revenue: f(31)})
+	got = history(t, repo, "MERGEQ")
+	assertMetric(t, "revenue", got.Revenue, f(31))
+	assertMetric(t, "net_profit", got.NetProfit, f(3))
+	assertMetric(t, "ebitda", got.EBITDA, f(6))
+	save(models.QuarterData{Company: "LEGACY", Revenue: f(30), NetProfit: f(3)}) // NULL source
+	save(models.QuarterData{Company: "LEGACY", Source: models.SourceCSV, Revenue: f(32)})
+	got = history(t, repo, "LEGACY")
+	assertMetric(t, "net_profit", got.NetProfit, f(3))
+
+	// Annual RSBU -> quarterly CSV flows: annual flows and the P/E/ROE built
+	// on them go; point-in-time figures stay.
+	save(models.QuarterData{Company: "FLIP", Source: models.SourceRSBU, Revenue: f(120), NetProfit: f(12),
+		PE: f(10), ROE: f(20), Capitalization: f(120)})
+	save(models.QuarterData{Company: "FLIP", Source: models.SourceCSV, Revenue: f(33)})
+	got = history(t, repo, "FLIP")
+	assertMetric(t, "revenue", got.Revenue, f(33))
+	assertMetric(t, "net_profit", got.NetProfit, nil)
+	assertMetric(t, "pe", got.PE, nil)
+	assertMetric(t, "roe", got.ROE, nil)
+	assertMetric(t, "capitalization", got.Capitalization, f(120))
+
+	// Same source again (FETCH_FORCE re-fetch): flows merge as before.
+	save(models.QuarterData{Company: "SWITCH", Source: models.SourceRSBU, NetProfit: f(13)})
+	got = history(t, repo, "SWITCH")
+	assertMetric(t, "revenue", got.Revenue, f(120))
+	assertMetric(t, "net_profit", got.NetProfit, f(13))
 }

@@ -3,6 +3,7 @@ package analytics
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -352,5 +353,168 @@ func TestValuationEdgeCases(t *testing.T) {
 	an := CheckRow(neg[0])
 	if len(an) != 1 || !an[0].Concerns("pb") || !an[0].Concerns("roe") {
 		t.Errorf("negative equity anomalies = %+v, want one concerning pb and roe", an)
+	}
+}
+
+func rsbuYear(year int, revenue, netProfit float64) models.QuarterData {
+	return models.QuarterData{Year: year, Quarter: "Q4", Company: "R", Source: models.SourceRSBU,
+		Revenue: models.Float(revenue), NetProfit: models.Float(netProfit)}
+}
+
+func TestTTMAnnualRSBURows(t *testing.T) {
+	// Annual-only RSBU history: every row is Q4 of a different year.
+	h := []models.QuarterData{
+		rsbuYear(2021, 100, 10), rsbuYear(2022, 110, 11), rsbuYear(2023, 120, 12), rsbuYear(2024, 150, 15),
+	}
+	ttm := TTMSeries(h, "net_profit")
+	// Before the fix the last point summed four different years (48).
+	if ttm[3].Value != 15 {
+		t.Errorf("TTM net profit 2024 = %v, want 15 (the annual figure itself)", ttm[3].Value)
+	}
+	if a := AnnualSeries(h, "revenue"); a[3].Value != 150 {
+		t.Errorf("annual revenue 2024 = %v, want 150", a[3].Value)
+	}
+	// YoY with a TTM base compares with the previous calendar year, not the
+	// row four positions back.
+	y := DerivedSeries(h, "revenue_yoy", PeriodTTM)
+	if !approx(y[3].Value, (150.0/120-1)*100, 1e-9) {
+		t.Errorf("TTM revenue YoY 2024 = %v, want 25", y[3].Value)
+	}
+	if !math.IsNaN(y[0].Value) {
+		t.Errorf("TTM revenue YoY 2021 = %v, want NaN (no 2020)", y[0].Value)
+	}
+	c := DerivedSeries(h, "revenue_cagr3", PeriodAnnual)
+	if want := (math.Pow(150.0/100, 1.0/3) - 1) * 100; !approx(c[3].Value, want, 1e-9) {
+		t.Errorf("3y CAGR 2024 = %v, want %v", c[3].Value, want)
+	}
+	if snap := BuildSnapshot(h); !approx(snap.NetMargin, 10, 1e-9) || snap.NetProfit != 15 {
+		t.Errorf("snapshot net profit/margin = %v/%v, want 15/10", snap.NetProfit, snap.NetMargin)
+	}
+}
+
+func TestTTMRequiresConsecutiveQuarters(t *testing.T) {
+	f := models.Float
+	q := func(y int, qq string, np float64) models.QuarterData {
+		return models.QuarterData{Year: y, Quarter: qq, Company: "Q", Source: models.SourceCBR102, NetProfit: f(np)}
+	}
+	// 2024-Q2 is missing: the window ending 2025-Q1 spans five quarters.
+	h := []models.QuarterData{q(2024, "Q1", 1), q(2024, "Q3", 3), q(2024, "Q4", 4), q(2025, "Q1", 5), q(2025, "Q2", 6)}
+	ttm := TTMSeries(h, "net_profit")
+	if !math.IsNaN(ttm[3].Value) {
+		t.Errorf("TTM at 2025-Q1 across a gap = %v, want NaN", ttm[3].Value)
+	}
+	if ttm[4].Value != 18 {
+		t.Errorf("TTM at 2025-Q2 = %v, want 18 (Q3..Q2)", ttm[4].Value)
+	}
+}
+
+func TestBuildCurrent(t *testing.T) {
+	f := models.Float
+	h := []models.QuarterData{
+		{Year: 2024, Quarter: "Q4", Company: "R", Source: models.SourceRSBU, NetProfit: f(90), Equity: f(400), Dividends: f(30)},
+		{Year: 2025, Quarter: "Q4", Company: "R", Source: models.SourceRSBU, NetProfit: f(100), Equity: f(500), Dividends: f(40)},
+	}
+	quote := models.MarketQuote{Company: "R", Capitalization: 800, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+	c := BuildCurrent(h, quote)
+	if !approx(c.PE, 8, 1e-9) || c.EarningsLabel != "2025-Q4" {
+		t.Errorf("current P/E = %v (%s), want 8 (2025-Q4)", c.PE, c.EarningsLabel)
+	}
+	if !approx(c.PB, 1.6, 1e-9) || !approx(c.DivYield, 5, 1e-9) || c.PriceDate != "2026-09-29" {
+		t.Errorf("current = %+v, want P/B 1.6, yield 5%%, date 2026-09-29", c)
+	}
+
+	loss := []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "L", Source: models.SourceRSBU, NetProfit: f(-5)}}
+	if c := BuildCurrent(loss, quote); !math.IsNaN(c.PE) || c.EarningsLabel != "2025-Q4" {
+		t.Errorf("loss-making: P/E = %v (%s), want NaN with label", c.PE, c.EarningsLabel)
+	}
+	if c := BuildCurrent(h, models.MarketQuote{}); !math.IsNaN(c.PE) || !math.IsNaN(c.Capitalization) {
+		t.Errorf("no quote: %+v, want NaN", c)
+	}
+}
+
+func TestBuildCurrentStale(t *testing.T) {
+	f := models.Float
+	// Data stopped in 2023; pricing it in September 2026 would be meaningless.
+	h := []models.QuarterData{{Year: 2023, Quarter: "Q4", Company: "S", Source: models.SourceRSBU,
+		NetProfit: f(100), Equity: f(500), Dividends: f(10)}}
+	quote := models.MarketQuote{Company: "S", Capitalization: 800, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+	c := BuildCurrent(h, quote)
+	if !c.Stale || !math.IsNaN(c.PE) || !math.IsNaN(c.PB) || !math.IsNaN(c.DivYield) {
+		t.Errorf("stale fundamentals: %+v, want NaN multiples and Stale", c)
+	}
+	if c.EarningsLabel != "2023-Q4 (too old)" {
+		t.Errorf("earnings label = %q", c.EarningsLabel)
+	}
+	// 2025-Q4 ends Dec 2025: 9 months before the quote, still fresh.
+	h[0].Year = 2025
+	if c := BuildCurrent(h, quote); c.Stale || !approx(c.PE, 8, 1e-9) {
+		t.Errorf("fresh fundamentals: %+v", c)
+	}
+}
+
+func TestQuoteIsFresh(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	q := models.MarketQuote{Capitalization: 1, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+	if !QuoteIsFresh(q, now) {
+		t.Error("yesterday's close should be fresh")
+	}
+	q.PriceDate = now.Add(-31 * 24 * time.Hour)
+	if QuoteIsFresh(q, now) {
+		t.Error("a month-old close should not be fresh")
+	}
+}
+
+func TestGrowthNeverMixesGroupAndStandalone(t *testing.T) {
+	f := models.Float
+	csvYear := func(y int, np float64) []models.QuarterData {
+		var out []models.QuarterData
+		for _, q := range []string{"Q1", "Q2", "Q3", "Q4"} {
+			out = append(out, models.QuarterData{Year: y, Quarter: q, Company: "M", Source: models.SourceCSV, NetProfit: f(np / 4)})
+		}
+		return out
+	}
+	// Group IFRS quarters for 2022-2023, then parent-only RSBU annual rows.
+	h := append(csvYear(2022, 400), csvYear(2023, 480)...)
+	h = append(h,
+		models.QuarterData{Year: 2024, Quarter: "Q4", Company: "M", Source: models.SourceRSBU, NetProfit: f(90)},
+		models.QuarterData{Year: 2025, Quarter: "Q4", Company: "M", Source: models.SourceRSBU, NetProfit: f(99)},
+	)
+	byLabel := map[string]float64{}
+	for _, p := range DerivedSeries(h, "net_profit_yoy", PeriodTTM) {
+		byLabel[p.Label] = p.Value
+	}
+	if !approx(byLabel["2023-Q4"], 20, 1e-9) {
+		t.Errorf("group YoY 2023-Q4 = %v, want 20", byLabel["2023-Q4"])
+	}
+	if !math.IsNaN(byLabel["2024-Q4"]) {
+		t.Errorf("YoY 2024-Q4 across group->standalone = %v, want NaN", byLabel["2024-Q4"])
+	}
+	if !approx(byLabel["2025-Q4"], 10, 1e-9) {
+		t.Errorf("standalone YoY 2025-Q4 = %v, want 10", byLabel["2025-Q4"])
+	}
+
+	ttm := TTMSeries(h, "net_profit")
+	latest, _ := LatestValid(ttm)
+	if prev, ok := YearAgo(ttm, latest, PeriodTTM, 1); !ok || prev.Value != 90 {
+		t.Errorf("YearAgo(2025-Q4) = %+v, %v; want 2024-Q4 = 90", prev, ok)
+	}
+	if _, ok := YearAgo(ttm, ttm[len(ttm)-2], PeriodTTM, 1); ok {
+		t.Error("YearAgo from standalone 2024-Q4 to group 2023-Q4 should not match")
+	}
+}
+
+func TestSnapshotStockFiguresFromLatestPeriod(t *testing.T) {
+	f := models.Float
+	// Bank: Q4 carries cap/P/E/ROE, the newer Q1 only profit.
+	h := []models.QuarterData{
+		{Year: 2025, Quarter: "Q4", Company: "B", Source: models.SourceCBR102, NetProfit: f(400), Capitalization: f(6000), PE: f(4), ROE: f(22)},
+		{Year: 2026, Quarter: "Q1", Company: "B", Source: models.SourceCBR102, NetProfit: f(420)},
+	}
+	s := BuildSnapshot(h)
+	if s.LastLabel != "2026-Q1" || s.PE != 4 || s.ROE != 22 || s.Capitalization != 6000 {
+		t.Errorf("snapshot = last %s, P/E %v, ROE %v, cap %v", s.LastLabel, s.PE, s.ROE, s.Capitalization)
+	}
+	if s.PELabel != "2025-Q4" || s.ROELabel != "2025-Q4" || s.CapLabel != "2025-Q4" {
+		t.Errorf("labels = %q %q %q, want 2025-Q4", s.PELabel, s.ROELabel, s.CapLabel)
 	}
 }

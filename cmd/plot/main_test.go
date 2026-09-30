@@ -119,3 +119,10 @@ func TestRouterAuthDisabled(t *testing.T) {
 		t.Errorf("text/plain POST: status = %d, want 415", rec.Code)
 	}
 }
+
+func (s *stubRepo) GetMarketQuote(context.Context, string) (models.MarketQuote, bool, error) {
+	return models.MarketQuote{}, false, nil
+}
+func (s *stubRepo) GetMarketQuotes(context.Context) (map[string]models.MarketQuote, error) {
+	return nil, nil
+}

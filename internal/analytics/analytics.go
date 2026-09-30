@@ -6,6 +6,7 @@ package analytics
 import (
 	"math"
 	"sort"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -26,6 +27,9 @@ type Point struct {
 	Year  int
 	Index int // monotonic index for ordering (year*10 + quarter for quarterly, year for annual)
 	Value float64
+	// Standalone marks figures from a standalone source (RSBU/CBR legal
+	// entity) rather than group ones; growth rates never compare the two.
+	Standalone bool
 }
 
 // Series is a chronologically ordered sequence of Points for one metric.
@@ -95,6 +99,29 @@ func quarterIdx(q string) int {
 	return 0
 }
 
+// quarterSeq numbers quarters consecutively across years (2024-Q4 -> 2025-Q1
+// differ by 1).
+func quarterSeq(q models.QuarterData) int {
+	idx := quarterIdx(q.Quarter)
+	if idx == 0 {
+		return math.MinInt / 2 // unknown quarter: never consecutive with anything
+	}
+	return q.Year*4 + idx - 1
+}
+
+// isAnnualFigure reports whether a row's flow metrics cover the whole year:
+// ГИР БО RSBU is annual-only and stored on Q4. (CBR bank rows are true single
+// quarters, as are CSV rows.)
+// standalone reports whether a row's figures are a single legal entity's
+// (RSBU/CBR) rather than group figures.
+func standalone(q models.QuarterData) bool {
+	return !IsComparable(q.Source)
+}
+
+func isAnnualFigure(q models.QuarterData) bool {
+	return q.Source == models.SourceRSBU && q.Quarter == "Q4"
+}
+
 func qLabel(year int, quarter string) string {
 	return formatYear(year) + "-" + quarter
 }
@@ -161,6 +188,8 @@ func QuarterlySeries(history []models.QuarterData, metric string) Series {
 			Year:  q.Year,
 			Index: q.Year*10 + quarterIdx(q.Quarter),
 			Value: rawValue(q, metric),
+
+			Standalone: standalone(q),
 		})
 	}
 	return out
@@ -178,27 +207,29 @@ func TTMSeries(history []models.QuarterData, metric string) Series {
 		var v float64
 		var ok bool
 		if flow {
-			if i < 3 {
-				out = append(out, Point{
-					Label: qLabel(q.Year, q.Quarter),
-					Year:  q.Year,
-					Index: q.Year*10 + quarterIdx(q.Quarter),
-					Value: math.NaN(),
-				})
-				continue
-			}
-			sum := 0.0
-			present := 0
-			for j := i - 3; j <= i; j++ {
-				val := rawValue(hist[j], metric)
-				if !math.IsNaN(val) {
-					sum += val
-					present++
+			switch {
+			case isAnnualFigure(q):
+				// An annual RSBU figure already is a trailing-12-months value.
+				v = rawValue(q, metric)
+				ok = !math.IsNaN(v)
+			case i >= 3 && quarterSeq(hist[i])-quarterSeq(hist[i-3]) == 3:
+				// Only four consecutive quarters make a TTM; rows are unique
+				// per quarter, so a span of 3 means no gaps.
+				// The four quarters must also be of one kind: a sum of group and
+				// standalone quarters is neither.
+				sum := 0.0
+				present := 0
+				for j := i - 3; j <= i; j++ {
+					val := rawValue(hist[j], metric)
+					if !math.IsNaN(val) && !isAnnualFigure(hist[j]) && standalone(hist[j]) == standalone(q) {
+						sum += val
+						present++
+					}
 				}
-			}
-			if present == 4 {
-				v = sum
-				ok = true
+				if present == 4 {
+					v = sum
+					ok = true
+				}
 			}
 		} else {
 			val := rawValue(q, metric)
@@ -216,6 +247,8 @@ func TTMSeries(history []models.QuarterData, metric string) Series {
 			Year:  q.Year,
 			Index: q.Year*10 + quarterIdx(q.Quarter),
 			Value: val,
+
+			Standalone: standalone(q),
 		})
 	}
 	return out
@@ -241,13 +274,16 @@ func AnnualSeries(history []models.QuarterData, metric string) Series {
 	for _, y := range years {
 		quarters := byYear[y]
 		val := math.NaN()
+		sa := standalone(quarters[len(quarters)-1])
 		if flow {
-			if len(quarters) == 4 {
+			if last := quarters[len(quarters)-1]; isAnnualFigure(last) {
+				val = rawValue(last, metric)
+			} else if len(quarters) == 4 {
 				sum := 0.0
 				present := 0
 				for _, q := range quarters {
 					v := rawValue(q, metric)
-					if !math.IsNaN(v) {
+					if !math.IsNaN(v) && standalone(q) == sa {
 						sum += v
 						present++
 					}
@@ -261,7 +297,7 @@ func AnnualSeries(history []models.QuarterData, metric string) Series {
 			for i := len(quarters) - 1; i >= 0; i-- {
 				v := rawValue(quarters[i], metric)
 				if !math.IsNaN(v) {
-					val = v
+					val, sa = v, standalone(quarters[i])
 					break
 				}
 			}
@@ -271,6 +307,8 @@ func AnnualSeries(history []models.QuarterData, metric string) Series {
 			Year:  y,
 			Index: y,
 			Value: val,
+
+			Standalone: sa,
 		})
 	}
 	return out
@@ -369,7 +407,7 @@ func ratio(num, den Series, scale float64) Series {
 		if ok && !math.IsNaN(p.Value) && !math.IsNaN(d) && d != 0 {
 			val = p.Value / d * scale
 		}
-		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val})
+		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val, Standalone: p.Standalone})
 	}
 	return out
 }
@@ -386,21 +424,49 @@ func positiveOnly(s Series) Series {
 	return out
 }
 
-// yoy computes year-over-year percentage change. The "previous year" window is
-// 4 points back for quarterly/TTM data and 1 point back for annual data.
+// indexPoints maps each point's Index to the point.
+func indexPoints(s Series) map[int]Point {
+	m := make(map[int]Point, len(s))
+	for _, p := range s {
+		m[p.Index] = p
+	}
+	return m
+}
+
+// YearAgo returns the point of s for the same period n calendar years before
+// p, if present and of the same kind (group vs standalone figures).
+func YearAgo(s Series, p Point, base Period, n int) (Point, bool) {
+	for _, q := range s {
+		if q.Index == p.Index-yearsBack(base, n) {
+			return q, q.Standalone == p.Standalone && !math.IsNaN(q.Value)
+		}
+	}
+	return Point{}, false
+}
+
+// yearsBack is the Index offset of the same period n years earlier: Index is
+// year*10+quarter for quarterly/TTM points and the year for annual ones.
+// Looking points up by Index (not by position) keeps gaps in the history —
+// e.g. annual-only RSBU rows — from pairing the wrong periods.
+func yearsBack(base Period, n int) int {
+	if base == PeriodAnnual {
+		return n
+	}
+	return n * 10
+}
+
+// yoy computes year-over-year percentage change against the same period one
+// calendar year earlier (NaN when that period is absent).
 func yoy(s Series, base Period) Series {
 	if len(s) == 0 {
 		return nil
 	}
-	lag := 4
-	if base == PeriodAnnual {
-		lag = 1
-	}
+	byIndex := indexPoints(s)
 	out := make(Series, 0, len(s))
-	for i, p := range s {
+	for _, p := range s {
 		val := math.NaN()
-		if i >= lag {
-			prev := s[i-lag].Value
+		if q, ok := byIndex[p.Index-yearsBack(base, 1)]; ok && q.Standalone == p.Standalone {
+			prev := q.Value
 			if !math.IsNaN(prev) && !math.IsNaN(p.Value) && prev != 0 {
 				val = (p.Value/prev - 1) * 100
 			}
@@ -416,16 +482,12 @@ func rollingCAGR(s Series, base Period, years int) Series {
 	if len(s) == 0 {
 		return nil
 	}
-	lag := years * 4
-	if base == PeriodAnnual {
-		lag = years
-	}
+	byIndex := indexPoints(s)
 	out := make(Series, 0, len(s))
-	for i, p := range s {
+	for _, p := range s {
 		val := math.NaN()
-		if i >= lag {
-			prev := s[i-lag].Value
-			cur := p.Value
+		if q, ok := byIndex[p.Index-yearsBack(base, years)]; ok && q.Standalone == p.Standalone {
+			prev, cur := q.Value, p.Value
 			if !math.IsNaN(prev) && !math.IsNaN(cur) && prev > 0 && cur > 0 {
 				val = (math.Pow(cur/prev, 1.0/float64(years)) - 1) * 100
 			}
@@ -459,20 +521,23 @@ type Snapshot struct {
 	Debt           float64
 	PE             float64
 	ROE            float64
-	PB             float64 // market cap / equity, from the latest period that has both
-	PBLabel        string  // period PB was taken from ("" when PB is NaN)
-	DivYield       float64 // dividends / market cap, %, latest period that has both
-	DivYieldLabel  string  // period DivYield was taken from
-	NetMargin      float64 // TTM net_profit / TTM revenue
-	EBITDAMargin   float64 // TTM
-	DebtEBITDA     float64 // last debt / TTM ebitda
-	RevenueYoY     float64
-	NetProfitYoY   float64
-	RevenueCAGR3Y  float64
-	NetProfitCAGR3 float64
-	RevenueCAGR5Y  float64
-	NetProfitCAGR5 float64
-	Score          int // 0-100 composite long-term-investor score
+	// Stock figures come from the latest period that reports them (a bank's
+	// latest row is usually a profit-only Q1-Q3); these name that period.
+	CapLabel, DebtLabel, PELabel, ROELabel string
+	PB                                     float64 // market cap / equity, from the latest period that has both
+	PBLabel                                string  // period PB was taken from ("" when PB is NaN)
+	DivYield                               float64 // dividends / market cap, %, latest period that has both
+	DivYieldLabel                          string  // period DivYield was taken from
+	NetMargin                              float64 // TTM net_profit / TTM revenue
+	EBITDAMargin                           float64 // TTM
+	DebtEBITDA                             float64 // last debt / TTM ebitda
+	RevenueYoY                             float64
+	NetProfitYoY                           float64
+	RevenueCAGR3Y                          float64
+	NetProfitCAGR3                         float64
+	RevenueCAGR5Y                          float64
+	NetProfitCAGR5                         float64
+	Score                                  int // 0-100 composite long-term-investor score
 }
 
 func lastNonNaN(s Series) float64 {
@@ -513,10 +578,15 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	snap.Category = last.Category
 	snap.LastLabel = qLabel(last.Year, last.Quarter)
 
-	snap.Capitalization = models.ValueOrNaN(last.Capitalization)
-	snap.Debt = models.ValueOrNaN(last.Debt)
-	snap.PE = models.ValueOrNaN(last.PE)
-	snap.ROE = models.ValueOrNaN(last.ROE)
+	latest := func(metric string, v *float64, label *string) {
+		if p, ok := LatestValid(QuarterlySeries(hist, metric)); ok {
+			*v, *label = p.Value, p.Label
+		}
+	}
+	latest("capitalization", &snap.Capitalization, &snap.CapLabel)
+	latest("debt", &snap.Debt, &snap.DebtLabel)
+	latest("pe", &snap.PE, &snap.PELabel)
+	latest("roe", &snap.ROE, &snap.ROELabel)
 
 	snap.Revenue = lastNonNaN(TTMSeries(hist, "revenue"))
 	snap.NetProfit = lastNonNaN(TTMSeries(hist, "net_profit"))
@@ -634,4 +704,87 @@ func computeScore(s Snapshot) int {
 		return 0
 	}
 	return int(math.Round(score * 100 / components))
+}
+
+// Current is a company's valuation at its latest exchange close: the stored
+// quote's market cap over the most recent fundamentals. Every float is NaN
+// when unknown; each *Label names the period the fundamental was taken from.
+type Current struct {
+	PriceDate      string // trade date of the quote, "YYYY-MM-DD"
+	Capitalization float64
+	PE             float64 // cap / trailing-12-months net profit (NaN for a loss)
+	EarningsLabel  string
+	PB             float64 // cap / latest positive equity
+	EquityLabel    string
+	DivYield       float64 // latest year's dividends / cap, %
+	DividendsLabel string
+	// Stale is set when a fundamental exists but ended more than
+	// MaxFundamentalAge before the quote; its multiple is then NaN and its
+	// label says "too old" rather than silently pairing today's price with
+	// figures from years ago.
+	Stale bool
+}
+
+// MaxFundamentalAge is how far a fundamental's period end may lag the quote
+// date before a "current" multiple built on it is withheld. Annual reports
+// land months after year-end, so it spans a full reporting cycle.
+const MaxFundamentalAge = 18 // months
+
+// QuoteMaxAge is how old a stored quote may be and still count as current; an
+// older one (delisting, long suspension, fetch not run) is ignored.
+const QuoteMaxAge = 30 * 24 * time.Hour
+
+// QuoteIsFresh reports whether q can be used as the current price at now.
+func QuoteIsFresh(q models.MarketQuote, now time.Time) bool {
+	return q.Capitalization > 0 && now.Sub(q.PriceDate) <= QuoteMaxAge
+}
+
+// monthsBetween returns how many months the period of p (quarterly Index)
+// ended before date.
+func monthsBetween(p Point, date time.Time) int {
+	endMonth := (p.Index % 10) * 3
+	return (date.Year()*12 + int(date.Month())) - (p.Year*12 + endMonth)
+}
+
+// BuildCurrent values a company at quote q. Trailing earnings are the latest
+// TTM net profit: four consecutive quarters, or an annual RSBU figure.
+func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
+	cur := Current{
+		PriceDate:      q.PriceDate.Format("2006-01-02"),
+		Capitalization: q.Capitalization,
+		PE:             math.NaN(),
+		PB:             math.NaN(),
+		DivYield:       math.NaN(),
+	}
+	if q.Capitalization <= 0 {
+		cur.Capitalization = math.NaN()
+		return cur
+	}
+	// fresh reports whether the fundamental at p is recent enough to price;
+	// otherwise it marks the result stale and relabels the period.
+	fresh := func(p Point, label *string) bool {
+		*label = p.Label
+		if monthsBetween(p, q.PriceDate) > MaxFundamentalAge {
+			*label = p.Label + " (too old)"
+			cur.Stale = true
+			return false
+		}
+		return true
+	}
+	if p, ok := LatestValid(TTMSeries(history, "net_profit")); ok {
+		if fresh(p, &cur.EarningsLabel) && p.Value > 0 {
+			cur.PE = q.Capitalization / p.Value
+		}
+	}
+	if p, ok := LatestValid(positiveOnly(QuarterlySeries(history, "equity"))); ok {
+		if fresh(p, &cur.EquityLabel) {
+			cur.PB = q.Capitalization / p.Value
+		}
+	}
+	if p, ok := LatestValid(QuarterlySeries(history, "dividends")); ok {
+		if fresh(p, &cur.DividendsLabel) {
+			cur.DivYield = p.Value / q.Capitalization * 100
+		}
+	}
+	return cur
 }

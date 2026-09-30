@@ -1,6 +1,9 @@
 package models
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Data sources, stored in company_financials.source. They tell the UI how far
 // a row's figures can be trusted and compared with other companies.
@@ -39,9 +42,9 @@ type QuarterData struct {
 	// Equity is balance-sheet equity (RSBU line 1300) for companies and
 	// regulatory capital (CBR form 123) for banks — the latter approximate.
 	Equity *float64
-	// Dividends is the year's total by record date (per-share x current
-	// shares outstanding), on the Q4 row only. Like Capitalization it is a
-	// point-in-time value, not a quarterly flow.
+	// Dividends is the year's total in billions of RUB, on the Q4 row only,
+	// entered by hand through CSV (no free exchange API exists). Like
+	// Capitalization it is a point-in-time value, not a quarterly flow.
 	Dividends *float64
 }
 
@@ -63,4 +66,13 @@ func ValueOrNaN(p *float64) float64 {
 		return math.NaN()
 	}
 	return *p
+}
+
+// MarketQuote is a company's latest exchange close and the market cap it
+// implies (price x current shares outstanding), refreshed by cmd/fetch.
+type MarketQuote struct {
+	Company        string
+	Price          float64   // RUB per share
+	Capitalization float64   // billions of RUB
+	PriceDate      time.Time // trade date of Price
 }

@@ -145,3 +145,37 @@ func TestParseTreatsZeroAsNoData(t *testing.T) {
 		t.Errorf("row = %+v, want Q4 with debt 5", data[0])
 	}
 }
+
+func TestParseDividendsRow(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "DIV_test.csv")
+	// Only the total "Дивиденды" row is read, and only its Q4 columns; zero is
+	// a real "no payout" there. Per-share, payout-ratio and yield rows from
+	// aggregator exports are ignored.
+	content := "Метрика;2023-Q3;2023-Q4;2024-Q4;2025-Q4\n" +
+		"Дивиденды, млрд руб;0;50,5;0;-\n" +
+		"Дивиденд, руб/акцию;0;33,3;0;0\n" +
+		"Дивиденды/прибыль, %;0;50;0;0\n" +
+		"Дивиденды на акцию, руб;0;33,3;0;0\n" +
+		"Див доход, ао, %;0;11;0;0\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := NewCSVParser(file).Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(data) != 2 {
+		t.Fatalf("rows = %d, want 2 (2023 and 2024): %+v", len(data), data)
+	}
+	got := map[int]float64{}
+	for _, d := range data {
+		if d.Dividends == nil {
+			t.Fatalf("row %d-%s has no dividends: %+v", d.Year, d.Quarter, d)
+		}
+		got[d.Year] = *d.Dividends
+	}
+	if got[2023] != 50.5 || got[2024] != 0 {
+		t.Errorf("dividends = %v, want 2023:50.5 2024:0", got)
+	}
+}

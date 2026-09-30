@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -30,6 +31,8 @@ type fakeRepo struct {
 	note         string
 	noteErr      error
 	deleteErr    error
+
+	quotes map[string]models.MarketQuote
 
 	savedCompany string
 	savedNote    string
@@ -65,9 +68,20 @@ func (f *fakeRepo) SaveCompanyNote(_ context.Context, company, note string) erro
 	return nil
 }
 func (f *fakeRepo) DeleteCompanyNote(_ context.Context, company string) error { return nil }
+func (f *fakeRepo) GetMarketQuote(_ context.Context, company string) (models.MarketQuote, bool, error) {
+	q, ok := f.quotes[company]
+	return q, ok, nil
+}
+func (f *fakeRepo) GetMarketQuotes(_ context.Context) (map[string]models.MarketQuote, error) {
+	return f.quotes, nil
+}
+
+// testNow pins the controller clock so quote freshness is deterministic.
+var testNow = time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 
 func newTestServer(repo Repository) *chi.Mux {
 	c := NewController(repo, slog.New(slog.DiscardHandler))
+	c.now = func() time.Time { return testNow }
 	r := chi.NewRouter()
 	r.Get("/healthz", c.Health)
 	r.Get("/readyz", c.Ready)
@@ -79,6 +93,8 @@ func newTestServer(repo Repository) *chi.Mux {
 	r.Get("/api/companies-with-categories", c.GetCompaniesWithCategories)
 	r.Get("/chart/{metric}", c.ChartHandler)
 	r.Get("/company/{name}", c.DashboardHandler)
+	r.Get("/screener", c.ScreenerHandler)
+	r.Get("/api/screener", c.ScreenerAPI)
 	r.Get("/api/company-note", c.GetCompanyNote)
 	r.Post("/api/company-note", c.SaveCompanyNote)
 	r.Delete("/api/company-note", c.DeleteCompanyNote)
@@ -348,5 +364,101 @@ func TestJSStringMap(t *testing.T) {
 	}
 	if strings.ContainsAny(got, "\"\\<") {
 		t.Error("output must not contain double quotes, backslashes or '<'")
+	}
+}
+
+func TestScreener(t *testing.T) {
+	xss := `<script>alert(1)</script>`
+	repo := &fakeRepo{
+		companies: []string{"SBER", xss},
+		history: map[string][]models.QuarterData{
+			"SBER": {{Year: 2025, Quarter: "Q4", Company: "SBER", Category: "banks", Source: models.SourceCBR102,
+				NetProfit: models.Float(1500), Capitalization: models.Float(6000), Equity: models.Float(7000)}},
+			xss: {{Year: 2025, Quarter: "Q4", Company: xss, Revenue: models.Float(1)}},
+		},
+		quotes: map[string]models.MarketQuote{
+			"SBER": {Company: "SBER", Capitalization: 5929, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)},
+		},
+	}
+	r := newTestServer(repo)
+
+	rec := do(t, r, http.MethodGet, "/api/screener", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("api status = %d", rec.Code)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	var sber map[string]any
+	for _, row := range rows {
+		if row["company"] == "SBER" {
+			sber = row
+		}
+	}
+	if sber == nil || sber["current"] != true || sber["price_date"] != "2026-09-29" {
+		t.Fatalf("SBER row = %v", sber)
+	}
+	if sber["ebitda"] != nil || sber["debt_ebitda"] != nil {
+		t.Errorf("unknown metric should be null: %v", sber["debt_ebitda"])
+	}
+
+	page := do(t, r, http.MethodGet, "/screener", "")
+	if page.Code != http.StatusOK {
+		t.Fatalf("page status = %d", page.Code)
+	}
+	body := page.Body.String()
+	if strings.Contains(body, xss) {
+		t.Error("company name reached the page unescaped")
+	}
+	if !strings.Contains(body, "SBER") || !strings.Contains(body, `<option value="banks">`) {
+		t.Error("page is missing rows or the category filter")
+	}
+}
+
+func TestDashboardCurrentValuation(t *testing.T) {
+	hist := []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceCBR102,
+		NetProfit: models.Float(1500), Capitalization: models.Float(6000)}}
+	withQuote := &fakeRepo{companyHist: hist, quotes: map[string]models.MarketQuote{
+		"SBER": {Company: "SBER", Capitalization: 5929, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)},
+	}}
+	body := do(t, newTestServer(withQuote), http.MethodGet, "/company/SBER", "").Body.String()
+	if !strings.Contains(body, "Current valuation · close 2026-09-29") || !strings.Contains(body, "P/E (now)") {
+		t.Error("dashboard with a quote should show the current-valuation block")
+	}
+
+	noQuote := &fakeRepo{companyHist: hist}
+	body = do(t, newTestServer(noQuote), http.MethodGet, "/company/SBER", "").Body.String()
+	if strings.Contains(body, "Current valuation") {
+		t.Error("dashboard without a quote must not show the current-valuation block")
+	}
+}
+
+func TestStaleQuoteIsIgnored(t *testing.T) {
+	hist := []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceCBR102,
+		NetProfit: models.Float(1500), Capitalization: models.Float(6000), PE: models.Float(4)}}
+	old := testNow.Add(-45 * 24 * time.Hour)
+	repo := &fakeRepo{
+		companies:   []string{"SBER"},
+		companyHist: hist,
+		history:     map[string][]models.QuarterData{"SBER": hist},
+		quotes:      map[string]models.MarketQuote{"SBER": {Company: "SBER", Capitalization: 1, PriceDate: old}},
+	}
+	r := newTestServer(repo)
+
+	body := do(t, r, http.MethodGet, "/company/SBER", "").Body.String()
+	if strings.Contains(body, "P/E (now)") || !strings.Contains(body, "too old to value against") {
+		t.Error("dashboard should replace a stale quote's valuation with a note")
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal(do(t, r, http.MethodGet, "/api/screener", "").Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["current"] != false || rows[0]["pe"] != 4.0 || rows[0]["capitalization"] != 6000.0 {
+		t.Errorf("screener row with stale quote = %v, want stored valuation", rows)
 	}
 }

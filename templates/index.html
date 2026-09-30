@@ -115,6 +115,11 @@
             letter-spacing: 0.02em;
         }
         .topbar-actions { display: flex; align-items: center; gap: 8px; }
+        .topbar-link {
+            color: var(--text-2); font-size: 14px; font-weight: 500; text-decoration: none;
+            padding: 6px 12px; border-radius: var(--radius-sm);
+        }
+        .topbar-link:hover { background: var(--bg-hover); color: var(--text-1); }
         .icon-btn {
             display: inline-flex; align-items: center; justify-content: center;
             width: 36px; height: 36px;
@@ -643,6 +648,7 @@
             <span>Financial Analyzer</span>
         </div>
         <div class="topbar-actions">
+            <a class="topbar-link" href="/screener">Screener</a>
             <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme"></button>
         </div>
     </div>
