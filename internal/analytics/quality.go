@@ -47,18 +47,18 @@ func CheckRow(q models.QuarterData) []Anomaly {
 
 	// Negative P/E just means a loss-making period — normal, not suspicious.
 	if pe > maxSanePE {
-		add(fmt.Sprintf("P/E %.0f is above %.0f — earnings near zero or not the group's", pe, maxSanePE), "pe")
+		add(fmt.Sprintf("P/E %.0f выше %.0f — прибыль близка к нулю или не консолидированная", pe, maxSanePE), "pe")
 	}
 	if roe > maxSaneROE || roe < -maxSaneROE {
-		add(fmt.Sprintf("ROE %.0f%% is beyond ±%.0f%%", roe, maxSaneROE), "roe")
+		add(fmt.Sprintf("ROE %.0f%% за пределами ±%.0f%%", roe, maxSaneROE), "roe")
 	}
 	if equity < 0 {
-		add("negative equity — P/B and ROE are not meaningful", "equity", "roe")
+		add("отрицательный капитал — P/B и ROE не имеют смысла", "equity", "roe")
 	}
 	// A reported zero revenue counts: a holding with no sales is exactly the
 	// case this check is for.
 	if revenue >= 0 && capitalization > 0 && revenue < capitalization*minRevenueCapRatio {
-		add(fmt.Sprintf("revenue is below %.0f%% of market cap — likely holding-level figures", minRevenueCapRatio*100),
+		add(fmt.Sprintf("выручка меньше %.0f%% капитализации — вероятно, отчётность холдинга", minRevenueCapRatio*100),
 			"revenue", "capitalization")
 	}
 	// A parent company living on dividends from subsidiaries books them below
@@ -68,7 +68,7 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	// gains and subsidiaries' dividends, so a quarter with such a gain can
 	// legitimately out-earn it; the check is skipped for CBR rows.
 	if q.Source != models.SourceCBR102 && revenue >= 0 && netProfit > revenue {
-		add("net profit exceeds revenue — income is likely dividends from subsidiaries (holding-level figures)",
+		add("чистая прибыль больше выручки — доход, вероятно, дивиденды дочерних компаний (отчётность холдинга)",
 			"revenue", "net_profit", "pe", "roe")
 	}
 	return out
@@ -154,33 +154,33 @@ func Sources(history []models.QuarterData) []string {
 func SourceLabel(source string) string {
 	switch source {
 	case models.SourceRSBU:
-		return "RSBU (issuer)"
+		return "РСБУ (эмитент)"
 	case models.SourceCBR102:
-		return "CBR forms 102/101"
+		return "ЦБ, формы 102/101"
 	case models.SourceCSV:
-		return "CSV import"
+		return "импорт CSV"
 	case models.SourceSmartLab:
 		return "smart-lab"
 	case "":
-		return "unknown"
+		return "неизвестно"
 	}
-	return "other" // never echo an unrecognised DB value into the UI
+	return "другое" // never echo an unrecognised DB value into the UI
 }
 
 // SourceNote explains how comparable a source's figures are.
 func SourceNote(source string) string {
 	switch source {
 	case models.SourceRSBU:
-		return "Annual standalone RSBU of the listed legal entity from ГИР БО, not consolidated IFRS. " +
-			"For holding companies revenue/profit are mostly intra-group dividends, so P/E and ROE are not comparable."
+		return "Годовая неконсолидированная РСБУ юрлица-эмитента из ГИР БО, а не МСФО группы. " +
+			"У холдингов выручка и прибыль — в основном внутригрупповые дивиденды, поэтому P/E и ROE несопоставимы."
 	case models.SourceCBR102:
-		return "Bank-only RSBU from CBR forms 102/101, not group IFRS. Revenue is net interest income + fee income (fee expense not netted)."
+		return "РСБУ самого банка из форм ЦБ 102/101, а не МСФО группы. Выручка — чистый процентный доход + комиссионные доходы (комиссионные расходы не вычтены)."
 	case models.SourceCSV:
-		return "Imported from a CSV file; accuracy depends on the file (usually group IFRS)."
+		return "Импортировано из CSV-файла; точность зависит от файла (обычно МСФО группы)."
 	case models.SourceSmartLab:
-		return "Group IFRS figures aggregated by smart-lab.ru."
+		return "МСФО группы, собранные smart-lab.ru."
 	case "":
-		return "Loaded before sources were tracked."
+		return "Загружено до того, как начали учитывать источник."
 	}
 	return ""
 }

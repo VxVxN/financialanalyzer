@@ -107,8 +107,8 @@ func TestSources(t *testing.T) {
 		!IsComparable(models.SourceSmartLab) || !IsComparable("") {
 		t.Error("IsComparable: RSBU/CBR must be non-comparable; smart-lab and legacy (\"\") comparable")
 	}
-	if got := SourceLabel("<img onerror=x>"); got != "other" {
-		t.Errorf("SourceLabel(unknown value) = %q, want \"other\"", got)
+	if got := SourceLabel("<img onerror=x>"); got != "другое" {
+		t.Errorf("SourceLabel(unknown value) = %q, want \"другое\"", got)
 	}
 }
 

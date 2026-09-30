@@ -72,7 +72,7 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <style>
@@ -94,7 +94,7 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
     <div class="chart-container">`, bgColor, textColor, bgColor)
 
 	page := components.NewPage()
-	page.PageTitle = fmt.Sprintf("%s — Financial Analyzer", formatMetricName(metric))
+	page.PageTitle = fmt.Sprintf("%s — Финансовый анализатор", formatMetricName(metric))
 
 	lineChart := buildSeriesChart(seriesByCompany, companies, metric, period, quality)
 	page.AddCharts(lineChart)
@@ -111,11 +111,11 @@ function exportTableCSV() {
 		return Array.from(row.querySelectorAll('th,td')).map(function(cell) {
 			let text = cell.innerText.trim();
 			if (text === '—') text = '';
-			if (/[",\n]/.test(text)) text = '"' + text.replace(/"/g, '""') + '"';
+			if (/[";\n]/.test(text)) text = '"' + text.replace(/"/g, '""') + '"';
 			return text;
-		}).join(',');
+		}).join(';');
 	}).join('\n');
-	const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+	const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
 	const link = document.createElement('a');
 	link.href = URL.createObjectURL(blob);
 	link.download = %q;
@@ -202,12 +202,12 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 	}
 	tooltipFormatter := getTooltipFormatter(metric, unit, sourceBySeries)
 
-	subtitle := "Quarterly"
+	subtitle := "по кварталам"
 	switch period {
 	case analytics.PeriodTTM:
-		subtitle = "Trailing 12 months"
+		subtitle = "LTM (скользящие 12 месяцев)"
 	case analytics.PeriodAnnual:
-		subtitle = "Annual"
+		subtitle = "по годам"
 	}
 
 	line.SetGlobalOptions(
@@ -242,7 +242,7 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 			ContainLabel: opts.Bool(true),
 		}),
 		charts.WithXAxisOpts(opts.XAxis{
-			Name:         "Period",
+			Name:         "Период",
 			NameLocation: "center",
 			NameGap:      30,
 			Type:         "category",
@@ -426,14 +426,14 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 		.export-btn:hover { background-color: %s; }
 	</style>
 	<div class="table-toolbar">
-		<button class="export-btn" onclick="exportTableCSV()">⬇ Export CSV</button>
+		<button class="export-btn" onclick="exportTableCSV()">⬇ Экспорт в CSV</button>
 	</div>
 	<div class="table-container">
 		<table class="data-table">
 			<thead>
 				<tr>
-					<th>Company / Period</th>
-					<th>Source</th>`,
+					<th>Компания / период</th>
+					<th>Источник</th>`,
 		bgPrimary, textPrimary, shadowColor, bgButton, borderColor, textPrimary, borderColor, textPrimary, bgSecondary, bgButtonHover,
 		bgButton, textPrimary, borderColor, bgButtonHover)
 
@@ -488,6 +488,8 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 				fmt.Fprintf(w, `<td%s>%.2fx</td>`, classAttr, v)
 			} else if unit != "" {
 				fmt.Fprintf(w, `<td%s>%.2f%s</td>`, classAttr, v, unit)
+			} else if metric == "pe" {
+				fmt.Fprintf(w, `<td%s>%.2f</td>`, classAttr, v)
 			} else {
 				fmt.Fprintf(w, `<td%s>%s</td>`, classAttr, humanFormat(v))
 			}
@@ -496,25 +498,17 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 	}
 
 	fmt.Fprintf(w, `</tbody></table></div>`)
-	fmt.Fprintf(w, `<div class="table-legend">⚠ Source: figures are not group IFRS and may not be comparable across companies. `+
-		`⚠ Cell / ▲ point: the value looks suspicious (hover for the reason).</div>`)
+	fmt.Fprintf(w, `<div class="table-legend">⚠ Источник: данные не по МСФО группы и могут быть несопоставимы между компаниями. `+
+		`⚠ Ячейка / ▲ точка: значение выглядит подозрительно (причина — во всплывающей подсказке).</div>`)
 }
 
-// humanFormat collapses large numbers to T/B/M/K. Used by the table for raw
-// flow/stock values where 7-trillion-with-no-grouping is unreadable.
+// humanFormat renders a money value stored in billions of RUB (the unit of
+// every flow/stock column) as "X млрд" or, from 1000 bln up, "X трлн".
 func humanFormat(v float64) string {
-	abs := math.Abs(v)
-	switch {
-	case abs >= 1e12:
-		return fmt.Sprintf("%.2fT", v/1e12)
-	case abs >= 1e9:
-		return fmt.Sprintf("%.2fB", v/1e9)
-	case abs >= 1e6:
-		return fmt.Sprintf("%.2fM", v/1e6)
-	case abs >= 1e3:
-		return fmt.Sprintf("%.2fK", v/1e3)
+	if math.Abs(v) >= 1000 {
+		return fmt.Sprintf("%.2f трлн", v/1000)
 	}
-	return fmt.Sprintf("%.2f", v)
+	return fmt.Sprintf("%.2f млрд", v)
 }
 
 // getTooltipFormatter returns the ECharts tooltip function. sources maps each
@@ -567,8 +561,8 @@ func jsString(s string) string {
 }
 
 func tooltipFormatterBody(metric, unit string) string {
-	if unit == "" {
-		// large absolute numbers (revenue, cap, debt, etc.)
+	if unit == "" && metric != "pe" {
+		// money in billions of RUB (revenue, cap, debt, etc.)
 		return `
 			function(params) {
 				let result = params[0].name + '<br/>';
@@ -577,23 +571,17 @@ func tooltipFormatterBody(metric, unit string) string {
 						let value = params[i].value;
 						let absV = Math.abs(value);
 						let formattedValue;
-						if (absV >= 1000000000000) {
-							formattedValue = (value / 1000000000000).toFixed(2) + 'T';
-						} else if (absV >= 1000000000) {
-							formattedValue = (value / 1000000000).toFixed(2) + 'B';
-						} else if (absV >= 1000000) {
-							formattedValue = (value / 1000000).toFixed(2) + 'M';
-						} else if (absV >= 1000) {
-							formattedValue = (value / 1000).toFixed(2) + 'K';
+						if (absV >= 1000) {
+							formattedValue = (value / 1000).toFixed(2) + ' трлн';
 						} else {
-							formattedValue = value.toFixed(2);
+							formattedValue = value.toFixed(2) + ' млрд';
 						}
 						result += params[i].marker + ' ' +
 								params[i].seriesName + srcOf(params[i].seriesName) + ': ' +
 								formattedValue + '<br/>';
 					} else {
 						result += params[i].marker + ' ' +
-								params[i].seriesName + ': No data<br/>';
+								params[i].seriesName + ': нет данных<br/>';
 					}
 				}
 				return result;
@@ -610,7 +598,7 @@ func tooltipFormatterBody(metric, unit string) string {
 							params[i].value.toFixed(2) + '` + unit + `' + '<br/>';
 				} else {
 					result += params[i].marker + ' ' +
-							params[i].seriesName + ': No data<br/>';
+							params[i].seriesName + ': нет данных<br/>';
 				}
 			}
 			return result;
@@ -621,47 +609,47 @@ func tooltipFormatterBody(metric, unit string) string {
 func formatMetricName(metric string) string {
 	switch metric {
 	case "revenue":
-		return "Revenue"
+		return "Выручка"
 	case "net_profit":
-		return "Net Profit"
+		return "Чистая прибыль"
 	case "ebitda":
 		return "EBITDA"
 	case "pe":
-		return "P/E Ratio"
+		return "P/E"
 	case "roe":
 		return "ROE"
 	case "capitalization":
-		return "Market Cap"
+		return "Капитализация"
 	case "debt":
-		return "Debt"
+		return "Долг"
 	case "equity":
-		return "Equity"
+		return "Капитал"
 	case "dividends":
-		return "Dividends"
+		return "Дивиденды"
 	case "pb":
-		return "P/B Ratio"
+		return "P/B"
 	case "div_yield":
-		return "Dividend Yield"
+		return "Дивидендная доходность"
 	case "net_margin":
-		return "Net Margin"
+		return "Чистая маржа"
 	case "ebitda_margin":
-		return "EBITDA Margin"
+		return "Маржа EBITDA"
 	case "debt_ebitda":
-		return "Debt / EBITDA"
+		return "Долг / EBITDA"
 	case "revenue_yoy":
-		return "Revenue YoY"
+		return "Выручка г/г"
 	case "net_profit_yoy":
-		return "Net Profit YoY"
+		return "Чистая прибыль г/г"
 	case "ebitda_yoy":
-		return "EBITDA YoY"
+		return "EBITDA г/г"
 	case "revenue_cagr3":
-		return "Revenue CAGR (3Y)"
+		return "CAGR выручки (3 года)"
 	case "net_profit_cagr3":
-		return "Net Profit CAGR (3Y)"
+		return "CAGR чистой прибыли (3 года)"
 	case "revenue_cagr5":
-		return "Revenue CAGR (5Y)"
+		return "CAGR выручки (5 лет)"
 	case "net_profit_cagr5":
-		return "Net Profit CAGR (5Y)"
+		return "CAGR чистой прибыли (5 лет)"
 	}
 	return metric
 }
@@ -669,31 +657,31 @@ func formatMetricName(metric string) string {
 func metricDescription(metric string) string {
 	switch metric {
 	case "revenue":
-		return "Revenue (banks: net interest income + fee and commission income)"
+		return "Выручка (банки: чистый процентный доход + комиссионные доходы)"
 	case "net_margin":
-		return "Net profit as % of revenue — pricing power & efficiency"
+		return "Чистая прибыль в % от выручки — ценовая сила и эффективность"
 	case "ebitda_margin":
-		return "EBITDA as % of revenue — operating profitability"
+		return "EBITDA в % от выручки — операционная рентабельность"
 	case "debt_ebitda":
-		return "Leverage — how many years of EBITDA to repay debt"
+		return "Долговая нагрузка — за сколько лет EBITDA можно погасить долг"
 	case "revenue_yoy", "net_profit_yoy", "ebitda_yoy":
-		return "Year-over-year growth, %"
+		return "Рост год к году, %"
 	case "revenue_cagr3", "net_profit_cagr3":
-		return "Compound annual growth, last 3 years"
+		return "Среднегодовой рост за последние 3 года"
 	case "revenue_cagr5", "net_profit_cagr5":
-		return "Compound annual growth, last 5 years"
+		return "Среднегодовой рост за последние 5 лет"
 	case "pe":
-		return "Price / Earnings — lower is cheaper (negative = losses)"
+		return "Цена / прибыль — чем ниже, тем дешевле (отрицательный = убыток)"
 	case "roe":
-		return "Return on equity — how efficiently capital is used"
+		return "Рентабельность капитала — насколько эффективно используется капитал"
 	case "pb":
-		return "Price / Book — market cap per ruble of equity"
+		return "Цена / балансовая стоимость — капитализация на рубль капитала"
 	case "div_yield":
-		return "Dividends with record dates in the year / year-end market cap, %"
+		return "Дивиденды с датой отсечки в этом году / капитализация на конец года, %"
 	case "equity":
-		return "Shareholders' equity (banks: bank-only RSBU balance, form 101)"
+		return "Собственный капитал (банки: баланс самого банка по РСБУ, форма 101)"
 	case "dividends":
-		return "Dividends by record-date year: per share x current share count (approximate after buybacks, issues, splits)"
+		return "Сумма дивидендов за год (по году отсечки), млрд руб."
 	}
 	return ""
 }

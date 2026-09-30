@@ -49,11 +49,11 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "text/html")
 
 	fmt.Fprintf(w, `<!DOCTYPE html>
-<html lang="en"%s>
+<html lang="ru"%s>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>%s — Dashboard</title>
+<title>%s — дашборд</title>
 <style>
 :root {
   --bg-primary: %s;
@@ -227,7 +227,7 @@ a:hover { text-decoration: underline; }
 <div class="container">
   <div class="toolbar">
     <div class="left">
-      <a href="/?theme=%s">← Back to comparison</a>
+      <a href="/?theme=%s">← К сравнению</a>
     </div>
     <button class="theme-toggle" onclick="toggleTheme()">%s</button>
   </div>
@@ -241,7 +241,7 @@ a:hover { text-decoration: underline; }
 	)
 
 	if len(history) == 0 {
-		fmt.Fprintf(w, `<div class="empty-state">No data for company <b>%s</b>.</div></div></body></html>`,
+		fmt.Fprintf(w, `<div class="empty-state">Нет данных по компании <b>%s</b>.</div></div></body></html>`,
 			html.EscapeString(company))
 		return
 	}
@@ -253,7 +253,7 @@ a:hover { text-decoration: underline; }
 	case hasQuote && analytics.QuoteIsFresh(quote, controller.now()):
 		renderCurrent(w, analytics.BuildCurrent(history, quote))
 	case hasQuote && quote.Capitalization > 0:
-		fmt.Fprintf(w, `<div class="section-title">Current valuation</div><p class="stale-note">Last stored close is from %s — too old to value against (refresh with <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
+		fmt.Fprintf(w, `<div class="section-title">Текущая оценка</div><p class="stale-note">Последняя сохранённая цена закрытия от %s — слишком старая для оценки (обновите: <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
 			html.EscapeString(quote.PriceDate.Format("2006-01-02")))
 	}
 	renderKPIs(w, snap)
@@ -297,18 +297,18 @@ async function saveNote() {
   const company = %q;
   const note = document.getElementById('noteText').value;
   const status = document.getElementById('noteStatus');
-  status.textContent = 'Saving…';
+  status.textContent = 'Сохранение…';
   try {
     const resp = await fetch('/api/company-note', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ company, note })
     });
-    if (!resp.ok) throw new Error('Failed to save note');
-    status.textContent = 'Saved';
+    if (!resp.ok) throw new Error('не удалось сохранить заметку');
+    status.textContent = 'Сохранено';
     setTimeout(() => status.textContent = '', 2000);
   } catch (err) {
-    status.textContent = 'Error: ' + err.message;
+    status.textContent = 'Ошибка: ' + err.message;
   }
 }
 </script>
@@ -344,9 +344,9 @@ func themeAttr(theme string) string {
 }
 func themeToggleLabel(theme string) string {
 	if theme == "dark" {
-		return "☀ Light"
+		return "☀ Светлая"
 	}
-	return "🌙 Dark"
+	return "🌙 Тёмная"
 }
 
 func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources []string) {
@@ -357,14 +357,14 @@ func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources 
     <h1>%s</h1>
     <div class="meta">
       <span class="pill">%s</span>
-      <span class="pill" title="%s">Source: %s</span>
-      <span>Latest: %s</span>
+      <span class="pill" title="%s">Источник: %s</span>
+      <span>Последний период: %s</span>
     </div>
   </div>
   <div class="score-box">
     <div class="value">%d</div>
     <div class="stars">%s</div>
-    <div class="label">Quality score</div>
+    <div class="label">Итоговый балл</div>
   </div>
 </div>`,
 		html.EscapeString(s.Company),
@@ -391,7 +391,7 @@ func renderDataQuality(w http.ResponseWriter, sources []string, anomalies []anal
 	if len(caveats) == 0 && len(anomalies) == 0 {
 		return
 	}
-	fmt.Fprint(w, `<div class="quality"><div class="title">⚠ Data quality</div>`)
+	fmt.Fprint(w, `<div class="quality"><div class="title">⚠ Качество данных</div>`)
 	for _, c := range caveats {
 		fmt.Fprintf(w, `<p>%s</p>`, c)
 	}
@@ -405,7 +405,7 @@ func renderDataQuality(w http.ResponseWriter, sources []string, anomalies []anal
 		}
 		fmt.Fprint(w, `</ul>`)
 		if extra := len(anomalies) - maxQualityItems; extra > 0 {
-			fmt.Fprintf(w, `<p>…and %d more.</p>`, extra)
+			fmt.Fprintf(w, `<p>…и ещё %d.</p>`, extra)
 		}
 	}
 	fmt.Fprint(w, `</div>`)
@@ -420,7 +420,7 @@ func scoreStars(score int) string {
 // renderCurrent shows valuation at the latest exchange close, each multiple
 // annotated with the period its fundamental comes from.
 func renderCurrent(w http.ResponseWriter, c analytics.Current) {
-	fmt.Fprintf(w, `<div class="section-title">Current valuation · close %s</div>`, html.EscapeString(c.PriceDate))
+	fmt.Fprintf(w, `<div class="section-title">Текущая оценка · закрытие %s</div>`, html.EscapeString(c.PriceDate))
 	sub := func(prefix, label string) string {
 		if label == "" {
 			return ""
@@ -428,10 +428,10 @@ func renderCurrent(w http.ResponseWriter, c analytics.Current) {
 		return prefix + " " + label
 	}
 	renderKPICards(w, []kpiCard{
-		{name: "Market Cap (now)", value: fmtMoney(c.Capitalization)},
-		{name: "P/E (now)", value: fmtRatio(c.PE), sub: sub("TTM earnings to", c.EarningsLabel)},
-		{name: "P/B (now)", value: fmtRatio(c.PB), sub: sub("equity", c.EquityLabel)},
-		{name: "Dividend Yield (now)", value: fmtPct(c.DivYield), sub: sub("dividends", c.DividendsLabel)},
+		{name: "Капитализация (сейчас)", value: fmtMoney(c.Capitalization)},
+		{name: "P/E (сейчас)", value: fmtRatio(c.PE), sub: sub("прибыль LTM на", c.EarningsLabel)},
+		{name: "P/B (сейчас)", value: fmtRatio(c.PB), sub: sub("капитал на", c.EquityLabel)},
+		{name: "Див. доходность (сейчас)", value: fmtPct(c.DivYield), sub: sub("дивиденды за", c.DividendsLabel)},
 	})
 }
 
@@ -441,7 +441,7 @@ func periodNote(s analytics.Snapshot, label string) string {
 	if label == "" || label == s.LastLabel {
 		return ""
 	}
-	return "as of " + label
+	return "на " + label
 }
 
 // joinSub joins non-empty KPI sub-lines.
@@ -457,22 +457,22 @@ func joinSub(parts ...string) string {
 
 func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 	cards := []kpiCard{
-		{name: "Market Cap", value: fmtMoney(s.Capitalization), sub: periodNote(s, s.CapLabel)},
-		{name: "Revenue (TTM)", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("YoY", s.RevenueYoY)},
-		{name: "Net Profit (TTM)", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("YoY", s.NetProfitYoY)},
-		{name: "EBITDA (TTM)", value: fmtMoney(s.EBITDA)},
-		{name: "Net Margin", value: fmtPct(s.NetMargin)},
-		{name: "EBITDA Margin", value: fmtPct(s.EBITDAMargin)},
+		{name: "Капитализация", value: fmtMoney(s.Capitalization), sub: periodNote(s, s.CapLabel)},
+		{name: "Выручка (LTM)", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("г/г", s.RevenueYoY)},
+		{name: "Чистая прибыль (LTM)", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("г/г", s.NetProfitYoY)},
+		{name: "EBITDA (LTM)", value: fmtMoney(s.EBITDA)},
+		{name: "Чистая маржа", value: fmtPct(s.NetMargin)},
+		{name: "Маржа EBITDA", value: fmtPct(s.EBITDAMargin)},
 		{name: "ROE", value: fmtPct(s.ROE), sub: periodNote(s, s.ROELabel)},
 		{name: "P/E", value: fmtRatio(s.PE), sub: joinSub(peComment(s.PE), periodNote(s, s.PELabel))},
 		{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
-		{name: "Dividend Yield", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
-		{name: "Debt", value: fmtMoney(s.Debt), sub: periodNote(s, s.DebtLabel)},
-		{name: "Debt / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
-		{name: "Revenue CAGR (3Y)", value: fmtPct(s.RevenueCAGR3Y)},
-		{name: "Net Profit CAGR (3Y)", value: fmtPct(s.NetProfitCAGR3)},
-		{name: "Revenue CAGR (5Y)", value: fmtPct(s.RevenueCAGR5Y)},
-		{name: "Net Profit CAGR (5Y)", value: fmtPct(s.NetProfitCAGR5)},
+		{name: "Див. доходность", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
+		{name: "Долг", value: fmtMoney(s.Debt), sub: periodNote(s, s.DebtLabel)},
+		{name: "Долг / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
+		{name: "CAGR выручки (3 года)", value: fmtPct(s.RevenueCAGR3Y)},
+		{name: "CAGR прибыли (3 года)", value: fmtPct(s.NetProfitCAGR3)},
+		{name: "CAGR выручки (5 лет)", value: fmtPct(s.RevenueCAGR5Y)},
+		{name: "CAGR прибыли (5 лет)", value: fmtPct(s.NetProfitCAGR5)},
 	}
 	renderKPICards(w, cards)
 }
@@ -512,10 +512,10 @@ func renderSparklines(w http.ResponseWriter, history []models.QuarterData) {
 	specs := []struct {
 		metric, name string
 	}{
-		{"revenue", "Revenue"},
-		{"net_profit", "Net Profit"},
+		{"revenue", "Выручка"},
+		{"net_profit", "Чистая прибыль"},
 		{"ebitda", "EBITDA"},
-		{"debt", "Debt"},
+		{"debt", "Долг"},
 	}
 
 	fmt.Fprintf(w, `<div class="sparkline-grid">`)
@@ -534,7 +534,7 @@ func renderSparklines(w http.ResponseWriter, history []models.QuarterData) {
 					deltaClass = "neg"
 					sign = ""
 				}
-				deltaText = fmt.Sprintf("%s%.1f%% YoY", sign, delta)
+				deltaText = fmt.Sprintf("%s%.1f%% г/г", sign, delta)
 			}
 		}
 		valueStr := "—"
@@ -543,7 +543,7 @@ func renderSparklines(w http.ResponseWriter, history []models.QuarterData) {
 		}
 		svg := buildSparklineSVG(series)
 		fmt.Fprintf(w, `<div class="spark">
-  <div class="name">%s (TTM)</div>
+  <div class="name">%s (LTM)</div>
   <div class="value">%s</div>
   <div class="delta %s">%s</div>
   %s
@@ -622,29 +622,29 @@ func renderDashboardChart(w http.ResponseWriter, history []models.QuarterData, t
 		company = history[0].Company
 	}
 
-	fmt.Fprintf(w, `<div class="section-title">Trend explorer</div>
+	fmt.Fprintf(w, `<div class="section-title">Динамика показателей</div>
 <div class="metric-row">
-  <span class="label">Metric</span>
-  <button class="btn metric-btn active" onclick="selectMetric('revenue', this)">Revenue</button>
-  <button class="btn metric-btn" onclick="selectMetric('net_profit', this)">Net Profit</button>
+  <span class="label">Показатель</span>
+  <button class="btn metric-btn active" onclick="selectMetric('revenue', this)">Выручка</button>
+  <button class="btn metric-btn" onclick="selectMetric('net_profit', this)">Чистая прибыль</button>
   <button class="btn metric-btn" onclick="selectMetric('ebitda', this)">EBITDA</button>
-  <button class="btn metric-btn" onclick="selectMetric('capitalization', this)">Market Cap</button>
-  <button class="btn metric-btn" onclick="selectMetric('debt', this)">Debt</button>
+  <button class="btn metric-btn" onclick="selectMetric('capitalization', this)">Капитализация</button>
+  <button class="btn metric-btn" onclick="selectMetric('debt', this)">Долг</button>
   <button class="btn metric-btn" onclick="selectMetric('pe', this)">P/E</button>
   <button class="btn metric-btn" onclick="selectMetric('roe', this)">ROE</button>
   <button class="btn metric-btn" onclick="selectMetric('pb', this)">P/B</button>
-  <button class="btn metric-btn" onclick="selectMetric('div_yield', this)">Div Yield</button>
-  <button class="btn metric-btn" onclick="selectMetric('net_margin', this)">Net Margin</button>
-  <button class="btn metric-btn" onclick="selectMetric('ebitda_margin', this)">EBITDA Margin</button>
-  <button class="btn metric-btn" onclick="selectMetric('debt_ebitda', this)">Debt/EBITDA</button>
-  <button class="btn metric-btn" onclick="selectMetric('revenue_yoy', this)">Revenue YoY</button>
-  <button class="btn metric-btn" onclick="selectMetric('net_profit_yoy', this)">Net Profit YoY</button>
+  <button class="btn metric-btn" onclick="selectMetric('div_yield', this)">Див. доходность</button>
+  <button class="btn metric-btn" onclick="selectMetric('net_margin', this)">Чистая маржа</button>
+  <button class="btn metric-btn" onclick="selectMetric('ebitda_margin', this)">Маржа EBITDA</button>
+  <button class="btn metric-btn" onclick="selectMetric('debt_ebitda', this)">Долг/EBITDA</button>
+  <button class="btn metric-btn" onclick="selectMetric('revenue_yoy', this)">Выручка г/г</button>
+  <button class="btn metric-btn" onclick="selectMetric('net_profit_yoy', this)">Прибыль г/г</button>
 </div>
 <div class="metric-row">
-  <span class="label">Period</span>
-  <button class="btn period-btn" onclick="selectPeriod('quarter', this)">Quarterly</button>
-  <button class="btn period-btn active" onclick="selectPeriod('ttm', this)">TTM</button>
-  <button class="btn period-btn" onclick="selectPeriod('annual', this)">Annual</button>
+  <span class="label">Период</span>
+  <button class="btn period-btn" onclick="selectPeriod('quarter', this)">Квартал</button>
+  <button class="btn period-btn active" onclick="selectPeriod('ttm', this)">LTM</button>
+  <button class="btn period-btn" onclick="selectPeriod('annual', this)">Год</button>
 </div>
 <div class="chart-card">
   <iframe id="dash-chart" src="/chart/revenue?period=ttm&theme=%s&companies=%s"
@@ -660,43 +660,43 @@ func renderScoreBreakdown(w http.ResponseWriter, s analytics.Snapshot) {
 		ok     bool
 		good   bool
 	}{
-		{"Growth (Revenue CAGR 3Y)", fmtPct(s.RevenueCAGR3Y), "30%", !math.IsNaN(s.RevenueCAGR3Y), s.RevenueCAGR3Y >= 10},
-		{"Profitability (ROE)", fmtPct(s.ROE), "25%", !math.IsNaN(s.ROE), s.ROE >= 15},
-		{"Margins (Net Margin)", fmtPct(s.NetMargin), "15%", !math.IsNaN(s.NetMargin), s.NetMargin >= 10},
-		{"Leverage (Debt/EBITDA)", fmtMultiple(s.DebtEBITDA), "15%", !math.IsNaN(s.DebtEBITDA), s.DebtEBITDA <= 2},
-		{"Valuation (P/E)", fmtRatio(s.PE), "15%", !math.IsNaN(s.PE) && s.PE > 0, s.PE > 0 && s.PE <= 12},
+		{"Рост (CAGR выручки, 3 года)", fmtPct(s.RevenueCAGR3Y), "30%", !math.IsNaN(s.RevenueCAGR3Y), s.RevenueCAGR3Y >= 10},
+		{"Рентабельность (ROE)", fmtPct(s.ROE), "25%", !math.IsNaN(s.ROE), s.ROE >= 15},
+		{"Маржинальность (чистая маржа)", fmtPct(s.NetMargin), "15%", !math.IsNaN(s.NetMargin), s.NetMargin >= 10},
+		{"Долговая нагрузка (Долг/EBITDA)", fmtMultiple(s.DebtEBITDA), "15%", !math.IsNaN(s.DebtEBITDA), s.DebtEBITDA <= 2},
+		{"Оценка (P/E)", fmtRatio(s.PE), "15%", !math.IsNaN(s.PE) && s.PE > 0, s.PE > 0 && s.PE <= 12},
 	}
 	fmt.Fprintf(w, `<div class="score-breakdown">
   <table>
-    <thead><tr><th>Component</th><th>Weight</th><th class="num">Value</th><th>Verdict</th></tr></thead>
+    <thead><tr><th>Компонент</th><th>Вес</th><th class="num">Значение</th><th>Вывод</th></tr></thead>
     <tbody>`)
 	for _, r := range rows {
 		var verdict string
 		switch {
 		case !r.ok:
-			verdict = `<span style="color:var(--text-muted)">no data</span>`
+			verdict = `<span style="color:var(--text-muted)">нет данных</span>`
 		case r.good:
-			verdict = `<span style="color:var(--pos)">good</span>`
+			verdict = `<span style="color:var(--pos)">хорошо</span>`
 		default:
-			verdict = `<span style="color:var(--warn)">weak</span>`
+			verdict = `<span style="color:var(--warn)">слабо</span>`
 		}
 		fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td class="num">%s</td><td>%s</td></tr>`,
 			html.EscapeString(r.name), r.weight, html.EscapeString(r.value), verdict)
 	}
 	fmt.Fprintf(w, `</tbody></table>
   <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">
-    Heuristic score, not a recommendation. Read each component and form your own judgment.
+    Эвристический балл, а не рекомендация. Изучите каждый компонент и составьте собственное мнение.
   </div>
 </div>`)
 }
 
 func renderNotes(w http.ResponseWriter, company, note string) {
 	fmt.Fprintf(w, `<div class="note-card">
-  <div class="section-title" style="margin-top:0">Your notes</div>
-  <textarea id="noteText" placeholder="Investment thesis, watchlist reminders, due-diligence findings…">%s</textarea>
+  <div class="section-title" style="margin-top:0">Ваши заметки</div>
+  <textarea id="noteText" placeholder="Инвестиционная идея, напоминания, результаты анализа…">%s</textarea>
   <div class="note-actions">
     <span class="status" id="noteStatus"></span>
-    <button class="save-btn" onclick="saveNote()">Save</button>
+    <button class="save-btn" onclick="saveNote()">Сохранить</button>
   </div>
 </div>`, html.EscapeString(note))
 }
@@ -757,15 +757,15 @@ func peComment(v float64) string {
 	}
 	switch {
 	case v <= 0:
-		return "loss-making"
+		return "убыток"
 	case v <= 8:
-		return "cheap"
+		return "дёшево"
 	case v <= 15:
-		return "fair"
+		return "справедливо"
 	case v <= 25:
-		return "expensive"
+		return "дорого"
 	}
-	return "very expensive"
+	return "очень дорого"
 }
 
 func leverageComment(v float64) string {
@@ -774,13 +774,13 @@ func leverageComment(v float64) string {
 	}
 	switch {
 	case v < 0:
-		return "net cash"
+		return "чистая денежная позиция"
 	case v <= 1:
-		return "low leverage"
+		return "низкая нагрузка"
 	case v <= 3:
-		return "moderate"
+		return "умеренная"
 	case v <= 5:
-		return "high"
+		return "высокая"
 	}
-	return "very high"
+	return "очень высокая"
 }

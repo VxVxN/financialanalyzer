@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Screener — Financial Analyzer</title>
+    <title>Скринер — Финансовый анализатор</title>
     <script>
         // Apply the saved theme before first paint (shared with the index page).
         (function () {
@@ -103,37 +103,37 @@
 <body>
 <div class="container">
     <div class="topline">
-        <a href="/">← Comparison</a>
-        <button id="themeToggle" type="button">Theme</button>
+        <a href="/">← Сравнение</a>
+        <button id="themeToggle" type="button">Тема</button>
     </div>
-    <h1>Screener</h1>
-    <p class="sub">All companies side by side. Click a column to sort; valuation uses the latest exchange close where a quote is stored.</p>
+    <h1>Скринер</h1>
+    <p class="sub">Все компании в одной таблице. Нажмите на заголовок столбца для сортировки; оценка считается по последней биржевой цене закрытия, если котировка сохранена.</p>
 
     <div class="filters">
-        <label>Search
-            <input id="q" type="search" placeholder="Ticker…">
+        <label>Поиск
+            <input id="q" type="search" placeholder="Тикер…">
         </label>
-        <label>Category
+        <label>Категория
             <select id="category">
-                <option value="">All</option>
+                <option value="">Все</option>
                 {{range .Categories}}<option value="{{.}}">{{.}}</option>{{end}}
             </select>
         </label>
         <label>P/E
-            <span class="range"><input id="pe_min" type="number" step="any" placeholder="min"><input id="pe_max" type="number" step="any" placeholder="max"></span>
+            <span class="range"><input id="pe_min" type="number" step="any" placeholder="от"><input id="pe_max" type="number" step="any" placeholder="до"></span>
         </label>
         <label>P/B
-            <span class="range"><input id="pb_min" type="number" step="any" placeholder="min"><input id="pb_max" type="number" step="any" placeholder="max"></span>
+            <span class="range"><input id="pb_min" type="number" step="any" placeholder="от"><input id="pb_max" type="number" step="any" placeholder="до"></span>
         </label>
-        <label>Div. yield, %
-            <span class="range"><input id="div_yield_min" type="number" step="any" placeholder="min"><input id="div_yield_max" type="number" step="any" placeholder="max"></span>
+        <label>Див. доходность, %
+            <span class="range"><input id="div_yield_min" type="number" step="any" placeholder="от"><input id="div_yield_max" type="number" step="any" placeholder="до"></span>
         </label>
         <label>ROE, %
-            <span class="range"><input id="roe_min" type="number" step="any" placeholder="min"><input id="roe_max" type="number" step="any" placeholder="max"></span>
+            <span class="range"><input id="roe_min" type="number" step="any" placeholder="от"><input id="roe_max" type="number" step="any" placeholder="до"></span>
         </label>
-        <label class="check"><input id="comparable" type="checkbox"> Comparable figures only</label>
-        <label class="check"><input id="noflags" type="checkbox"> No data-quality flags</label>
-        <button id="reset" type="button">Reset</button>
+        <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные</label>
+        <label class="check"><input id="noflags" type="checkbox"> Без замечаний к качеству данных</label>
+        <button id="reset" type="button">Сбросить</button>
     </div>
 
     <p class="count" id="count"></p>
@@ -144,11 +144,11 @@
         </table>
     </div>
     <p class="legend">
-        <b>Valuation</b>: “live” = market cap at the latest close (date shown; closes older than 30 days are ignored) over trailing earnings
-        (period after “E”) / latest equity / latest dividends — multiples on fundamentals older than 18 months are left blank;
-        otherwise the values stored for the latest period. A loss gives no P/E.
-        <b>Comparable</b>: standalone RSBU / CBR figures (holding-level, not consolidated) are not comparable across companies.
-        <b>Flags</b>: data-quality anomalies in the company's history — open the dashboard for details.
+        <b>Основа оценки</b>: «рынок» — капитализация по последней цене закрытия (дата указана; закрытия старше 30 дней не учитываются),
+        делённая на прибыль LTM (период после «прибыль») / последний капитал / последние дивиденды — мультипликаторы по отчётности
+        старше 18 месяцев не показываются; «отчёт» — значения, сохранённые за последний период. При убытке P/E не считается.
+        <b>Сопоставимость</b>: неконсолидированная РСБУ / данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
+        <b>Замечания</b>: аномалии качества данных в истории компании — подробности на дашборде.
     </p>
 </div>
 
@@ -158,21 +158,21 @@
 
     // Column spec: key, header, kind (text|money|ratio|pct|int), and how to render.
     const COLUMNS = [
-        { key: 'company', label: 'Company', kind: 'text' },
-        { key: 'category', label: 'Category', kind: 'text', cls: 'left' },
-        { key: 'capitalization', label: 'Market cap, bln', kind: 'money' },
+        { key: 'company', label: 'Компания', kind: 'text' },
+        { key: 'category', label: 'Категория', kind: 'text', cls: 'left' },
+        { key: 'capitalization', label: 'Капитализация, млрд', kind: 'money' },
         { key: 'pe', label: 'P/E', kind: 'ratio' },
         { key: 'pb', label: 'P/B', kind: 'ratio' },
-        { key: 'div_yield', label: 'Div. yield', kind: 'pct' },
+        { key: 'div_yield', label: 'Див. доходность', kind: 'pct' },
         { key: 'roe', label: 'ROE', kind: 'pct' },
-        { key: 'net_margin', label: 'Net margin', kind: 'pct' },
-        { key: 'debt_ebitda', label: 'Debt/EBITDA', kind: 'ratio' },
-        { key: 'revenue_yoy', label: 'Revenue YoY', kind: 'pct', signed: true },
-        { key: 'net_profit_yoy', label: 'Profit YoY', kind: 'pct', signed: true },
-        { key: 'score', label: 'Score', kind: 'int' },
-        { key: 'anomalies', label: 'Flags', kind: 'int' },
-        { key: 'valuation', label: 'Valuation', kind: 'text', cls: 'left' },
-        { key: 'source', label: 'Source', kind: 'text', cls: 'left' },
+        { key: 'net_margin', label: 'Чистая маржа', kind: 'pct' },
+        { key: 'debt_ebitda', label: 'Долг/EBITDA', kind: 'ratio' },
+        { key: 'revenue_yoy', label: 'Выручка г/г', kind: 'pct', signed: true },
+        { key: 'net_profit_yoy', label: 'Прибыль г/г', kind: 'pct', signed: true },
+        { key: 'score', label: 'Балл', kind: 'int' },
+        { key: 'anomalies', label: 'Замечания', kind: 'int' },
+        { key: 'valuation', label: 'Основа оценки', kind: 'text', cls: 'left' },
+        { key: 'source', label: 'Источник', kind: 'text', cls: 'left' },
     ];
 
     let sortKey = 'capitalization';
@@ -186,8 +186,8 @@
         return labels.join(', ');
     }
     function valuationText(row) {
-        const earnings = row.earnings_period ? ' · E ' + row.earnings_period : '';
-        return (row.current ? 'live · ' + row.price_date : 'stored · ' + (row.last_period || '—')) + earnings;
+        const earnings = row.earnings_period ? ' · прибыль ' + row.earnings_period : '';
+        return (row.current ? 'рынок · ' + row.price_date : 'отчёт · ' + (row.last_period || '—')) + earnings;
     }
     function sortValue(row, key) {
         if (key === 'source') return sourceText(row);
@@ -247,9 +247,9 @@
             return sortDir * (va - vb);
         });
         renderHead();
-        $('count').textContent = rows.length + ' of ' + ROWS.length + ' companies';
+        $('count').textContent = 'Показано ' + rows.length + ' из ' + ROWS.length;
         if (!rows.length) {
-            $('body').innerHTML = '<tr><td class="empty" colspan="' + COLUMNS.length + '">No companies match the filters.</td></tr>';
+            $('body').innerHTML = '<tr><td class="empty" colspan="' + COLUMNS.length + '">Нет компаний, подходящих под фильтры.</td></tr>';
             return;
         }
         const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
@@ -259,14 +259,14 @@
             }
             if (c.key === 'category') return '<td class="left">' + esc(r.category || '—') + '</td>';
             if (c.key === 'valuation') {
-                const title = r.stale ? ' title="Fundamentals are too old to value at today\'s price"' : '';
+                const title = r.stale ? ' title="Отчётность слишком старая для оценки по текущей цене"' : '';
                 return '<td class="left muted' + (r.stale ? ' flag' : '') + '"' + title + '>' + esc(valuationText(r)) + '</td>';
             }
             if (c.key === 'source') {
                 return '<td class="left"><span class="pill' + (r.comparable ? '' : ' warn') + '">' + esc(sourceText(r)) + '</span></td>';
             }
             if (c.key === 'anomalies') {
-                return r.anomalies ? '<td class="flag" title="Data-quality flags">' + r.anomalies + '</td>' : '<td class="na">0</td>';
+                return r.anomalies ? '<td class="flag" title="Замечания к качеству данных">' + r.anomalies + '</td>' : '<td class="na">0</td>';
             }
             const text = fmt(c, r[c.key]);
             if (text === null) return '<td class="na">—</td>';

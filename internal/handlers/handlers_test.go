@@ -280,7 +280,7 @@ func TestChartHasCSVExport(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "exportTableCSV") || !strings.Contains(body, "Export CSV") {
+	if !strings.Contains(body, "exportTableCSV") || !strings.Contains(body, "Экспорт в CSV") {
 		t.Errorf("chart page is missing the CSV export control")
 	}
 	if !strings.Contains(body, "revenue_export.csv") {
@@ -314,14 +314,14 @@ func TestChartShowsSourceAndFlags(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"<th>Source</th>",
+		"<th>Источник</th>",
 		`class="source warn"`, // X5: RSBU is not comparable
-		"RSBU (issuer)",
+		"РСБУ (эмитент)",
 		`<td class="source" `, // SBER: smart-lab is comparable, no warning
 		`class="flag"`,        // X5 2025-Q4 P/E cell flagged
-		"net profit exceeds revenue",
+		"чистая прибыль больше выручки",
 		`"triangle"`, // flagged point on the chart
-		`const src = {['SBER']: 'smart-lab', ['X5']: 'RSBU (issuer)'}`, // tooltip source map
+		`const src = {['SBER']: 'smart-lab', ['X5']: decodeURIComponent('%D0%A0%D0%A1%D0%91%D0%A3 (%D1%8D%D0%BC%D0%B8%D1%82%D0%B5%D0%BD%D1%82)')}`, // tooltip source map
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("chart page missing %q", want)
@@ -341,7 +341,7 @@ func TestDashboardDataQuality(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Source: RSBU (issuer)", "Data quality", "2025-Q4", "net profit exceeds revenue"} {
+	for _, want := range []string{"Источник: РСБУ (эмитент)", "Качество данных", "2025-Q4", "чистая прибыль больше выручки"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -350,7 +350,7 @@ func TestDashboardDataQuality(t *testing.T) {
 	clean := &fakeRepo{companyHist: []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER",
 		Source: models.SourceSmartLab, Revenue: models.Float(100), NetProfit: models.Float(30), PE: models.Float(4)}}}
 	rec = do(t, newTestServer(clean), http.MethodGet, "/company/SBER", "")
-	if strings.Contains(rec.Body.String(), "Data quality") {
+	if strings.Contains(rec.Body.String(), "Качество данных") {
 		t.Error("clean IFRS data must not show the data-quality warning")
 	}
 }
@@ -426,13 +426,13 @@ func TestDashboardCurrentValuation(t *testing.T) {
 		"SBER": {Company: "SBER", Capitalization: 5929, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)},
 	}}
 	body := do(t, newTestServer(withQuote), http.MethodGet, "/company/SBER", "").Body.String()
-	if !strings.Contains(body, "Current valuation · close 2026-09-29") || !strings.Contains(body, "P/E (now)") {
+	if !strings.Contains(body, "Текущая оценка · закрытие 2026-09-29") || !strings.Contains(body, "P/E (сейчас)") {
 		t.Error("dashboard with a quote should show the current-valuation block")
 	}
 
 	noQuote := &fakeRepo{companyHist: hist}
 	body = do(t, newTestServer(noQuote), http.MethodGet, "/company/SBER", "").Body.String()
-	if strings.Contains(body, "Current valuation") {
+	if strings.Contains(body, "Текущая оценка") {
 		t.Error("dashboard without a quote must not show the current-valuation block")
 	}
 }
@@ -450,7 +450,7 @@ func TestStaleQuoteIsIgnored(t *testing.T) {
 	r := newTestServer(repo)
 
 	body := do(t, r, http.MethodGet, "/company/SBER", "").Body.String()
-	if strings.Contains(body, "P/E (now)") || !strings.Contains(body, "too old to value against") {
+	if strings.Contains(body, "P/E (сейчас)") || !strings.Contains(body, "слишком старая для оценки") {
 		t.Error("dashboard should replace a stale quote's valuation with a note")
 	}
 

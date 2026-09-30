@@ -765,7 +765,7 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 	fresh := func(p Point, label *string) bool {
 		*label = p.Label
 		if monthsBetween(p, q.PriceDate) > MaxFundamentalAge {
-			*label = p.Label + " (too old)"
+			*label = p.Label + " (устарело)"
 			cur.Stale = true
 			return false
 		}

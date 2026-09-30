@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Financial Analyzer</title>
+    <title>Финансовый анализатор</title>
     <style>
         /* ============================================================
            Design tokens
@@ -644,12 +644,12 @@
 <header class="topbar">
     <div class="topbar-inner">
         <div class="brand">
-            <span class="brand-mark">FA</span>
-            <span>Financial Analyzer</span>
+            <span class="brand-mark">ФА</span>
+            <span>Финансовый анализатор</span>
         </div>
         <div class="topbar-actions">
-            <a class="topbar-link" href="/screener">Screener</a>
-            <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme"></button>
+            <a class="topbar-link" href="/screener">Скринер</a>
+            <button class="icon-btn" id="themeToggle" title="Сменить тему" aria-label="Сменить тему"></button>
         </div>
     </div>
 </header>
@@ -660,33 +660,33 @@
 <div class="container">
 
     <div class="page-header">
-        <h1>Cross-company comparison</h1>
-        <p>Pick companies and metrics to compare quarterly financials side-by-side.</p>
+        <h1>Сравнение компаний</h1>
+        <p>Выберите компании и показатели, чтобы сравнить финансовые результаты бок о бок.</p>
     </div>
 
     <!-- Companies selection -->
     <section class="card">
         <div class="card-header">
             <div>
-                <h2 class="card-title">Companies</h2>
-                <p class="card-subtitle">Filter by sector, then choose what to analyze.</p>
+                <h2 class="card-title">Компании</h2>
+                <p class="card-subtitle">Отфильтруйте по сектору и выберите, что анализировать.</p>
             </div>
             <div class="card-actions">
-                <button class="btn btn-ghost" id="selectAllBtn">Select all</button>
-                <button class="btn btn-ghost" id="deselectAllBtn">Clear</button>
+                <button class="btn btn-ghost" id="selectAllBtn">Выбрать все</button>
+                <button class="btn btn-ghost" id="deselectAllBtn">Сбросить</button>
             </div>
         </div>
 
         <div class="category-tabs" id="categoryTabs"></div>
 
         <div class="companies-grid" id="companiesGrid">
-            <div class="loading">Loading companies…</div>
+            <div class="loading">Загрузка компаний…</div>
         </div>
 
         <div class="selection-bar">
-            <span class="selected-count" id="selectedCount"><strong>0</strong> companies selected</span>
+            <span class="selected-count" id="selectedCount">Выбрано: <strong>0</strong></span>
             <button class="btn btn-primary btn-lg" id="analyzeBtn" disabled>
-                Analyze
+                Анализировать
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
         </div>
@@ -696,13 +696,13 @@
     <section id="metricsSection" style="display:none;">
         <div class="card reveal">
             <div class="controls-row">
-                <span class="controls-label">Period</span>
+                <span class="controls-label">Период</span>
                 <div class="period-switcher" id="periodSwitcher">
-                    <button class="period-btn" data-period="quarter">Quarterly</button>
-                    <button class="period-btn active" data-period="ttm">TTM</button>
-                    <button class="period-btn" data-period="annual">Annual</button>
+                    <button class="period-btn" data-period="quarter">Квартал</button>
+                    <button class="period-btn active" data-period="ttm">LTM</button>
+                    <button class="period-btn" data-period="annual">Год</button>
                 </div>
-                <span class="period-help">TTM smooths seasonality across the last 4 quarters.</span>
+                <span class="period-help">LTM — сумма за последние 4 квартала, сглаживает сезонность.</span>
             </div>
             <div class="metric-groups" id="metric-groups"></div>
             <div id="chart-container"></div>
@@ -771,11 +771,11 @@
             if (theme === 'dark') {
                 html.setAttribute('data-theme', 'dark');
                 elements.themeToggle.innerHTML = ICONS.sun;
-                elements.themeToggle.title = 'Switch to light theme';
+                elements.themeToggle.title = 'Светлая тема';
             } else {
                 html.removeAttribute('data-theme');
                 elements.themeToggle.innerHTML = ICONS.moon;
-                elements.themeToggle.title = 'Switch to dark theme';
+                elements.themeToggle.title = 'Тёмная тема';
             }
             localStorage.setItem('theme', theme);
             reloadAllIframes();
@@ -802,7 +802,7 @@
         }
         async function loadData() {
             try {
-                elements.companiesGrid.innerHTML = '<div class="loading">Loading companies…</div>';
+                elements.companiesGrid.innerHTML = '<div class="loading">Загрузка компаний…</div>';
                 const [companies, cats] = await Promise.all([loadCompaniesWithCategories(), loadCategories()]);
                 state.companiesWithCategories = companies;
                 state.categories = cats;
@@ -810,7 +810,7 @@
                 renderCompaniesGrid();
             } catch (err) {
                 console.error('loadData error:', err);
-                elements.companiesGrid.innerHTML = '<div class="error-message">Error loading companies. Please refresh.</div>';
+                elements.companiesGrid.innerHTML = '<div class="error-message">Не удалось загрузить компании. Обновите страницу.</div>';
             }
         }
 
@@ -820,7 +820,7 @@
         function renderCategoryTabs() {
             const { categoryTabs } = elements;
             categoryTabs.innerHTML = '';
-            const tabs = [['all', 'All']];
+            const tabs = [['all', 'Все']];
             state.categories.filter(Boolean).forEach(cat => tabs.push([cat, cat]));
             tabs.forEach(([value, label]) => {
                 const btn = document.createElement('button');
@@ -842,7 +842,7 @@
         function renderCompaniesGrid() {
             const { companiesGrid } = elements;
             if (!state.companiesWithCategories.length) {
-                companiesGrid.innerHTML = '<div class="empty-state">No companies found</div>';
+                companiesGrid.innerHTML = '<div class="empty-state">Компании не найдены</div>';
                 return;
             }
             const filtered = state.currentCategory === 'all'
@@ -855,7 +855,7 @@
             const uniqueCompanies = Array.from(uniqueMap.values());
 
             if (uniqueCompanies.length === 0) {
-                companiesGrid.innerHTML = '<div class="empty-state">No companies in this category</div>';
+                companiesGrid.innerHTML = '<div class="empty-state">В этой категории нет компаний</div>';
                 return;
             }
 
@@ -880,21 +880,21 @@
                 const actions = document.createElement('div');
                 actions.className = 'company-actions';
 
-                const dashBtn = makeActionBtn(ICONS.chart, 'Open dashboard', 'accent');
+                const dashBtn = makeActionBtn(ICONS.chart, 'Открыть дашборд', 'accent');
                 dashBtn.classList.add('company-dash-btn');
                 dashBtn.addEventListener('click', (e) => {
                     e.stopPropagation(); e.preventDefault();
                     window.open('/company/' + encodeURIComponent(company) + '?theme=' + getCurrentTheme(), '_blank');
                 });
 
-                const noteBtn = makeActionBtn(ICONS.note, 'Edit note', 'accent');
+                const noteBtn = makeActionBtn(ICONS.note, 'Заметка', 'accent');
                 noteBtn.classList.add('company-note-btn');
                 noteBtn.addEventListener('click', (e) => {
                     e.stopPropagation(); e.preventDefault();
                     openNoteModal(company);
                 });
 
-                const delBtn = makeActionBtn(ICONS.trash, 'Delete company', 'danger');
+                const delBtn = makeActionBtn(ICONS.trash, 'Удалить компанию', 'danger');
                 delBtn.classList.add('company-delete-btn');
                 delBtn.addEventListener('click', (e) => {
                     e.stopPropagation(); e.preventDefault();
@@ -970,12 +970,12 @@
             }
 
             modal.innerHTML =
-                '<h3>Note · ' + escapeHtml(company) + '</h3>' +
-                '<textarea id="noteText" placeholder="Investment thesis, watchlist reminders, due-diligence findings…">' + escapeHtml(existingNote) + '</textarea>' +
+                '<h3>Заметка · ' + escapeHtml(company) + '</h3>' +
+                '<textarea id="noteText" placeholder="Инвестиционная идея, напоминания, результаты анализа…">' + escapeHtml(existingNote) + '</textarea>' +
                 '<div class="note-modal-buttons">' +
-                (existingNote ? '<button class="btn note-delete-btn" id="deleteNoteBtn">Delete</button>' : '') +
-                '<button class="btn note-cancel-btn" id="cancelNoteBtn">Cancel</button>' +
-                '<button class="btn note-save-btn" id="saveNoteBtn">Save</button>' +
+                (existingNote ? '<button class="btn note-delete-btn" id="deleteNoteBtn">Удалить</button>' : '') +
+                '<button class="btn note-cancel-btn" id="cancelNoteBtn">Отмена</button>' +
+                '<button class="btn note-save-btn" id="saveNoteBtn">Сохранить</button>' +
                 '</div>';
 
             document.body.append(overlay, modal);
@@ -999,7 +999,7 @@
                         cleanup();
                     } catch (err) {
                         console.error('Error deleting note:', err);
-                        alert('Failed to delete note');
+                        alert('Не удалось удалить заметку');
                     }
                 });
             }
@@ -1018,7 +1018,7 @@
                     cleanup();
                 } catch (err) {
                     console.error('Error saving note:', err);
-                    alert('Failed to save note');
+                    alert('Не удалось сохранить заметку');
                 }
             });
 
@@ -1039,7 +1039,7 @@
             state.selectedCompanies = Array.from(checkboxes).map(cb => cb.value);
             const count = state.selectedCompanies.length;
             elements.selectedCountSpan.innerHTML =
-                '<strong>' + count + '</strong> ' + (count === 1 ? 'company' : 'companies') + ' selected';
+                'Выбрано: <strong>' + count + '</strong>';
             elements.analyzeBtn.disabled = count === 0;
             if (count === 0) elements.metricsSection.style.display = 'none';
         }
@@ -1149,10 +1149,10 @@
             const box = document.createElement('div');
             box.className = 'delete-confirmation';
             box.innerHTML =
-                '<p>Delete <strong>' + escapeHtml(companyName) + '</strong> and all its data?</p>' +
+                '<p>Удалить <strong>' + escapeHtml(companyName) + '</strong> и все её данные?</p>' +
                 '<div class="delete-confirmation-buttons">' +
-                '<button class="btn delete-cancel-btn">Cancel</button>' +
-                '<button class="btn delete-confirm-btn">Delete</button>' +
+                '<button class="btn delete-cancel-btn">Отмена</button>' +
+                '<button class="btn delete-confirm-btn">Удалить</button>' +
                 '</div>';
 
             document.body.append(overlay, box);
@@ -1179,7 +1179,7 @@
                     elements.metricsSection.style.display = 'none';
                 } catch (err) {
                     console.error('Delete error:', err);
-                    alert('Error deleting company: ' + err.message);
+                    alert('Ошибка удаления компании: ' + err.message);
                     cleanup();
                 }
             });

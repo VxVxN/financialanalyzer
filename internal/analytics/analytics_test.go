@@ -442,7 +442,7 @@ func TestBuildCurrentStale(t *testing.T) {
 	if !c.Stale || !math.IsNaN(c.PE) || !math.IsNaN(c.PB) || !math.IsNaN(c.DivYield) {
 		t.Errorf("stale fundamentals: %+v, want NaN multiples and Stale", c)
 	}
-	if c.EarningsLabel != "2023-Q4 (too old)" {
+	if c.EarningsLabel != "2023-Q4 (устарело)" {
 		t.Errorf("earnings label = %q", c.EarningsLabel)
 	}
 	// 2025-Q4 ends Dec 2025: 9 months before the quote, still fresh.
