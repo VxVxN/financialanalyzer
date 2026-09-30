@@ -314,8 +314,13 @@ func parseDBF(b []byte) (*dbfTable, error) {
 		if off+32 > len(b) {
 			return nil, fmt.Errorf("dbf truncated field descriptor at %d", off)
 		}
-		name := string(bytes.TrimRight(b[off:off+11], "\x00"))
-		fields = append(fields, name)
+		// The name is NUL-terminated; older CBR archives (2021 and earlier)
+		// leave junk after the terminator instead of zero-filling it.
+		name := b[off : off+11]
+		if i := bytes.IndexByte(name, 0); i >= 0 {
+			name = name[:i]
+		}
+		fields = append(fields, string(name))
 		lengths = append(lengths, int(b[off+16]))
 	}
 	if len(fields) == 0 {

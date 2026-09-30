@@ -148,6 +148,24 @@ func TestParseDBF(t *testing.T) {
 	}
 }
 
+// TestParseDBFJunkAfterFieldName covers the pre-2022 archives, whose field
+// descriptors leave garbage after the name's NUL terminator.
+func TestParseDBFJunkAfterFieldName(t *testing.T) {
+	dbf := buildDBF(
+		[]dbfFieldDef{{"REGN\x00\xd0\x31", 4}, {"CODE\x00\xe8\xa7", 5}, {"SIM_ITOGO\x00\x5c", 16}},
+		[][]string{{"2673", "61101", "2673066"}},
+		nil,
+	)
+
+	profits, err := parseForm102(dbf)
+	if err != nil {
+		t.Fatalf("parseForm102: %v", err)
+	}
+	if math.Abs(profits[2673]-2.673066) > 1e-9 {
+		t.Errorf("REGN 2673 = %v, want 2.673066", profits[2673])
+	}
+}
+
 // ---- DBF builder for tests --------------------------------------------------
 
 type dbfFieldDef struct {
