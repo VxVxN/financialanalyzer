@@ -30,8 +30,8 @@ func (r *Repository) Ping(ctx context.Context) error {
 
 func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterData) error {
 	query := `
-    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source, equity, dividends)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (year, quarter, company) 
     DO UPDATE SET
         source = COALESCE(EXCLUDED.source, company_financials.source),
@@ -41,7 +41,9 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
         ebitda = COALESCE(EXCLUDED.ebitda, company_financials.ebitda),
         debt = COALESCE(EXCLUDED.debt, company_financials.debt),
         pe = COALESCE(EXCLUDED.pe, company_financials.pe),
-        roe = COALESCE(EXCLUDED.roe, company_financials.roe)`
+        roe = COALESCE(EXCLUDED.roe, company_financials.roe),
+        equity = COALESCE(EXCLUDED.equity, company_financials.equity),
+        dividends = COALESCE(EXCLUDED.dividends, company_financials.dividends)`
 
 	_, err := r.db.ExecContext(ctx, query,
 		data.Year,
@@ -56,6 +58,8 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
 		data.PE,
 		data.ROE,
 		nullIfEmpty(data.Source),
+		data.Equity,
+		data.Dividends,
 	)
 
 	return err
@@ -100,7 +104,7 @@ func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]m
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
-			COALESCE(source, '')
+			COALESCE(source, ''), equity, dividends
 		FROM company_financials
 		WHERE company = $1
 		ORDER BY year,
@@ -125,6 +129,7 @@ func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]m
 			&q.Year, &q.Quarter, &q.Company, &q.Category,
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
+			&q.Equity, &q.Dividends,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}
@@ -149,7 +154,7 @@ func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string
 	query := fmt.Sprintf(`
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
-			COALESCE(source, '')
+			COALESCE(source, ''), equity, dividends
 		FROM company_financials
 		WHERE company IN (%s)
 		ORDER BY company, year,
@@ -174,6 +179,7 @@ func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string
 			&q.Year, &q.Quarter, &q.Company, &q.Category,
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
+			&q.Equity, &q.Dividends,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}

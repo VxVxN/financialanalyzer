@@ -414,6 +414,8 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 		{name: "EBITDA Margin", value: fmtPct(s.EBITDAMargin)},
 		{name: "ROE", value: fmtPct(s.ROE)},
 		{name: "P/E", value: fmtRatio(s.PE), sub: peComment(s.PE)},
+		{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
+		{name: "Dividend Yield", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
 		{name: "Debt", value: fmtMoney(s.Debt)},
 		{name: "Debt / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
 		{name: "Revenue CAGR (3Y)", value: fmtPct(s.RevenueCAGR3Y)},
@@ -594,6 +596,8 @@ func renderDashboardChart(w http.ResponseWriter, history []models.QuarterData, t
   <button class="btn metric-btn" onclick="selectMetric('debt', this)">Debt</button>
   <button class="btn metric-btn" onclick="selectMetric('pe', this)">P/E</button>
   <button class="btn metric-btn" onclick="selectMetric('roe', this)">ROE</button>
+  <button class="btn metric-btn" onclick="selectMetric('pb', this)">P/B</button>
+  <button class="btn metric-btn" onclick="selectMetric('div_yield', this)">Div Yield</button>
   <button class="btn metric-btn" onclick="selectMetric('net_margin', this)">Net Margin</button>
   <button class="btn metric-btn" onclick="selectMetric('ebitda_margin', this)">EBITDA Margin</button>
   <button class="btn metric-btn" onclick="selectMetric('debt_ebitda', this)">Debt/EBITDA</button>

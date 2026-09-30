@@ -285,3 +285,72 @@ func TestReportedZeroIsNotMissing(t *testing.T) {
 		t.Errorf("snapshot debt = %v, want 0 (debt-free company)", snap.Debt)
 	}
 }
+
+func TestValuationMetrics(t *testing.T) {
+	f := models.Float
+	// Annual-style rows (figures on Q4) plus a bank-style Q1 row carrying only
+	// net profit, which must not break the trailing P/B / yield.
+	h := []models.QuarterData{
+		{Year: 2023, Quarter: "Q4", Company: "X", Capitalization: f(1000), Equity: f(500), Dividends: f(50)},
+		{Year: 2024, Quarter: "Q4", Company: "X", Capitalization: f(1200), Equity: f(400), Dividends: f(0)},
+		{Year: 2025, Quarter: "Q1", Company: "X", NetProfit: f(10)},
+	}
+
+	pb := DerivedSeries(h, "pb", PeriodQuarter)
+	if !approx(pb[0].Value, 2, 1e-9) || !approx(pb[1].Value, 3, 1e-9) || !math.IsNaN(pb[2].Value) {
+		t.Errorf("quarterly P/B = %v, want [2 3 NaN]", pb)
+	}
+	dy := DerivedSeries(h, "div_yield", PeriodAnnual)
+	if !approx(dy[0].Value, 5, 1e-9) || dy[1].Value != 0 {
+		t.Errorf("annual dividend yield = %v, want [5 0]", dy)
+	}
+
+	snap := BuildSnapshot(h)
+	if !approx(snap.PB, 3, 1e-9) {
+		t.Errorf("snapshot P/B = %v, want 3 (carried from 2024-Q4)", snap.PB)
+	}
+	if snap.DivYield != 0 {
+		t.Errorf("snapshot dividend yield = %v, want 0 (no payout in 2024 is a real zero)", snap.DivYield)
+	}
+
+	noEquity := []models.QuarterData{{Year: 2024, Quarter: "Q4", Company: "Y", Capitalization: f(100), Equity: f(0)}}
+	if v := DerivedSeries(noEquity, "pb", PeriodQuarter)[0].Value; !math.IsNaN(v) {
+		t.Errorf("P/B with zero equity = %v, want NaN", v)
+	}
+	for _, m := range []string{"pb", "div_yield", "equity", "dividends"} {
+		if !IsValidMetric(m) {
+			t.Errorf("IsValidMetric(%q) = false", m)
+		}
+	}
+}
+
+func TestValuationEdgeCases(t *testing.T) {
+	f := models.Float
+	snap := BuildSnapshot(nil)
+	if !math.IsNaN(snap.PB) || !math.IsNaN(snap.DivYield) || !math.IsNaN(snap.PE) {
+		t.Errorf("empty history: PB=%v DivYield=%v PE=%v, want NaN", snap.PB, snap.DivYield, snap.PE)
+	}
+
+	// Bank-style: latest row is Q1 with profit only; valuation comes from Q4
+	// and carries its label.
+	h := []models.QuarterData{
+		{Year: 2024, Quarter: "Q4", Company: "B", Capitalization: f(900), Equity: f(300), Dividends: f(45)},
+		{Year: 2025, Quarter: "Q1", Company: "B", NetProfit: f(50)},
+	}
+	snap = BuildSnapshot(h)
+	if !approx(snap.PB, 3, 1e-9) || snap.PBLabel != "2024-Q4" {
+		t.Errorf("PB = %v (%q), want 3 (2024-Q4)", snap.PB, snap.PBLabel)
+	}
+	if !approx(snap.DivYield, 5, 1e-9) || snap.DivYieldLabel != "2024-Q4" {
+		t.Errorf("DivYield = %v (%q), want 5 (2024-Q4)", snap.DivYield, snap.DivYieldLabel)
+	}
+
+	neg := []models.QuarterData{{Year: 2024, Quarter: "Q4", Company: "N", Capitalization: f(100), Equity: f(-20)}}
+	if v := DerivedSeries(neg, "pb", PeriodQuarter)[0].Value; !math.IsNaN(v) {
+		t.Errorf("P/B with negative equity = %v, want NaN", v)
+	}
+	an := CheckRow(neg[0])
+	if len(an) != 1 || !an[0].Concerns("pb") || !an[0].Concerns("roe") {
+		t.Errorf("negative equity anomalies = %+v, want one concerning pb and roe", an)
+	}
+}

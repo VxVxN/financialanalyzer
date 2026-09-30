@@ -634,6 +634,14 @@ func formatMetricName(metric string) string {
 		return "Market Cap"
 	case "debt":
 		return "Debt"
+	case "equity":
+		return "Equity"
+	case "dividends":
+		return "Dividends"
+	case "pb":
+		return "P/B Ratio"
+	case "div_yield":
+		return "Dividend Yield"
 	case "net_margin":
 		return "Net Margin"
 	case "ebitda_margin":
@@ -676,19 +684,27 @@ func metricDescription(metric string) string {
 		return "Price / Earnings — lower is cheaper (negative = losses)"
 	case "roe":
 		return "Return on equity — how efficiently capital is used"
+	case "pb":
+		return "Price / Book — market cap per ruble of equity (banks: regulatory capital)"
+	case "div_yield":
+		return "Dividends with record dates in the year / year-end market cap, %"
+	case "equity":
+		return "Shareholders' equity (banks: regulatory capital, approximate)"
+	case "dividends":
+		return "Dividends by record-date year: per share x current share count (approximate after buybacks, issues, splits)"
 	}
 	return ""
 }
 
 func getMetricUnit(metric string) string {
 	switch metric {
-	case "roe",
+	case "roe", "div_yield",
 		"net_margin", "ebitda_margin",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
 		"revenue_cagr5", "net_profit_cagr5":
 		return "%"
-	case "debt_ebitda":
+	case "debt_ebitda", "pb":
 		return "x"
 	}
 	return ""

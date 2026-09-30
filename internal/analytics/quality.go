@@ -43,6 +43,7 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	pe, roe := models.ValueOrNaN(q.PE), models.ValueOrNaN(q.ROE)
 	revenue, capitalization := models.ValueOrNaN(q.Revenue), models.ValueOrNaN(q.Capitalization)
 	netProfit := models.ValueOrNaN(q.NetProfit)
+	equity := models.ValueOrNaN(q.Equity)
 
 	// Negative P/E just means a loss-making period — normal, not suspicious.
 	if pe > maxSanePE {
@@ -50,6 +51,9 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	}
 	if roe > maxSaneROE || roe < -maxSaneROE {
 		add(fmt.Sprintf("ROE %.0f%% is beyond ±%.0f%%", roe, maxSaneROE), "roe")
+	}
+	if equity < 0 {
+		add("negative equity — P/B and ROE are not meaningful", "equity", "roe")
 	}
 	// A reported zero revenue counts: a holding with no sales is exactly the
 	// case this check is for.
@@ -85,6 +89,10 @@ func metricInputs(metric string) []string {
 		return []string{"ebitda", "revenue"}
 	case "debt_ebitda":
 		return []string{"debt", "ebitda"}
+	case "pb":
+		return []string{"capitalization", "equity"}
+	case "div_yield":
+		return []string{"dividends", "capitalization"}
 	case "revenue_yoy", "revenue_cagr3", "revenue_cagr5":
 		return []string{"revenue"}
 	case "net_profit_yoy", "net_profit_cagr3", "net_profit_cagr5":

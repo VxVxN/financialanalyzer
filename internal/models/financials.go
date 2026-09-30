@@ -36,13 +36,21 @@ type QuarterData struct {
 	Debt           *float64
 	PE             *float64
 	ROE            *float64
+	// Equity is balance-sheet equity (RSBU line 1300) for companies and
+	// regulatory capital (CBR form 123) for banks — the latter approximate.
+	Equity *float64
+	// Dividends is the year's total by record date (per-share x current
+	// shares outstanding), on the Q4 row only. Like Capitalization it is a
+	// point-in-time value, not a quarterly flow.
+	Dividends *float64
 }
 
 // IsEmpty reports whether the row carries no metric at all.
 func (q *QuarterData) IsEmpty() bool {
 	return q.Capitalization == nil && q.Revenue == nil &&
 		q.NetProfit == nil && q.EBITDA == nil &&
-		q.Debt == nil && q.PE == nil && q.ROE == nil
+		q.Debt == nil && q.PE == nil && q.ROE == nil &&
+		q.Equity == nil && q.Dividends == nil
 }
 
 // Float returns a pointer to v, for filling QuarterData metric fields.

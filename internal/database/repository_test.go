@@ -75,7 +75,7 @@ func TestSaveQuarterDataZeroVersusNull(t *testing.T) {
 	// Debt is a reported zero; EBITDA is not reported at all.
 	err := repo.SaveQuarterData(ctx, models.QuarterData{
 		Year: 2024, Quarter: "Q4", Company: "ZERO", Category: "test", Source: models.SourceRSBU,
-		Revenue: f(100), NetProfit: f(10), Debt: f(0),
+		Revenue: f(100), NetProfit: f(10), Debt: f(0), Equity: f(250.5), Dividends: f(0),
 	})
 	if err != nil {
 		t.Fatalf("save: %v", err)
@@ -85,6 +85,8 @@ func TestSaveQuarterDataZeroVersusNull(t *testing.T) {
 	assertMetric(t, "debt", got.Debt, f(0))
 	assertMetric(t, "ebitda", got.EBITDA, nil)
 	assertMetric(t, "revenue", got.Revenue, f(100))
+	assertMetric(t, "equity", got.Equity, f(250.5))
+	assertMetric(t, "dividends", got.Dividends, f(0))
 	if got.Source != models.SourceRSBU {
 		t.Errorf("source = %q, want %q", got.Source, models.SourceRSBU)
 	}

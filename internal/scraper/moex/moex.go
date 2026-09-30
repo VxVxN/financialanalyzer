@@ -12,6 +12,10 @@
 // Values are returned in billions of RUB to match the rest of the codebase
 // (the CSV/smart-lab convention). Shares count is the current ISSUESIZE, so
 // caps for years with since-changed share counts are approximate.
+//
+// Dividends come from /iss/securities/{SECID}/dividends.json (per-share value
+// by registry close date). A year's total is the sum of its record-date
+// payouts times ISSUESIZE — the same current-share-count approximation.
 package moex
 
 import (
@@ -35,16 +39,26 @@ const (
 )
 
 type Client struct {
+	BaseURL   string // ISS root; NewClient sets the package BaseURL (tests override it)
 	HTTP      *http.Client
 	UserAgent string
 	Board     string
 	Delay     time.Duration
 	Retry     httpx.Policy // retries for transient failures (network, 429, 5xx)
 	lastReq   time.Time
+
+	// Per-secid caches: both values are requested once per ticker but used for
+	// every year. A failed dividends lookup is cached too, so an outage costs
+	// one retry cycle per ticker, not one per year. A Client is not safe for
+	// concurrent use.
+	issueSize    map[string]float64
+	dividends    map[string]DividendHistory
+	dividendsErr map[string]error
 }
 
 func NewClient() *Client {
 	return &Client{
+		BaseURL:   BaseURL,
 		HTTP:      &http.Client{Timeout: defaultTimeout},
 		UserAgent: defaultUserAgent,
 		Board:     DefaultBoard,
@@ -82,13 +96,100 @@ func (c *Client) CapitalizationAt(ctx context.Context, secid string, year int) (
 
 // IssueSize returns the number of shares outstanding for secid.
 func (c *Client) IssueSize(ctx context.Context, secid string) (float64, error) {
-	url := fmt.Sprintf("%s/iss/securities/%s.json?iss.meta=off&iss.only=description",
-		BaseURL, strings.ToUpper(secid))
+	secid = strings.ToUpper(secid)
+	if v, ok := c.issueSize[secid]; ok {
+		return v, nil
+	}
+	url := fmt.Sprintf("%s/iss/securities/%s.json?iss.meta=off&iss.only=description", c.BaseURL, secid)
 	body, err := c.get(ctx, url)
 	if err != nil {
 		return 0, err
 	}
-	return ParseIssueSize(body)
+	v, err := ParseIssueSize(body)
+	if err != nil {
+		return 0, err
+	}
+	if c.issueSize == nil {
+		c.issueSize = make(map[string]float64)
+	}
+	c.issueSize[secid] = v
+	return v, nil
+}
+
+// DividendHistory is a security's per-share dividend record, bucketed by the
+// calendar year of the registry close (record) date.
+type DividendHistory struct {
+	perShare  map[int]float64 // RUB per share, summed per year
+	unknown   map[int]bool    // years with a non-RUB or unparseable payout
+	firstYear int             // earliest record-date year; 0 = no records
+}
+
+// PerShare returns the RUB paid per share for record dates in year. ok is false
+// when the figure is unknown: no history at all, a year before the history
+// starts (MOEX coverage, not proof of no payout), or a payout that is non-RUB or
+// has no parseable amount. A year the history covers without payouts returns
+// (0, true) — a real zero, as trustworthy as ISS's completeness.
+func (h DividendHistory) PerShare(year int) (float64, bool) {
+	if h.firstYear == 0 || year < h.firstYear || h.unknown[year] {
+		return 0, false
+	}
+	return h.perShare[year], true
+}
+
+// Dividends returns the dividend history of secid (cached per client).
+func (c *Client) Dividends(ctx context.Context, secid string) (DividendHistory, error) {
+	secid = strings.ToUpper(secid)
+	if h, ok := c.dividends[secid]; ok {
+		return h, nil
+	}
+	if err, ok := c.dividendsErr[secid]; ok {
+		return DividendHistory{}, err
+	}
+	url := fmt.Sprintf("%s/iss/securities/%s/dividends.json?iss.meta=off", c.BaseURL, secid)
+	body, err := c.get(ctx, url)
+	if err == nil {
+		var h DividendHistory
+		if h, err = ParseDividends(body); err == nil {
+			if c.dividends == nil {
+				c.dividends = make(map[string]DividendHistory)
+			}
+			c.dividends[secid] = h
+			return h, nil
+		}
+	}
+	// A canceled context is not a property of the ticker; don't cache it.
+	if ctx.Err() == nil {
+		if c.dividendsErr == nil {
+			c.dividendsErr = make(map[string]error)
+		}
+		c.dividendsErr[secid] = err
+	}
+	return DividendHistory{}, err
+}
+
+// DividendsTotal returns the dividends of secid with record dates in year, in
+// billions of RUB (per-share sum x current ISSUESIZE). It returns nil when the
+// year's figure is unknown (see DividendHistory.PerShare) and a pointer to 0
+// for a year the history covers without payouts.
+func (c *Client) DividendsTotal(ctx context.Context, secid string, year int) (*float64, error) {
+	h, err := c.Dividends(ctx, secid)
+	if err != nil {
+		return nil, fmt.Errorf("dividends %s: %w", secid, err)
+	}
+	perShare, ok := h.PerShare(year)
+	if !ok {
+		return nil, nil
+	}
+	shares, err := c.IssueSize(ctx, secid)
+	if err != nil {
+		return nil, fmt.Errorf("issue size %s: %w", secid, err)
+	}
+	if shares == 0 {
+		return nil, fmt.Errorf("issue size %s: zero", secid)
+	}
+	const rubPerBillion = 1e9
+	total := perShare * shares / rubPerBillion
+	return &total, nil
 }
 
 // LastClose returns the most recent closing price for secid in [from, till]
@@ -96,7 +197,7 @@ func (c *Client) IssueSize(ctx context.Context, secid string) (float64, error) {
 func (c *Client) LastClose(ctx context.Context, secid, from, till string) (float64, error) {
 	url := fmt.Sprintf("%s/iss/history/engines/stock/markets/shares/boards/%s/securities/%s.json"+
 		"?iss.meta=off&iss.only=history&from=%s&till=%s",
-		BaseURL, c.Board, strings.ToUpper(secid), from, till)
+		c.BaseURL, c.Board, strings.ToUpper(secid), from, till)
 	body, err := c.get(ctx, url)
 	if err != nil {
 		return 0, err
@@ -175,6 +276,72 @@ func ParseIssueSize(body []byte) (float64, error) {
 		}
 	}
 	return 0, fmt.Errorf("ISSUESIZE not found in description")
+}
+
+// ParseDividends reads a /iss/securities/{SECID}/dividends.json "dividends"
+// block (columns include registryclosedate "YYYY-MM-DD", value, currencyid).
+func ParseDividends(body []byte) (DividendHistory, error) {
+	b, err := decodeBlock(body, "dividends")
+	if err != nil {
+		return DividendHistory{}, err
+	}
+	dateCol, valCol, curCol := b.col("registryclosedate"), b.col("value"), b.col("currencyid")
+	if dateCol < 0 || valCol < 0 {
+		return DividendHistory{}, fmt.Errorf("dividends block missing registryclosedate/value columns")
+	}
+	if err := checkComplete(body, "dividends", len(b.Data)); err != nil {
+		return DividendHistory{}, err
+	}
+	h := DividendHistory{perShare: map[int]float64{}, unknown: map[int]bool{}}
+	for _, row := range b.Data {
+		if len(row) <= dateCol || len(row) <= valCol {
+			continue
+		}
+		date := asString(row[dateCol])
+		if len(date) < 4 {
+			continue
+		}
+		year, err := strconv.Atoi(date[:4])
+		if err != nil {
+			continue
+		}
+		if h.firstYear == 0 || year < h.firstYear {
+			h.firstYear = year
+		}
+		// A payout without an amount (declared, not yet filled in) makes the
+		// year unknown rather than silently zero.
+		v, ok := asFloat(row[valCol])
+		if !ok {
+			h.unknown[year] = true
+			continue
+		}
+		if curCol >= 0 && len(row) > curCol {
+			if cur := asString(row[curCol]); cur != "" && cur != "RUB" && cur != "SUR" {
+				h.unknown[year] = true
+				continue
+			}
+		}
+		h.perShare[year] += v
+	}
+	return h, nil
+}
+
+// checkComplete fails when an ISS "<block>.cursor" block reports more rows
+// than were returned — a paginated response read as if it were complete would
+// turn every later year into a false zero.
+func checkComplete(body []byte, block string, got int) error {
+	cur, err := decodeBlock(body, block+".cursor")
+	if err != nil {
+		return nil // no cursor block: the response is the whole list
+	}
+	col := cur.col("TOTAL")
+	if col < 0 || len(cur.Data) == 0 || len(cur.Data[0]) <= col {
+		return nil
+	}
+	if total, ok := asFloat(cur.Data[0][col]); ok && int(total) > got {
+		return fmt.Errorf("%s: paginated response (%d of %d rows)", block, got, int(total))
+	}
+	return nil
 }
 
 // ParseLastClose returns the last non-empty CLOSE (or LEGALCLOSEPRICE) value in

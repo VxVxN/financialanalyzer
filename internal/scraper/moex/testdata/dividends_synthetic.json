@@ -1,0 +1,10 @@
+{
+"dividends": {
+	"columns": ["secid", "isin", "registryclosedate", "value", "currencyid"],
+	"data": [
+		["TEST", "RU0000000000", "2020-07-10", 10, "RUB"],
+		["TEST", "RU0000000000", "2023-01-12", 3.5, "RUB"],
+		["TEST", "RU0000000000", "2023-07-14", 6.5, "RUB"],
+		["TEST", "RU0000000000", "2024-06-01", 1.2, "USD"]
+	]
+}}

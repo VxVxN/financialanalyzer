@@ -17,8 +17,9 @@ tables.
   single interactive chart (`/chart/{metric}`), with a data table underneath.
 - **Single-company dashboard** (`/company/{name}`) — KPIs, sparklines, a quality
   score with a transparent breakdown, a trend explorer, and free-text notes.
-- **Derived analytics** — net/EBITDA margins, Debt/EBITDA, revenue & net-profit
-  YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
+- **Derived analytics** — net/EBITDA margins, Debt/EBITDA, P/B, dividend yield,
+  revenue & net-profit YoY and 3y/5y CAGR, all computed on quarterly, TTM, or
+  annual bases.
 - **Two ingestion paths** — CSV import and a free primary-source fetcher
   (ГИР БО + MOEX ISS for companies, CBR forms 102/123 for banks).
 - **Self-contained binaries** — migrations and templates are embedded, so every

@@ -307,6 +307,7 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			logger.Warn("Capitalization unavailable", "ticker", spec.Ticker, "year", r.Year, "error", err)
 		}
 		capPtr := capitalization(marketCap, err)
+		dividends := dividendsTotal(ctx, mx, spec.Ticker, r.Year, logger)
 
 		out = append(out, models.QuarterData{
 			Year:           r.Year,
@@ -320,9 +321,22 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			Debt:           r.Debt,
 			PE:             peRatio(capPtr, r.NetProfit),
 			ROE:            roePercent(r.NetProfit, r.Equity),
+			Equity:         r.Equity,
+			Dividends:      dividends,
 		})
 	}
 	return out, nil
+}
+
+// dividendsTotal looks up a year's dividends (billions of RUB). A failure is
+// non-fatal — the row keeps its other figures and dividends stay unset.
+func dividendsTotal(ctx context.Context, mx *moex.Client, ticker string, year int, logger *slog.Logger) *float64 {
+	v, err := mx.DividendsTotal(ctx, ticker, year)
+	if err != nil {
+		logger.Warn("Dividends unavailable", "ticker", ticker, "year", year, "error", err)
+		return nil
+	}
+	return v
 }
 
 // capitalization turns a MOEX market-cap lookup into a metric: nil when the
@@ -739,8 +753,10 @@ func bankRows(ctx context.Context, mx *moex.Client, s bankSpec, year int, cum ma
 			annual := models.Float(cur)
 			row.PE = peRatio(row.Capitalization, annual) // annual P/E uses full-year profit
 			if c, ok := capital[s.Regn]; ok {
-				row.ROE = roePercent(annual, &c) // full-year profit / year-end capital
+				row.Equity = &c                          // regulatory capital stands in for equity
+				row.ROE = roePercent(annual, row.Equity) // full-year profit / year-end capital
 			}
+			row.Dividends = dividendsTotal(ctx, mx, s.Ticker, year, logger)
 		}
 
 		if row.IsEmpty() {

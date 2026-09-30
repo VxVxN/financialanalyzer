@@ -46,6 +46,7 @@ func IsFlow(metric string) bool {
 func IsDerived(metric string) bool {
 	switch metric {
 	case "net_margin", "ebitda_margin", "debt_ebitda",
+		"pb", "div_yield",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
 		"revenue_cagr5", "net_profit_cagr5":
@@ -57,8 +58,8 @@ func IsDerived(metric string) bool {
 // AllMetrics is the canonical order of metrics shown to the user.
 var AllMetrics = []string{
 	"revenue", "net_profit", "ebitda",
-	"capitalization", "debt",
-	"pe", "roe",
+	"capitalization", "debt", "equity", "dividends",
+	"pe", "roe", "pb", "div_yield",
 	"net_margin", "ebitda_margin", "debt_ebitda",
 	"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 	"revenue_cagr3", "net_profit_cagr3",
@@ -128,6 +129,10 @@ func rawValue(q models.QuarterData, metric string) float64 {
 		return models.ValueOrNaN(q.PE)
 	case "roe":
 		return models.ValueOrNaN(q.ROE)
+	case "equity":
+		return models.ValueOrNaN(q.Equity)
+	case "dividends":
+		return models.ValueOrNaN(q.Dividends)
 	}
 	return math.NaN()
 }
@@ -163,7 +168,8 @@ func QuarterlySeries(history []models.QuarterData, metric string) Series {
 
 // TTMSeries returns a trailing-twelve-months series for `metric`. For flow
 // metrics (revenue/net_profit/ebitda) it sums the last 4 quarters at each
-// point; for stock/ratio metrics it carries the most recent observed value.
+// point; stock/ratio metrics keep each period's own value (NaN where the row
+// lacks it — nothing is carried forward).
 func TTMSeries(history []models.QuarterData, metric string) Series {
 	hist := SortHistory(history)
 	out := make(Series, 0, len(hist))
@@ -306,6 +312,15 @@ func DerivedSeries(history []models.QuarterData, metric string, base Period) Ser
 			eb = QuarterlySeries(history, "ebitda")
 		}
 		return ratio(debt, eb, 1)
+	case "pb":
+		// Both are point-in-time values. P/B is undefined for non-positive
+		// equity (a negative ratio would read as "cheap"); CheckRow flags
+		// negative equity separately.
+		return ratio(pick("capitalization"), positiveOnly(pick("equity")), 1)
+	case "div_yield":
+		// Dividends sit on the Q4 row (year's record dates) and cap is the
+		// year-end value, so the quarterly/annual yield is a trailing one.
+		return ratio(pick("dividends"), pick("capitalization"), 100)
 	case "revenue_yoy":
 		return yoy(pick("revenue"), base)
 	case "net_profit_yoy":
@@ -355,6 +370,18 @@ func ratio(num, den Series, scale float64) Series {
 			val = p.Value / d * scale
 		}
 		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val})
+	}
+	return out
+}
+
+// positiveOnly maps non-positive values to NaN.
+func positiveOnly(s Series) Series {
+	out := make(Series, len(s))
+	for i, p := range s {
+		if p.Value <= 0 {
+			p.Value = math.NaN()
+		}
+		out[i] = p
 	}
 	return out
 }
@@ -432,6 +459,10 @@ type Snapshot struct {
 	Debt           float64
 	PE             float64
 	ROE            float64
+	PB             float64 // market cap / equity, from the latest period that has both
+	PBLabel        string  // period PB was taken from ("" when PB is NaN)
+	DivYield       float64 // dividends / market cap, %, latest period that has both
+	DivYieldLabel  string  // period DivYield was taken from
 	NetMargin      float64 // TTM net_profit / TTM revenue
 	EBITDAMargin   float64 // TTM
 	DebtEBITDA     float64 // last debt / TTM ebitda
@@ -471,6 +502,8 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 		NetProfitCAGR3: math.NaN(),
 		RevenueCAGR5Y:  math.NaN(),
 		NetProfitCAGR5: math.NaN(),
+		PB:             math.NaN(),
+		DivYield:       math.NaN(),
 	}
 	if len(hist) == 0 {
 		return snap
@@ -492,6 +525,15 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	snap.NetMargin = lastNonNaN(DerivedSeries(hist, "net_margin", PeriodTTM))
 	snap.EBITDAMargin = lastNonNaN(DerivedSeries(hist, "ebitda_margin", PeriodTTM))
 	snap.DebtEBITDA = lastNonNaN(DerivedSeries(hist, "debt_ebitda", PeriodTTM))
+	// Valuation inputs live on Q4 rows, while a bank's latest row is often a
+	// Q1-Q3 with profit only; take the latest period that has them and keep
+	// its label so the dashboard can say how old the figure is.
+	if p, ok := LatestValid(DerivedSeries(hist, "pb", PeriodQuarter)); ok {
+		snap.PB, snap.PBLabel = p.Value, p.Label
+	}
+	if p, ok := LatestValid(DerivedSeries(hist, "div_yield", PeriodQuarter)); ok {
+		snap.DivYield, snap.DivYieldLabel = p.Value, p.Label
+	}
 
 	snap.RevenueYoY = lastNonNaN(DerivedSeries(hist, "revenue_yoy", PeriodTTM))
 	snap.NetProfitYoY = lastNonNaN(DerivedSeries(hist, "net_profit_yoy", PeriodTTM))

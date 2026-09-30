@@ -32,8 +32,17 @@ var indexMetricGroups = []metricGroup{
 			{ID: "ebitda", Label: "EBITDA"},
 			{ID: "capitalization", Label: "Market Cap"},
 			{ID: "debt", Label: "Debt"},
+			{ID: "equity", Label: "Equity"},
+			{ID: "dividends", Label: "Dividends"},
 			{ID: "pe", Label: "P/E"},
 			{ID: "roe", Label: "ROE"},
+		},
+	},
+	{
+		Name: "Valuation",
+		Items: []metricItem{
+			{ID: "pb", Label: "P/B"},
+			{ID: "div_yield", Label: "Dividend Yield"},
 		},
 	},
 	{
