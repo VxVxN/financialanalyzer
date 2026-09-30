@@ -522,7 +522,7 @@ type Snapshot struct {
 	PE             float64
 	ROE            float64
 	// Stock figures come from the latest period that reports them (a bank's
-	// latest row is usually a profit-only Q1-Q3); these name that period.
+	// latest row is usually a Q1-Q3 without market cap); these name that period.
 	CapLabel, DebtLabel, PELabel, ROELabel string
 	PB                                     float64 // market cap / equity, from the latest period that has both
 	PBLabel                                string  // period PB was taken from ("" when PB is NaN)

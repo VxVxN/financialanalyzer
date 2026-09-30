@@ -1,7 +1,8 @@
 # Bank ticker list for `cmd/fetch` — exchange-listed credit institutions whose
-# quarterly net profit comes from the Central Bank's form 102 archives
-# (https://www.cbr.ru/vfs/credit/forms/102-YYYYMMDD.rar). Banks file form 102
-# with the CBR, not ГИР БО, so they are fetched through a separate pipeline.
+# quarterly figures come from the Central Bank's form 102 and 101 archives
+# (https://www.cbr.ru/vfs/credit/forms/102-YYYYMMDD.rar, 101-YYYYMMDD.rar).
+# Banks report to the CBR, not ГИР БО, so they are fetched through a separate
+# pipeline.
 #
 # Format:  TICKER  REGN  CATEGORY   (one per line, "#" starts a comment)
 #   TICKER   MOEX security id (also used for year-end market cap / P/E)
@@ -13,12 +14,13 @@
 # CAVEATS (inherent to the source — see internal/scraper/cbr docs):
 #   * Form 102 is RSBU of the bank legal entity, not consolidated IFRS, so
 #     figures differ from group/"market" numbers.
-#   * NET PROFIT and ROE are populated; ROE uses total regulatory capital
-#     (Basel III own funds, form 123 line "000") as the equity base, so it is
-#     approximate (regulatory capital, not balance-sheet equity).
-#   * Revenue/EBITDA/Debt have no clean form 102 line (smart-lab leaves them
-#     empty for banks too) and stay empty.
-#   * Per-quarter net profit is recovered by differencing the cumulative YTD
-#     archives; market cap, P/E and ROE are on the Q4 (full-year) row only.
+#   * NET PROFIT, REVENUE and EQUITY are populated. Revenue is a proxy: net
+#     interest income + gross fee and commission income (form 102). Equity is
+#     balance-sheet equity from form 101 (capital accounts 1xx + financial
+#     result 706-708) at each quarter end; ROE and P/B are based on it.
+#   * EBITDA/Debt have no meaningful bank equivalent and stay empty.
+#   * Per-quarter net profit and revenue are recovered by differencing the
+#     cumulative YTD archives; market cap, P/E and ROE are on the Q4
+#     (full-year) row only.
 
 T     2673  banks   # АО "ТБанк" (ex-Тинькофф; holding restructured, cap may not align)

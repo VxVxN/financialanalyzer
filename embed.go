@@ -26,8 +26,8 @@ var TemplatesFS embed.FS
 var TickerRegistry string
 
 // BankRegistry is the bundled "TICKER REGN CATEGORY" list (bank_tickers.txt)
-// used by cmd/fetch to fetch exchange-listed banks' net profit from the Central
-// Bank's form 102 archives, keyed by CBR registration number rather than INN.
+// used by cmd/fetch to fetch exchange-listed banks' figures from the Central
+// Bank's form 102/101 archives, keyed by CBR registration number rather than INN.
 //
 //go:embed bank_tickers.txt
 var BankRegistry string

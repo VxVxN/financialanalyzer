@@ -8,9 +8,11 @@ import (
 	"testing"
 )
 
-// TestFetchPeriodFromArchive exercises the real extraction + parsing path
+// TestExtractAndParseArchive exercises the real extraction + parsing path
 // against a saved form 102 archive (102-20240101.rar = full year 2023). The
-// expected values are the published RSBU net profits for those banks.
+// expected net profits are the published RSBU figures for those banks; the
+// revenues were computed independently from the same archive's section totals
+// (Сбербанк: net interest income 2414.7 + fee income 999.8).
 func TestExtractAndParseArchive(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "102-20240101.rar"))
 	if err != nil {
@@ -22,70 +24,120 @@ func TestExtractAndParseArchive(t *testing.T) {
 		t.Fatalf("extract dbf: %v", err)
 	}
 
-	profits, err := parseForm102(dbf)
+	figures, err := parseForm102(dbf)
 	if err != nil {
 		t.Fatalf("parse form 102: %v", err)
 	}
 
-	// REGN -> approximate 2023 RSBU net profit, billions of RUB.
-	want := map[int]float64{
-		1481: 1493.1, // Сбербанк
-		1000: 241.5,  // ВТБ
-		2673: 46.3,   // Тинькофф Банк
+	// REGN -> 2023 RSBU figures, billions of RUB.
+	want := map[int]Form102{
+		1481: {NetProfit: 1493.149, Revenue: 3414.518}, // Сбербанк
+		1000: {NetProfit: 241.482, Revenue: 703.959},   // ВТБ
+		2673: {NetProfit: 46.263, Revenue: 420.914},    // Тинькофф Банк
 	}
 	for regn, exp := range want {
-		got, ok := profits[regn]
+		got, ok := figures[regn]
 		if !ok {
-			t.Errorf("REGN %d missing from parsed profits", regn)
+			t.Errorf("REGN %d missing from parsed figures", regn)
 			continue
 		}
-		if math.Abs(got-exp) > 0.5 {
-			t.Errorf("REGN %d net profit = %.1f bln; want ~%.1f", regn, got, exp)
+		if math.Abs(got.NetProfit-exp.NetProfit) > 0.001 {
+			t.Errorf("REGN %d net profit = %.3f bln; want %.3f", regn, got.NetProfit, exp.NetProfit)
+		}
+		if math.Abs(got.Revenue-exp.Revenue) > 0.001 {
+			t.Errorf("REGN %d revenue = %.3f bln; want %.3f", regn, got.Revenue, exp.Revenue)
 		}
 	}
 
-	if len(profits) < 100 {
-		t.Errorf("expected 100+ banks with a financial result, got %d", len(profits))
+	if len(figures) < 100 {
+		t.Errorf("expected 100+ banks with a financial result, got %d", len(figures))
 	}
 }
 
-// TestExtractAndParseCapital exercises the form 123 path against a saved archive
-// (123-20240101.rar = regulatory capital as of year-end 2023).
-func TestExtractAndParseCapital(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "123-20240101.rar"))
+// TestExtractAndParseEquity exercises the form 101 path against a saved archive
+// (101-20240101.rar = balances as of year-end 2023, first-order accounts).
+// Сбербанк: 102 (67.8) + 106 (-12.3) + 107 (3.5) + 108 (4798.3) + 114 (-9.8) +
+// 706 (the year's profit, 1493.1) = 6340.7.
+func TestExtractAndParseEquity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "101-20240101.rar"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
 
-	dbf, err := extractDBF(raw, "_123D.DBF")
+	dbf, err := extractDBF(raw, "B1.DBF")
 	if err != nil {
 		t.Fatalf("extract dbf: %v", err)
 	}
 
-	capital, err := parseForm123(dbf)
+	equity, err := parseForm101(dbf)
 	if err != nil {
-		t.Fatalf("parse form 123: %v", err)
+		t.Fatalf("parse form 101: %v", err)
 	}
 
-	// REGN -> total regulatory capital, billions of RUB (year-end 2023).
+	// REGN -> balance-sheet equity, billions of RUB (year-end 2023).
 	want := map[int]float64{
-		1481: 6265.2, // Сбербанк
-		1000: 1781.4, // ВТБ
-		436:  173.4,  // Банк "Санкт-Петербург"
+		1481: 6340.667, // Сбербанк
+		1000: 1204.094, // ВТБ
+		2673: 206.955,  // Тинькофф Банк
 	}
 	for regn, exp := range want {
-		got, ok := capital[regn]
+		got, ok := equity[regn]
 		if !ok {
-			t.Errorf("REGN %d missing from parsed capital", regn)
+			t.Errorf("REGN %d missing from parsed equity", regn)
 			continue
 		}
-		if math.Abs(got-exp) > 0.5 {
-			t.Errorf("REGN %d capital = %.1f bln; want ~%.1f", regn, got, exp)
+		if math.Abs(got-exp) > 0.001 {
+			t.Errorf("REGN %d equity = %.3f bln; want %.3f", regn, got, exp)
 		}
 	}
 
-	if len(capital) < 100 {
-		t.Errorf("expected 100+ banks with capital, got %d", len(capital))
+	if len(equity) < 100 {
+		t.Errorf("expected 100+ banks with equity, got %d", len(equity))
+	}
+}
+
+// TestParseForm101 covers the account selection and sign rules on a synthetic
+// table: plan filter, passive/active sides, 5-digit rows used only when no
+// first-order row exists for the account, junk after a NUL (pre-2022 archives)
+// and non-equity accounts ignored.
+func TestParseForm101(t *testing.T) {
+	const planA, planB = "\x80", "\x81" // cp866 "А", "Б"
+	dbf := buildDBF(
+		[]dbfFieldDef{{"REGN", 4}, {"PLAN", 1}, {"NUM_SC", 5}, {"A_P", 1}, {"IITG", 20}},
+		[][]string{
+			// Bank 1: old archive, second-order accounts only.
+			{"1", planA, "10207", "2", "1000000"},      // +1.0 charter capital
+			{"1", planA, "10605", "1", "200000"},       // -0.2 negative revaluation
+			{"1", planA, "10801", "2", "3000000"},      // +3.0 retained earnings
+			{"1", planA, "70601", "2", "5000000"},      // +5.0 current-year income
+			{"1", planA, "70606", "1", "4500000"},      // -4.5 current-year expense
+			{"1", planA, "20202", "1", "9000000"},      // cash: not equity
+			{"1", planA, "ITGAP", "2", "99000000"},     // total line: not an account
+			{"1", planB, "10207", "2", "7000000"},      // off-plan: ignored
+			{"1", planA, "109\x00\xd1", "1", "100000"}, // -0.1, junk after NUL
+			// Bank 2: both orders for 108 -> the first-order row wins.
+			{"2", planA, "108", "2", "4000000"},   // +4.0
+			{"2", planA, "10801", "2", "4000000"}, // same money, second order
+			{"2", planA, "111", "1", "500000"},    // -0.5 dividends
+			{"2", planA, "707", "2", "250000"},    // +0.25 last year's result
+			{"2", planA, "708", "2", "0"},
+			{"2", planA, "102", "9", "123"}, // unknown side: skipped
+		},
+		nil,
+	)
+
+	equity, err := parseForm101(dbf)
+	if err != nil {
+		t.Fatalf("parseForm101: %v", err)
+	}
+	want := map[int]float64{1: 1.0 - 0.2 + 3.0 + 5.0 - 4.5 - 0.1, 2: 4.0 - 0.5 + 0.25}
+	for regn, exp := range want {
+		if math.Abs(equity[regn]-exp) > 1e-9 {
+			t.Errorf("REGN %d equity = %v, want %v", regn, equity[regn], exp)
+		}
+	}
+	if len(equity) != len(want) {
+		t.Errorf("parsed %d banks, want %d: %v", len(equity), len(want), equity)
 	}
 }
 
@@ -121,6 +173,14 @@ func TestParseDBF(t *testing.T) {
 			{"1000", "61101", "241481674"},
 			{"DELETED", "x", "x"}, // marked deleted below
 			{"963", "61102", "5000000"},
+			{"963", "11000", "9000000"}, // interest income
+			{"963", "12000", "1000000"}, // commission booked as interest
+			{"963", "15000", "7000000"}, // provision release: excluded
+			{"963", "27000", "2000000"}, // fee income
+			{"963", "31000", "4000000"}, // interest expense
+			{"963", "35000", "500000"},  // adjustment reducing interest income
+			{"963", "37000", "3000000"}, // provision charge: excluded
+			{"42", "11000", "1000000"},  // no financial result: omitted
 		},
 		map[int]bool{2: true},
 	)
@@ -132,19 +192,25 @@ func TestParseDBF(t *testing.T) {
 	if tbl.col("REGN") != 0 || tbl.col("CODE") != 1 || tbl.col("SIM_ITOGO") != 2 {
 		t.Fatalf("unexpected columns: %+v", tbl.fields)
 	}
-	if len(tbl.records) != 3 {
-		t.Fatalf("expected 3 non-deleted records, got %d", len(tbl.records))
+	if len(tbl.records) != 11 {
+		t.Fatalf("expected 11 non-deleted records, got %d", len(tbl.records))
 	}
 
-	profits, err := parseForm102(dbf)
+	figures, err := parseForm102(dbf)
 	if err != nil {
 		t.Fatalf("parseForm102: %v", err)
 	}
-	if math.Abs(profits[1481]-1493.148578) > 1e-6 {
-		t.Errorf("REGN 1481 = %v, want 1493.148578", profits[1481])
+	if math.Abs(figures[1481].NetProfit-1493.148578) > 1e-6 {
+		t.Errorf("REGN 1481 = %v, want 1493.148578", figures[1481].NetProfit)
 	}
-	if math.Abs(profits[963]-(-5.0)) > 1e-6 { // loss code 61102 -> negative
-		t.Errorf("REGN 963 = %v, want -5.0", profits[963])
+	if math.Abs(figures[963].NetProfit-(-5.0)) > 1e-6 { // loss code 61102 -> negative
+		t.Errorf("REGN 963 net profit = %v, want -5.0", figures[963].NetProfit)
+	}
+	if math.Abs(figures[963].Revenue-7.5) > 1e-6 { // 9 + 1 - 4 - 0.5 + 2
+		t.Errorf("REGN 963 revenue = %v, want 7.5", figures[963].Revenue)
+	}
+	if _, ok := figures[42]; ok {
+		t.Error("REGN 42 has no financial result and must be omitted")
 	}
 }
 
@@ -157,12 +223,12 @@ func TestParseDBFJunkAfterFieldName(t *testing.T) {
 		nil,
 	)
 
-	profits, err := parseForm102(dbf)
+	figures, err := parseForm102(dbf)
 	if err != nil {
 		t.Fatalf("parseForm102: %v", err)
 	}
-	if math.Abs(profits[2673]-2.673066) > 1e-9 {
-		t.Errorf("REGN 2673 = %v, want 2.673066", profits[2673])
+	if math.Abs(figures[2673].NetProfit-2.673066) > 1e-9 {
+		t.Errorf("REGN 2673 = %v, want 2.673066", figures[2673].NetProfit)
 	}
 }
 

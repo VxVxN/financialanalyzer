@@ -668,6 +668,8 @@ func formatMetricName(metric string) string {
 
 func metricDescription(metric string) string {
 	switch metric {
+	case "revenue":
+		return "Revenue (banks: net interest income + fee and commission income)"
 	case "net_margin":
 		return "Net profit as % of revenue — pricing power & efficiency"
 	case "ebitda_margin":
@@ -685,11 +687,11 @@ func metricDescription(metric string) string {
 	case "roe":
 		return "Return on equity — how efficiently capital is used"
 	case "pb":
-		return "Price / Book — market cap per ruble of equity (banks: regulatory capital)"
+		return "Price / Book — market cap per ruble of equity"
 	case "div_yield":
 		return "Dividends with record dates in the year / year-end market cap, %"
 	case "equity":
-		return "Shareholders' equity (banks: regulatory capital, approximate)"
+		return "Shareholders' equity (banks: bank-only RSBU balance, form 101)"
 	case "dividends":
 		return "Dividends by record-date year: per share x current share count (approximate after buybacks, issues, splits)"
 	}

@@ -39,8 +39,8 @@ type QuarterData struct {
 	Debt           *float64
 	PE             *float64
 	ROE            *float64
-	// Equity is balance-sheet equity (RSBU line 1300) for companies and
-	// regulatory capital (CBR form 123) for banks — the latter approximate.
+	// Equity is balance-sheet equity: RSBU line 1300 for companies, the capital
+	// and financial-result accounts of CBR form 101 for banks.
 	Equity *float64
 	// Dividends is the year's total in billions of RUB, on the Q4 row only,
 	// entered by hand through CSV (no free exchange API exists). Like

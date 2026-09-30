@@ -12,6 +12,7 @@ import (
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/models"
+	"github.com/VxVxN/financialanalyzer/internal/scraper/cbr"
 	"github.com/VxVxN/financialanalyzer/internal/scraper/moex"
 )
 
@@ -239,4 +240,174 @@ func TestStoredSpecs(t *testing.T) {
 	if fmt.Sprint(bankSpecs) != fmt.Sprint(wantBanks) {
 		t.Errorf("banks = %+v, want %+v", bankSpecs, wantBanks)
 	}
+}
+
+// TestBankRows: cumulative YTD figures are differenced into quarters, each row
+// carries its quarter-end equity, and only the Q4 row gets cap, P/E and ROE.
+// Stored periods are skipped, and a quarter whose predecessor is missing
+// cannot be differenced.
+func TestBankRows(t *testing.T) {
+	const regn = 1481
+	spec := bankSpec{Ticker: "SBER", Regn: regn, Category: "banks"}
+	cum := map[string]map[int]cbr.Form102{
+		"Q1": {regn: {NetProfit: 100, Revenue: 300}},
+		"Q2": {regn: {NetProfit: 250, Revenue: 650}},
+		"Q3": {regn: {NetProfit: 380, Revenue: 1000}},
+		"Q4": {regn: {NetProfit: 500, Revenue: 1400}, 1000: {NetProfit: 1}},
+	}
+	equity := map[string]map[int]float64{
+		"Q1": {regn: 1000},
+		"Q3": {regn: 1100},
+		"Q4": {regn: 1200},
+	}
+	existing := map[string]struct{}{"2023-Q2": {}}
+	var capCalls []string
+	capAt := func(ticker string, year int) *float64 {
+		capCalls = append(capCalls, fmt.Sprintf("%s-%d", ticker, year))
+		return models.Float(5000)
+	}
+
+	rows := bankRows(spec, 2023, cum, equity, nil, existing, capAt)
+
+	type want struct {
+		quarter              string
+		profit, revenue, eq  float64
+		hasEquity, valuation bool
+	}
+	wants := []want{
+		{quarter: "Q1", profit: 100, revenue: 300, eq: 1000, hasEquity: true},
+		// Q2 is already stored; Q3 is still differenced against Q2's cumulative.
+		{quarter: "Q3", profit: 130, revenue: 350, eq: 1100, hasEquity: true},
+		{quarter: "Q4", profit: 120, revenue: 400, eq: 1200, hasEquity: true, valuation: true},
+	}
+	if len(rows) != len(wants) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(wants), rows)
+	}
+	near := func(got *float64, want float64) bool {
+		return got != nil && math.Abs(*got-want) < 1e-9
+	}
+	for i, w := range wants {
+		r := rows[i]
+		if r.Quarter != w.quarter || r.Year != 2023 || r.Company != "SBER" || r.Category != "banks" || r.Source != models.SourceCBR102 {
+			t.Errorf("row %d = %d-%s %s/%s/%s, want 2023-%s SBER/banks/%s", i, r.Year, r.Quarter, r.Company, r.Category, r.Source, w.quarter, models.SourceCBR102)
+		}
+		if !near(r.NetProfit, w.profit) || !near(r.Revenue, w.revenue) {
+			t.Errorf("%s profit/revenue = %v/%v, want %v/%v", w.quarter, deref(r.NetProfit), deref(r.Revenue), w.profit, w.revenue)
+		}
+		if w.hasEquity != (r.Equity != nil) || (w.hasEquity && !near(r.Equity, w.eq)) {
+			t.Errorf("%s equity = %v, want %v", w.quarter, deref(r.Equity), w.eq)
+		}
+		if !w.valuation {
+			if r.Capitalization != nil || r.PE != nil || r.ROE != nil {
+				t.Errorf("%s carries valuation fields; only Q4 should", w.quarter)
+			}
+			continue
+		}
+		if !near(r.Capitalization, 5000) || !near(r.PE, 10) || !near(r.ROE, 500.0/1200*100) {
+			t.Errorf("Q4 cap/PE/ROE = %v/%v/%v, want 5000/10/%v", deref(r.Capitalization), deref(r.PE), deref(r.ROE), 500.0/1200*100)
+		}
+	}
+	if len(capCalls) != 1 || capCalls[0] != "SBER-2023" {
+		t.Errorf("capAt calls = %v, want exactly [SBER-2023]", capCalls)
+	}
+
+	// A missing Q2 cumulative leaves Q2 and Q3 out; Q4 (no equity) still has
+	// cap and P/E but no ROE.
+	delete(cum, "Q2")
+	rows = bankRows(spec, 2023, cum, map[string]map[int]float64{}, nil, nil, capAt)
+	if len(rows) != 2 || rows[0].Quarter != "Q1" || rows[1].Quarter != "Q4" {
+		t.Fatalf("with Q2 missing got %+v, want Q1 and Q4", rows)
+	}
+	if q4 := rows[1]; q4.Equity != nil || q4.ROE != nil || !near(q4.PE, 10) {
+		t.Errorf("Q4 without equity: equity=%v ROE=%v PE=%v, want nil/nil/10", deref(q4.Equity), deref(q4.ROE), deref(q4.PE))
+	}
+
+	// A bank absent from the archives yields nothing and is never priced.
+	capCalls = nil
+	if rows := bankRows(bankSpec{Ticker: "VTBR", Regn: 1000}, 2023, map[string]map[int]cbr.Form102{"Q1": {}}, nil, nil, nil, capAt); len(rows) != 0 {
+		t.Errorf("absent bank produced rows: %+v", rows)
+	}
+	if len(capCalls) != 0 {
+		t.Errorf("absent bank priced: %v", capCalls)
+	}
+}
+
+// TestBankRowsLossesAndPending: a quarter below the previous cumulative goes
+// negative, a loss year has no P/E but a negative ROE, and a pending quarter is
+// held back while its cumulative still differences the next one.
+func TestBankRowsLossesAndPending(t *testing.T) {
+	const regn = 7
+	spec := bankSpec{Ticker: "BANK", Regn: regn}
+	cum := map[string]map[int]cbr.Form102{
+		"Q1": {regn: {NetProfit: 10, Revenue: 50}},
+		"Q2": {regn: {NetProfit: 4, Revenue: 45}}, // Q2 alone: -6 profit, -5 revenue
+		"Q3": {regn: {NetProfit: -20, Revenue: 60}},
+		"Q4": {regn: {NetProfit: -30, Revenue: 80}},
+	}
+	equity := map[string]map[int]float64{"Q2": {regn: 100}, "Q4": {regn: 90}}
+	capAt := func(string, int) *float64 { return models.Float(500) }
+
+	rows := bankRows(spec, 2024, cum, equity, map[string]bool{"Q3": true}, nil, capAt)
+	got := map[string]models.QuarterData{}
+	for _, r := range rows {
+		got[r.Quarter] = r
+	}
+	if _, ok := got["Q3"]; ok || len(rows) != 3 {
+		t.Fatalf("rows = %+v, want Q1, Q2, Q4 (Q3 pending)", rows)
+	}
+	near := func(p *float64, want float64) bool { return p != nil && math.Abs(*p-want) < 1e-9 }
+	if q2 := got["Q2"]; !near(q2.NetProfit, -6) || !near(q2.Revenue, -5) {
+		t.Errorf("Q2 = %v/%v, want -6/-5", deref(q2.NetProfit), deref(q2.Revenue))
+	}
+	q4 := got["Q4"] // differenced against the pending Q3's cumulative
+	if !near(q4.NetProfit, -10) || !near(q4.Revenue, 20) {
+		t.Errorf("Q4 = %v/%v, want -10/20", deref(q4.NetProfit), deref(q4.Revenue))
+	}
+	if q4.PE != nil {
+		t.Errorf("loss-year P/E = %v, want nil", *q4.PE)
+	}
+	if !near(q4.ROE, -30.0/90*100) {
+		t.Errorf("loss-year ROE = %v, want %v", deref(q4.ROE), -30.0/90*100)
+	}
+}
+
+func TestEquityPending(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC) // grace = 90 days
+	for date, want := range map[string]bool{
+		"20261001": true,  // future quarter end
+		"20260801": true,  // 60 days ago
+		"20260703": true,  // 89 days ago, still within grace
+		"20260701": false, // 91 days ago
+		"20230101": false,
+		"garbage":  false,
+	} {
+		if got := equityPending(date, now); got != want {
+			t.Errorf("equityPending(%s) = %v, want %v", date, got, want)
+		}
+	}
+}
+
+func TestQuarterFullyStored(t *testing.T) {
+	specs := []bankSpec{{Ticker: "A"}, {Ticker: "B"}}
+	existing := map[string]map[string]struct{}{
+		"A": {"2024-Q1": {}, "2024-Q2": {}},
+		"B": {"2024-Q1": {}},
+	}
+	if !quarterFullyStored(specs, existing, 2024, "Q1") {
+		t.Error("Q1 stored for both banks, want true")
+	}
+	if quarterFullyStored(specs, existing, 2024, "Q2") {
+		t.Error("Q2 missing for B, want false")
+	}
+	if yearFullyStored(specs, existing, 2024) {
+		t.Error("year incomplete, want false")
+	}
+}
+
+// deref formats an optional metric for failure messages.
+func deref(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }

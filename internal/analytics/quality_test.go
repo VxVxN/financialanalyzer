@@ -37,6 +37,11 @@ func TestCheckRow(t *testing.T) {
 		// ПАО «КЦ ИКС 5» 2025: revenue 85.7, profit 124.5 — only the profit>revenue rule fires.
 		{"holding (X5-like)", row(700, 85.7, 124.5, 5.6, 29.2), [][]string{{"revenue", "net_profit", "pe", "roe"}}},
 		{"bank: revenue not reported", withoutRevenue(row(7000, 0, 1500, 4.7, 24)), nil},
+		// A bank quarter with a big provision release out-earns the NII + fee
+		// revenue proxy; that is not the holding signature.
+		{"bank: profit above revenue proxy", withSource(row(7000, 300, 400, 4.7, 24), models.SourceCBR102), nil},
+		{"non-bank: profit above revenue still flagged", withSource(row(7000, 300, 400, 4.7, 24), models.SourceCSV),
+			[][]string{{"revenue", "net_profit", "pe", "roe"}}},
 		{"no cap: revenue/cap rule skipped", withoutCap(row(0, 0.1, 0.05, 0, 5)), nil},
 		// A reported zero revenue is a real figure: a pure holding with no sales.
 		{"holding with zero revenue", row(900, 0, 30, 30, 20), [][]string{
@@ -105,4 +110,9 @@ func TestSources(t *testing.T) {
 	if got := SourceLabel("<img onerror=x>"); got != "other" {
 		t.Errorf("SourceLabel(unknown value) = %q, want \"other\"", got)
 	}
+}
+
+func withSource(q models.QuarterData, source string) models.QuarterData {
+	q.Source = source
+	return q
 }

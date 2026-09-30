@@ -63,8 +63,11 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	}
 	// A parent company living on dividends from subsidiaries books them below
 	// revenue, so its net profit can exceed revenue. For an operating company
-	// that essentially never happens.
-	if revenue >= 0 && netProfit > revenue {
+	// that essentially never happens. A bank's revenue is only a proxy (net
+	// interest + fee income) that leaves out provision releases, FX/securities
+	// gains and subsidiaries' dividends, so a quarter with such a gain can
+	// legitimately out-earn it; the check is skipped for CBR rows.
+	if q.Source != models.SourceCBR102 && revenue >= 0 && netProfit > revenue {
 		add("net profit exceeds revenue — income is likely dividends from subsidiaries (holding-level figures)",
 			"revenue", "net_profit", "pe", "roe")
 	}
@@ -153,7 +156,7 @@ func SourceLabel(source string) string {
 	case models.SourceRSBU:
 		return "RSBU (issuer)"
 	case models.SourceCBR102:
-		return "CBR form 102"
+		return "CBR forms 102/101"
 	case models.SourceCSV:
 		return "CSV import"
 	case models.SourceSmartLab:
@@ -171,7 +174,7 @@ func SourceNote(source string) string {
 		return "Annual standalone RSBU of the listed legal entity from ГИР БО, not consolidated IFRS. " +
 			"For holding companies revenue/profit are mostly intra-group dividends, so P/E and ROE are not comparable."
 	case models.SourceCBR102:
-		return "Bank-only RSBU from CBR forms 102/123, not group IFRS. ROE uses regulatory capital, so it is approximate."
+		return "Bank-only RSBU from CBR forms 102/101, not group IFRS. Revenue is net interest income + fee income (fee expense not netted)."
 	case models.SourceCSV:
 		return "Imported from a CSV file; accuracy depends on the file (usually group IFRS)."
 	case models.SourceSmartLab:

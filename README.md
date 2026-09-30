@@ -24,7 +24,7 @@ tables.
   revenue & net-profit YoY and 3y/5y CAGR, all computed on quarterly, TTM, or
   annual bases.
 - **Two ingestion paths** — CSV import and a free primary-source fetcher
-  (ГИР БО + MOEX ISS for companies, CBR forms 102/123 for banks).
+  (ГИР БО + MOEX ISS for companies, CBR forms 102/101 for banks).
 - **Self-contained binaries** — migrations and templates are embedded, so every
   binary runs from any working directory with nothing on disk beside it.
 - **Light/dark themes** on every page.
@@ -108,8 +108,8 @@ jumps more than 4× year over year so a missing split can be added.
 
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
-102/123 archives (`FETCH_BANKS`, registry `bank_tickers.txt`), and EBITDA is left
-empty. See package docs for details.
+102/101 archives (`FETCH_BANKS`, registry `bank_tickers.txt`; bank revenue is
+net interest income + fee income), and EBITDA is left empty. See package docs for details.
 
 ## Configuration
 

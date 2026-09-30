@@ -45,14 +45,14 @@ func TestFetchPeriodRetriesThenParses(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	profits, err := testClient(srv).FetchPeriod(context.Background(), "20240101")
+	figures, err := testClient(srv).FetchPeriod(context.Background(), "20240101")
 	if err != nil {
 		t.Fatalf("FetchPeriod: %v", err)
 	}
 	if calls.Load() != 2 {
 		t.Errorf("calls = %d, want 2 (one retry)", calls.Load())
 	}
-	if _, ok := profits[1481]; !ok {
+	if _, ok := figures[1481]; !ok {
 		t.Error("Sberbank (REGN 1481) missing from parsed archive")
 	}
 }
@@ -72,5 +72,34 @@ func TestFetchPeriodNotPublished(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Errorf("calls = %d, want 1 (404 must not be retried)", calls.Load())
+	}
+}
+
+// TestFetchEquityServesForm101: FetchEquity requests the form 101 archive for
+// the date and parses its balance table.
+func TestFetchEquityServesForm101(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "101-20240101.rar"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/vfs/credit/forms/101-20240101.rar" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(raw)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	equity, err := c.FetchEquity(context.Background(), "20240101")
+	if err != nil {
+		t.Fatalf("FetchEquity: %v", err)
+	}
+	if _, ok := equity[1481]; !ok {
+		t.Error("Sberbank (REGN 1481) missing from parsed equity")
+	}
+	if _, err := c.FetchEquity(context.Background(), "20990101"); !errors.Is(err, ErrNotPublished) {
+		t.Errorf("unpublished date: err = %v, want ErrNotPublished", err)
 	}
 }
