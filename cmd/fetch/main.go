@@ -29,7 +29,10 @@
 //	                    or "TICKER:INN:CATEGORY", e.g. "LKOH,GAZP:oil"
 //	FETCH_TICKERS_FILE  path to a file with one "TICKER [INN] [CATEGORY]" per
 //	                    line ("#" comments allowed)
-//	(neither set)       fetch every ticker in the bundled registry
+//	(no FETCH_* list)   refresh the companies already in the DB (those
+//	                    found in the bundled registries)
+//	FETCH_ALL           with no list set: fetch every ticker in the bundled
+//	                    registries instead
 //
 // Other knobs:
 //
@@ -40,13 +43,13 @@
 //
 // Banks (CBR form 102), independent of the ГИР БО list above:
 //
-//	FETCH_BANKS         comma-separated bank tickers, e.g. "SBER,VTBR"; empty
-//	                    means every ticker in the bundled bank registry
+//	FETCH_BANKS         comma-separated bank tickers, e.g. "SBER,VTBR"
 //	FETCH_BANK_FROM_YEAR  earliest reporting year to fetch (default 2020); the
 //	                    latest is the current year
 //
-// With no FETCH_* variable set, fetch runs both pipelines over their full
-// bundled registries; requesting one kind explicitly suppresses the other.
+// With no FETCH_* list set, fetch runs both pipelines over the companies
+// already stored (FETCH_ALL: over the full bundled registries); requesting one
+// kind explicitly suppresses the other.
 package main
 
 import (
@@ -126,25 +129,46 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("load bank registry: %w", err)
 	}
 
-	// Resolve which pipelines to run. With no env at all, fetch everything;
-	// an explicit request for one kind suppresses the other.
+	// Resolve which pipelines to run. An explicit request for one kind
+	// suppresses the other; with no list at all, refresh the companies already
+	// in the DB (FETCH_ALL: every registry entry instead).
 	bankRaw := os.Getenv("FETCH_BANKS")
 	explicitNonBank := os.Getenv("FETCH_TICKERS") != "" || os.Getenv("FETCH_TICKERS_FILE") != ""
 	explicitBank := bankRaw != ""
 	fetchEverything := !explicitNonBank && !explicitBank
+	fetchAllRegistry := fetchEverything && os.Getenv("FETCH_ALL") != ""
 
 	var specs []tickerSpec
-	if explicitNonBank || fetchEverything {
-		if specs, err = loadTickerSpecs(registry); err != nil {
-			return err
+	var bankSpecs []bankSpec
+	switch {
+	case fetchAllRegistry:
+		specs = registrySpecs(registry)
+		bankSpecs = loadBankSpecs(bankRegistry, "")
+	case fetchEverything:
+		stored, err := app.Repo.GetAllCompaniesWithCategories(ctx)
+		if err != nil {
+			return fmt.Errorf("list stored companies: %w", err)
+		}
+		if len(stored) == 0 {
+			return fmt.Errorf("DB has no companies yet: set FETCH_TICKERS / FETCH_TICKERS_FILE / FETCH_BANKS, or FETCH_ALL=1 for the whole registry")
+		}
+		specs, bankSpecs = storedSpecs(stored, registry, bankRegistry)
+	default:
+		if explicitNonBank {
+			if specs, err = loadTickerSpecs(registry); err != nil {
+				return err
+			}
+		}
+		if explicitBank {
+			bankSpecs = loadBankSpecs(bankRegistry, bankRaw)
 		}
 	}
-	var bankSpecs []bankSpec
-	if explicitBank || fetchEverything {
-		bankSpecs = loadBankSpecs(bankRegistry, bankRaw)
-	}
-	if len(specs) == 0 && len(bankSpecs) == 0 {
+	if len(specs) == 0 && len(bankSpecs) == 0 && !fetchEverything {
 		return fmt.Errorf("no tickers: set FETCH_TICKERS / FETCH_TICKERS_FILE / FETCH_BANKS, or add registry entries")
+	}
+	if fetchEverything && !fetchAllRegistry {
+		logger.Info("Refreshing companies stored in the DB (set FETCH_TICKERS / FETCH_BANKS to add new ones, FETCH_ALL=1 for the whole registry)",
+			"companies", len(specs), "banks", len(bankSpecs))
 	}
 
 	force := os.Getenv("FETCH_FORCE") != ""
@@ -573,8 +597,8 @@ func parseRegistryLine(line string) (tickerSpec, bool) {
 	return spec, true
 }
 
-// loadTickerSpecs resolves the ticker list from env vars, falling back to the
-// whole bundled registry when neither var is set.
+// loadTickerSpecs resolves the ticker list from FETCH_TICKERS or
+// FETCH_TICKERS_FILE (the caller checks that one is set).
 func loadTickerSpecs(registry map[string]tickerSpec) ([]tickerSpec, error) {
 	if raw := os.Getenv("FETCH_TICKERS"); raw != "" {
 		return parseTickerSpecList(raw, registry), nil
@@ -582,7 +606,41 @@ func loadTickerSpecs(registry map[string]tickerSpec) ([]tickerSpec, error) {
 	if path := os.Getenv("FETCH_TICKERS_FILE"); path != "" {
 		return readTickerSpecFile(path, registry)
 	}
-	return registrySpecs(registry), nil
+	return nil, nil
+}
+
+// storedSpecs picks the registry entries for companies already in the DB, so a
+// default run refreshes what is there instead of pulling the whole registry.
+// A stored name must equal the ticker exactly (fetch stores tickers
+// upper-cased; anything else would create a second company), and its stored
+// category is kept. Companies in neither registry (CSV-only) are skipped here;
+// they still get quotes.
+func storedSpecs(stored []database.CompanyWithCategory, registry map[string]tickerSpec, bankRegistry map[string]bankSpec) ([]tickerSpec, []bankSpec) {
+	var specs []tickerSpec
+	var banks []bankSpec
+	seen := make(map[string]struct{}, len(stored))
+	for _, c := range stored {
+		if _, dup := seen[c.Company]; dup {
+			continue
+		}
+		seen[c.Company] = struct{}{}
+		if b, ok := bankRegistry[c.Company]; ok {
+			if c.Category != "" {
+				b.Category = c.Category
+			}
+			banks = append(banks, b)
+			continue
+		}
+		if s, ok := registry[c.Company]; ok {
+			if c.Category != "" {
+				s.Category = c.Category
+			}
+			specs = append(specs, s)
+		}
+	}
+	sort.Slice(specs, func(i, j int) bool { return specs[i].Ticker < specs[j].Ticker })
+	sort.Slice(banks, func(i, j int) bool { return banks[i].Ticker < banks[j].Ticker })
+	return specs, banks
 }
 
 // registrySpecs returns every registry entry, sorted by ticker for stable runs.

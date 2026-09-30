@@ -89,6 +89,11 @@ CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
 FETCH_TICKERS="LKOH:7708004767:oil,MGNT:2309085638:retail" go run ./cmd/fetch
 FETCH_TICKERS_FILE=/path/to/list.txt go run ./cmd/fetch
 
+# No list: refresh only the companies already in the DB; FETCH_ALL=1 fetches
+# every ticker in the bundled registries
+go run ./cmd/fetch
+FETCH_ALL=1 go run ./cmd/fetch
+
 # Refresh only the latest exchange closes (current P/E etc.)
 FETCH_QUOTES_ONLY=1 go run ./cmd/fetch
 ```

@@ -24,7 +24,8 @@ CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
 # Fetch from free primary sources (ГИР БО + MOEX ISS). Ticker INN/category are
 # resolved from the bundled registry (fetch_tickers.txt), so a request can be
 # just the ticker; INN/category may still be given explicitly to override.
-go run ./cmd/fetch                                    # every ticker in the registry
+go run ./cmd/fetch                                    # companies already in the DB
+FETCH_ALL=1 go run ./cmd/fetch                        # every ticker in both registries
 FETCH_TICKERS="OZON,X5:retail" go run ./cmd/fetch    # registry-resolved
 FETCH_TICKERS="MGNT:2309085638:retail" go run ./cmd/fetch  # full explicit form
 FETCH_TICKERS_FILE=/path/to/list.txt go run ./cmd/fetch
@@ -38,8 +39,10 @@ FETCH_QUOTES_ONLY=1 go run ./cmd/fetch
 # registry bank_tickers.txt mapping TICKER->REGN). Runs by default alongside the
 # ГИР БО list; request a subset / limit the year range explicitly:
 FETCH_BANKS="T" FETCH_BANK_FROM_YEAR=2009 go run ./cmd/fetch
-# With no FETCH_* var set, both pipelines run over their full bundled registries;
-# requesting one kind (FETCH_TICKERS or FETCH_BANKS) suppresses the other.
+# With no FETCH_* list set, both pipelines refresh only the companies already in
+# the DB that appear in their registry (stored category kept); FETCH_ALL=1 runs
+# the full bundled registries instead. Requesting one kind (FETCH_TICKERS or
+# FETCH_BANKS) suppresses the other; new companies are added by naming them.
 
 # Build
 go build ./...

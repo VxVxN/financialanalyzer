@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 	"github.com/VxVxN/financialanalyzer/internal/scraper/moex"
 )
@@ -202,5 +203,34 @@ func TestCapJumps(t *testing.T) {
 func TestExtraSplitsRegistryLoads(t *testing.T) {
 	if sp := extraSplits["BELU"]; len(sp) != 1 || sp[0].After != 8 {
 		t.Errorf("bundled BELU split = %+v", sp)
+	}
+}
+
+func TestStoredSpecs(t *testing.T) {
+	registry := map[string]tickerSpec{
+		"LKOH": {"LKOH", "7708004767", "oil"},
+		"MGNT": {"MGNT", "2309085638", "retail"},
+	}
+	banks := map[string]bankSpec{
+		"SBER": {"SBER", 1481, "banks"},
+		"VTBR": {"VTBR", 1000, "banks"},
+	}
+	stored := []database.CompanyWithCategory{
+		{Company: "SBER", Category: "финансы"}, // stored category wins
+		{Company: "SBER", Category: "banks"},   // duplicate company is ignored
+		{Company: "MGNT", Category: ""},        // empty category keeps the registry one
+		{Company: "lkoh", Category: "oil"},     // not the stored ticker form
+		{Company: "CSVONLY", Category: "misc"}, // in neither registry
+	}
+
+	specs, bankSpecs := storedSpecs(stored, registry, banks)
+
+	wantSpecs := []tickerSpec{{"MGNT", "2309085638", "retail"}}
+	wantBanks := []bankSpec{{"SBER", 1481, "финансы"}}
+	if fmt.Sprint(specs) != fmt.Sprint(wantSpecs) {
+		t.Errorf("specs = %+v, want %+v", specs, wantSpecs)
+	}
+	if fmt.Sprint(bankSpecs) != fmt.Sprint(wantBanks) {
+		t.Errorf("banks = %+v, want %+v", bankSpecs, wantBanks)
 	}
 }
