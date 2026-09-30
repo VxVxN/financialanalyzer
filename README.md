@@ -97,6 +97,10 @@ Dividends have no free exchange API, so they come from CSV: a row starting with
 `Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
 means "no payout").
 
+Historical market caps undo later share splits (MOEX's split list plus the
+bundled `share_splits.txt` for splits MOEX omits); the fetcher warns when a cap
+jumps more than 4× year over year so a missing split can be added.
+
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
 102/123 archives (`FETCH_BANKS`, registry `bank_tickers.txt`), and EBITDA is left

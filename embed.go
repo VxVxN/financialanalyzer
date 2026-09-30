@@ -31,3 +31,10 @@ var TickerRegistry string
 //
 //go:embed bank_tickers.txt
 var BankRegistry string
+
+// SplitRegistry is the bundled "SECID TRADEDATE BEFORE AFTER" list
+// (share_splits.txt) of splits missing from MOEX's split list; cmd/fetch uses
+// it to rebuild historical share counts for market caps.
+//
+//go:embed share_splits.txt
+var SplitRegistry string

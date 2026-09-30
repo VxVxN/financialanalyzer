@@ -1,0 +1,17 @@
+# Share splits/consolidations MOEX's split list (/iss/statistics/engines/stock/
+# splits) is missing. cmd/fetch merges these with MOEX's list to rebuild the
+# share count behind historical market caps (current ISSUESIZE with later
+# splits undone). Add a row when `cmd/fetch` warns about a year-over-year cap
+# jump that no split explains.
+#
+# Format:  SECID  TRADEDATE  BEFORE  AFTER   ("#" starts a comment)
+#   TRADEDATE  first session at post-split prices (YYYY-MM-DD)
+#   BEFORE AFTER  BEFORE old shares became AFTER new ones (1:8 split = 1 8,
+#                 5000:1 consolidation = 5000 1)
+#
+# Rows are per secid: when a company splits ordinary and preferred shares
+# (e.g. SNGS and SNGSP) and MOEX omits both, add a row for each. If MOEX later
+# lists the same split (within a month of the date here), cmd/fetch ignores
+# the row and warns so it can be deleted.
+
+BELU  2024-08-22  1  8   # НоваБев 1:8 (15.8M -> 126.4M shares); trading resumed 2024-08-22 at 714 vs 4680
