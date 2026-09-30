@@ -12,6 +12,24 @@ jobs:
   test:
     name: Build & Test
     runs-on: ubuntu-latest
+    # Throwaway Postgres for the repository integration tests in
+    # internal/database (they truncate its tables; skipped without the DSN).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_DSN: host=127.0.0.1 port=5432 user=test password=test dbname=test sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
