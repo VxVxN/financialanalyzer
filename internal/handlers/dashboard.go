@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -52,6 +53,8 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		controller.logger.Warn("failed to load market quote", "company", company, "error", err)
 	}
+
+	ownRow, peersKnown := controller.relativeValuationRow(r.Context(), company, history, quote, hasQuote)
 
 	pal := paletteFor(theme)
 
@@ -230,6 +233,14 @@ a:hover { text-decoration: underline; }
 .score-breakdown th, .score-breakdown td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
 .score-breakdown th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
 .score-breakdown td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.rel-val { margin: 0 0 20px; }
+.rel-val .table-scroll { overflow-x: auto; }
+.rel-val th.num { text-align: right; }
+.rel-val td { white-space: nowrap; }
+.rel-val .pos { color: var(--pos); }
+.rel-val .neg { color: var(--neg); }
+.rel-val .muted { color: var(--text-muted); }
+.rel-val-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -265,6 +276,7 @@ a:hover { text-decoration: underline; }
 		fmt.Fprintf(w, `<div class="section-title">Текущая оценка</div><p class="stale-note">Последняя сохранённая цена закрытия от %s — слишком старая для оценки (обновите: <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
 			html.EscapeString(quote.PriceDate.Format("2006-01-02")))
 	}
+	renderRelativeValuation(w, history, ownRow, peersKnown)
 	renderKPIs(w, snap)
 	renderSparklines(w, history)
 	renderDashboardChart(w, history, theme)
@@ -323,6 +335,36 @@ async function saveNote() {
 }
 </script>
 </body></html>`, jsonForScript(company))
+}
+
+// relativeValuationRow returns the company's screener row with its sector
+// medians, the same figures the screener shows. The medians need every
+// company's row; failing to build them only hides the sector column
+// (peersKnown false).
+func (controller *Controller) relativeValuationRow(ctx context.Context, company string, history []models.QuarterData, quote models.MarketQuote, hasQuote bool) (row analytics.ScreenerRow, peersKnown bool) {
+	if len(history) == 0 {
+		return analytics.ScreenerRow{}, false
+	}
+	rows, err := controller.buildScreener(ctx)
+	if err != nil {
+		controller.logger.Warn("failed to build peer valuations", "company", company, "error", err)
+	}
+	for _, r := range rows {
+		if r.Company == company {
+			return r, err == nil
+		}
+	}
+	var q *models.MarketQuote
+	if hasQuote && analytics.QuoteIsFresh(quote, controller.now()) {
+		q = &quote
+	}
+	own := analytics.BuildScreenerRow(history, q)
+	if err != nil {
+		return own, false
+	}
+	rows = append(rows, own)
+	analytics.ApplySectorMedians(rows)
+	return rows[len(rows)-1], true
 }
 
 // jsonForScript encodes v as a JavaScript literal for an inline <script>:

@@ -41,12 +41,47 @@ type ScreenerRow struct {
 	NetProfitYoY    *float64 `json:"net_profit_yoy"`
 	Score           int      `json:"score"`
 	Anomalies       int      `json:"anomalies"` // data-quality flags over the history
+
+	// *HistPct: the valuation's percentile within the company's own history
+	// (HistoricalBand; low = cheap for P/E and P/B, high = cheap for yield).
+	PEHistPct       *float64 `json:"pe_hist_pct"`
+	PBHistPct       *float64 `json:"pb_hist_pct"`
+	DivYieldHistPct *float64 `json:"div_yield_hist_pct"`
+	// *Sector: median over the other companies of the category
+	// (ApplySectorMedians); SectorPeers counts those companies.
+	PESector       *float64 `json:"pe_sector"`
+	PBSector       *float64 `json:"pb_sector"`
+	DivYieldSector *float64 `json:"div_yield_sector"`
+	SectorPeers    int      `json:"sector_peers"`
+}
+
+// setHistPcts places the row's valuation within the company's history.
+func (r *ScreenerRow) setHistPcts(history []models.QuarterData) {
+	pct := func(metric string, v *float64) *float64 {
+		if v == nil {
+			return nil
+		}
+		if b, ok := HistoricalBand(history, metric, *v); ok {
+			return &b.Percentile
+		}
+		return nil
+	}
+	r.PEHistPct = pct("pe", r.PE)
+	r.PBHistPct = pct("pb", r.PB)
+	r.DivYieldHistPct = pct("div_yield", r.DivYield)
 }
 
 // BuildScreenerRow summarizes one company; quote is nil when none is stored
 // (callers drop quotes that fail QuoteIsFresh). A P/E of a loss-making period
-// is null on both paths, so the column sorts and filters one way.
+// is null on both paths, so the column sorts and filters one way. Sector
+// medians need every row: ApplySectorMedians fills them afterwards.
 func BuildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) ScreenerRow {
+	row := buildScreenerRow(history, quote)
+	row.setHistPcts(history)
+	return row
+}
+
+func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) ScreenerRow {
 	snap := BuildSnapshot(history)
 	sources := Sources(history)
 	row := ScreenerRow{

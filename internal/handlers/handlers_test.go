@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -498,5 +499,51 @@ func TestStaleQuoteIsIgnored(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0]["current"] != false || rows[0]["pe"] != 4.0 || rows[0]["capitalization"] != 6000.0 {
 		t.Errorf("screener row with stale quote = %v, want stored valuation", rows)
+	}
+}
+
+func TestRelativeValuation(t *testing.T) {
+	year := func(company string, y int, pe float64) models.QuarterData {
+		return models.QuarterData{Year: y, Quarter: "Q4", Company: company, Category: "oil", Source: models.SourceCSV,
+			PE: models.Float(pe), Capitalization: models.Float(pe * 100), NetProfit: models.Float(100)}
+	}
+	hist := map[string][]models.QuarterData{
+		"A": {year("A", 2022, 10), year("A", 2023, 8), year("A", 2024, 6), year("A", 2025, 3)},
+		"B": {year("B", 2025, 6)},
+		"C": {year("C", 2025, 12)},
+	}
+	repo := &fakeRepo{companies: []string{"A", "B", "C"}, history: hist, companyHist: hist["A"]}
+	r := newTestServer(repo)
+
+	var rows []map[string]any
+	if err := json.Unmarshal(do(t, r, http.MethodGet, "/api/screener", "").Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row["company"] != "A" {
+			continue
+		}
+		// Peers B, C: median of 6 and 12. A's 3 is the lowest of 4 years:
+		// a tie with itself counts half.
+		if row["pe_sector"] != 9.0 || row["sector_peers"] != 2.0 || row["pe_hist_pct"] != 12.5 {
+			t.Errorf("A row = %v", row)
+		}
+	}
+
+	body := do(t, r, http.MethodGet, "/company/A", "").Body.String()
+	for _, want := range []string{
+		"Оценка относительно истории и сектора · по последним сохранённым данным за 2025-Q4",
+		"дёшево относительно истории", "дешевле сектора (-67%)", "3.00 – 10.00 (4 пер., 2022-Q4 – 2025-Q4)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard lacks %q", want)
+		}
+	}
+
+	// Peers that cannot be loaded hide only the sector column.
+	repo.historyErr = errors.New("db down")
+	body = do(t, r, http.MethodGet, "/company/A", "").Body.String()
+	if !strings.Contains(body, "дёшево относительно истории") || strings.Contains(body, "Медиана сектора") {
+		t.Error("without peers the dashboard should keep the history band and drop the sector column")
 	}
 }

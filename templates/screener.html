@@ -98,6 +98,8 @@
         .pill.warn { background: var(--accent-bg); color: var(--warning); }
         .empty { padding: 32px; text-align: center; color: var(--text-3); }
         .legend { color: var(--text-3); font-size: 12px; margin-top: 10px; line-height: 1.6; }
+        tfoot td { background: var(--bg-muted); color: var(--text-2); font-weight: 600; border-bottom: none; }
+        td[title] { cursor: help; }
     </style>
 </head>
 <body>
@@ -141,6 +143,7 @@
         <table>
             <thead><tr id="head"></tr></thead>
             <tbody id="body"></tbody>
+            <tfoot id="foot"></tfoot>
         </table>
     </div>
     <p class="legend">
@@ -151,6 +154,10 @@
         <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
         <b>Сопоставимость</b>: неконсолидированная РСБУ / данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
         <b>Замечания</b>: аномалии качества данных в истории компании — подробности на дашборде.
+        <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории (нужно не меньше двух);
+        <b>перцентиль истории</b> — доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего:
+        низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
+        <b>Медиана</b> внизу таблицы считается по показанным компаниям: выберите категорию, чтобы получить медиану сектора.
     </p>
 </div>
 
@@ -164,6 +171,8 @@
         { key: 'category', label: 'Категория', kind: 'text', cls: 'left' },
         { key: 'capitalization', label: 'Капитализация, млрд', kind: 'money' },
         { key: 'pe', label: 'P/E', kind: 'ratio' },
+        { key: 'pe_vs_sector', label: 'P/E к сектору', kind: 'pct', signed: true, cheapBelow: true },
+        { key: 'pe_hist_pct', label: 'P/E: перцентиль истории', kind: 'pctile' },
         { key: 'pb', label: 'P/B', kind: 'ratio' },
         { key: 'div_yield', label: 'Див. доходность', kind: 'pct' },
         { key: 'ev_ebit', label: 'EV/EBIT', kind: 'ratio' },
@@ -194,6 +203,28 @@
         const earnings = row.earnings_period ? ' · прибыль ' + row.earnings_period : '';
         return (row.current ? 'рынок · ' + row.price_date : 'отчёт · ' + (row.last_period || '—')) + earnings;
     }
+    // Gap to the sector median in % (negative = cheaper than the peers).
+    function vsSector(v, median) {
+        return v === null || v === undefined || !median ? null : (v / median - 1) * 100;
+    }
+    for (const r of ROWS) r.pe_vs_sector = vsSector(r.pe, r.pe_sector);
+    const pctText = (v) => Math.round(v) + '%';
+    // Tooltip of a valuation cell: the sector median and the history percentile.
+    const BAND = { pe: ['pe_sector', 'pe_hist_pct'], pb: ['pb_sector', 'pb_hist_pct'], div_yield: ['div_yield_sector', 'div_yield_hist_pct'] };
+    function bandTitle(col, row) {
+        const keys = BAND[col.key];
+        if (!keys) return '';
+        const parts = [];
+        const med = row[keys[0]], pct = row[keys[1]];
+        if (med !== null && med !== undefined) parts.push('медиана сектора ' + fmt(col, med) + ' (аналогов: ' + row.sector_peers + ')');
+        if (pct !== null && pct !== undefined) parts.push('перцентиль истории ' + pctText(pct));
+        return parts.join(' · ');
+    }
+    function median(vals) {
+        if (!vals.length) return null;
+        const s = vals.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    }
     function sortValue(row, key) {
         if (key === 'source') return sourceText(row);
         if (key === 'valuation') return row.current ? 'a' + row.price_date : 'b' + (row.last_period || '');
@@ -206,6 +237,7 @@
             case 'money': return v.toLocaleString('en-US', { maximumFractionDigits: v >= 100 ? 0 : 1 });
             case 'ratio': return v.toFixed(2) + (col.key === 'debt_ebitda' ? 'x' : '');
             case 'pct': return (col.signed && v > 0 ? '+' : '') + v.toFixed(1) + '%';
+            case 'pctile': return pctText(v);
             case 'int': return String(v);
             default: return String(v);
         }
@@ -253,6 +285,7 @@
         });
         renderHead();
         $('count').textContent = 'Показано ' + rows.length + ' из ' + ROWS.length;
+        renderFoot(rows);
         if (!rows.length) {
             $('body').innerHTML = '<tr><td class="empty" colspan="' + COLUMNS.length + '">Нет компаний, подходящих под фильтры.</td></tr>';
             return;
@@ -276,11 +309,28 @@
             const text = fmt(c, r[c.key]);
             if (text === null) return '<td class="na">—</td>';
             let cls = '';
-            if (c.signed || c.key === 'pe' || c.key === 'roe') cls = r[c.key] < 0 ? 'neg' : (c.signed && r[c.key] > 0 ? 'pos' : '');
-            return '<td class="' + cls + '">' + esc(text) + '</td>';
+            const v = r[c.key];
+            if (c.cheapBelow) cls = v <= -20 ? 'pos' : (v >= 20 ? 'neg' : '');
+            else if (c.kind === 'pctile') cls = v <= 25 ? 'pos' : (v >= 75 ? 'neg' : '');
+            else if (c.signed || c.key === 'pe' || c.key === 'roe') cls = v < 0 ? 'neg' : (c.signed && v > 0 ? 'pos' : '');
+            const title = bandTitle(c, r);
+            return '<td class="' + cls + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(text) + '</td>';
         }).join('') + '</tr>').join('');
     }
 
+    // Median row over the companies shown: with a category selected, the
+    // sector median (this company included).
+    const NO_MEDIAN = new Set(['score', 'anomalies']);
+    function renderFoot(rows) {
+        if (rows.length < 2) { $('foot').innerHTML = ''; return; }
+        $('foot').innerHTML = '<tr>' + COLUMNS.map((c, i) => {
+            if (i === 0) return '<td class="left">Медиана (' + rows.length + ')</td>';
+            if (c.kind === 'text' || NO_MEDIAN.has(c.key)) return '<td></td>';
+            const vals = rows.map((r) => r[c.key]).filter((v) => v !== null && v !== undefined);
+            const text = fmt(c, median(vals));
+            return text === null ? '<td class="na">—</td>' : '<td>' + esc(text) + '</td>';
+        }).join('') + '</tr>';
+    }
     $('head').addEventListener('click', (e) => {
         const th = e.target.closest('th');
         if (!th) return;
