@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -136,8 +137,20 @@ func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]Me
 		return &MetricConfig{IsSpecial: true, SpecialType: "DIVIDENDS"}
 	case strings.Contains(metricName, "P/E"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "PE"}
-	case strings.Contains(metricName, "Долг") && !strings.Contains(metricName, "Чистый"):
+	// "/" and "%" keep ratios such as "Долг/EBITDA" out: their value is a
+	// multiple, not billions.
+	case strings.Contains(metricName, "Долг") && !strings.Contains(metricName, "Чистый") && !isRatioRow(metricName):
 		return &MetricConfig{IsSpecial: true, SpecialType: "DEBT"}
+	// Cash-flow rows of aggregator exports (amounts only, not ratios such as
+	// "CAPEX/Выручка, %"). Capex is stored as a positive outflow.
+	case strings.HasPrefix(metricName, "CAPEX") && !isRatioRow(metricName):
+		return &MetricConfig{IsSpecial: true, SpecialType: "CAPEX"}
+	case strings.HasPrefix(metricName, "Операционный денежный поток") && !isRatioRow(metricName):
+		return &MetricConfig{IsSpecial: true, SpecialType: "OPERATING_CASH_FLOW"}
+	case strings.HasPrefix(metricName, "Операционная прибыль") && !isRatioRow(metricName):
+		return &MetricConfig{IsSpecial: true, SpecialType: "OPERATING_PROFIT"}
+	case strings.HasPrefix(metricName, "Наличность") && !isRatioRow(metricName):
+		return &MetricConfig{IsSpecial: true, SpecialType: "CASH"}
 	case strings.Contains(metricName, "Чистая прибыль") && !strings.Contains(metricName, "н/с"):
 		return &MetricConfig{IsSpecial: true, SpecialType: "NET_PROFIT"}
 	}
@@ -152,6 +165,12 @@ func (p *CSVParser) detectMetricConfig(metricName string, handlers map[string]Me
 	}
 
 	return nil
+}
+
+// isRatioRow reports whether a row label names a ratio or percentage rather
+// than an amount.
+func isRatioRow(metricName string) bool {
+	return strings.ContainsAny(metricName, "/%")
 }
 
 func (p *CSVParser) processMetricRow(
@@ -252,6 +271,15 @@ func (p *CSVParser) applyMetricValue(config *MetricConfig, data *models.QuarterD
 			data.NetProfit = &value
 		case "DIVIDENDS":
 			data.Dividends = &value
+		case "CASH":
+			data.Cash = &value
+		case "OPERATING_PROFIT":
+			data.OperatingProfit = &value
+		case "OPERATING_CASH_FLOW":
+			data.OperatingCashFlow = &value
+		case "CAPEX":
+			v := math.Abs(value)
+			data.Capex = &v
 		}
 	} else if config.Handler != nil {
 		config.Handler(data, value)

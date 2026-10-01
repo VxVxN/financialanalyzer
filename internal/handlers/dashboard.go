@@ -432,6 +432,8 @@ func renderCurrent(w http.ResponseWriter, c analytics.Current) {
 		{name: "P/E (сейчас)", value: fmtRatio(c.PE), sub: sub("прибыль LTM на", c.EarningsLabel)},
 		{name: "P/B (сейчас)", value: fmtRatio(c.PB), sub: sub("капитал на", c.EquityLabel)},
 		{name: "Див. доходность (сейчас)", value: fmtPct(c.DivYield), sub: sub("дивиденды за", c.DividendsLabel)},
+		{name: "EV/EBIT (сейчас)", value: fmtRatio(c.EVEBIT), sub: sub("EBIT LTM на", c.EBITLabel)},
+		{name: "P/FCF (сейчас)", value: fmtRatio(c.PFCF), sub: sub("FCF LTM на", c.FCFLabel)},
 	})
 }
 
@@ -463,11 +465,16 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 		{name: "EBITDA (LTM)", value: fmtMoney(s.EBITDA)},
 		{name: "Чистая маржа", value: fmtPct(s.NetMargin)},
 		{name: "Маржа EBITDA", value: fmtPct(s.EBITDAMargin)},
+		{name: "Операционная маржа", value: fmtPct(s.OperatingMargin)},
+		{name: "FCF (LTM)", value: fmtMoney(s.FCF), sub: periodNote(s, s.FCFLabel)},
 		{name: "ROE", value: fmtPct(s.ROE), sub: periodNote(s, s.ROELabel)},
 		{name: "P/E", value: fmtRatio(s.PE), sub: joinSub(peComment(s.PE), periodNote(s, s.PELabel))},
 		{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
 		{name: "Див. доходность", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
+		{name: "EV/EBIT", value: fmtRatio(s.EVEBIT), sub: s.EVEBITLabel},
+		{name: "P/FCF", value: fmtRatio(s.PFCF), sub: s.PFCFLabel},
 		{name: "Долг", value: fmtMoney(s.Debt), sub: periodNote(s, s.DebtLabel)},
+		{name: "Чистый долг", value: fmtMoney(s.NetDebt), sub: periodNote(s, s.NetDebtLabel)},
 		{name: "Долг / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
 		{name: "CAGR выручки (3 года)", value: fmtPct(s.RevenueCAGR3Y)},
 		{name: "CAGR прибыли (3 года)", value: fmtPct(s.NetProfitCAGR3)},
@@ -634,8 +641,13 @@ func renderDashboardChart(w http.ResponseWriter, history []models.QuarterData, t
   <button class="btn metric-btn" onclick="selectMetric('roe', this)">ROE</button>
   <button class="btn metric-btn" onclick="selectMetric('pb', this)">P/B</button>
   <button class="btn metric-btn" onclick="selectMetric('div_yield', this)">Див. доходность</button>
+  <button class="btn metric-btn" onclick="selectMetric('ev_ebit', this)">EV/EBIT</button>
+  <button class="btn metric-btn" onclick="selectMetric('p_fcf', this)">P/FCF</button>
+  <button class="btn metric-btn" onclick="selectMetric('fcf', this)">FCF</button>
+  <button class="btn metric-btn" onclick="selectMetric('net_debt', this)">Чистый долг</button>
   <button class="btn metric-btn" onclick="selectMetric('net_margin', this)">Чистая маржа</button>
   <button class="btn metric-btn" onclick="selectMetric('ebitda_margin', this)">Маржа EBITDA</button>
+  <button class="btn metric-btn" onclick="selectMetric('operating_margin', this)">Опер. маржа</button>
   <button class="btn metric-btn" onclick="selectMetric('debt_ebitda', this)">Долг/EBITDA</button>
   <button class="btn metric-btn" onclick="selectMetric('revenue_yoy', this)">Выручка г/г</button>
   <button class="btn metric-btn" onclick="selectMetric('net_profit_yoy', this)">Прибыль г/г</button>

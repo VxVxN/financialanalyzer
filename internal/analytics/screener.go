@@ -9,7 +9,7 @@ import (
 // ScreenerRow is one company's line in the cross-company screener. Numeric
 // fields are nil when unknown (JSON null) so the table can sort them last.
 //
-// Valuation (Capitalization, PE, PB, DivYield) is taken at the latest exchange
+// Valuation (Capitalization, PE, PB, DivYield, EVEBIT, PFCF) is taken at the latest exchange
 // close when a quote is stored (Current = true), otherwise from the latest
 // stored period — the same figures the dashboard shows.
 type ScreenerRow struct {
@@ -27,17 +27,20 @@ type ScreenerRow struct {
 	// (see MaxFundamentalAge), so the live multiples are null.
 	Stale bool `json:"stale"`
 
-	Capitalization *float64 `json:"capitalization"`
-	PE             *float64 `json:"pe"`
-	PB             *float64 `json:"pb"`
-	DivYield       *float64 `json:"div_yield"`
-	ROE            *float64 `json:"roe"`
-	NetMargin      *float64 `json:"net_margin"`
-	DebtEBITDA     *float64 `json:"debt_ebitda"`
-	RevenueYoY     *float64 `json:"revenue_yoy"`
-	NetProfitYoY   *float64 `json:"net_profit_yoy"`
-	Score          int      `json:"score"`
-	Anomalies      int      `json:"anomalies"` // data-quality flags over the history
+	Capitalization  *float64 `json:"capitalization"`
+	PE              *float64 `json:"pe"`
+	PB              *float64 `json:"pb"`
+	DivYield        *float64 `json:"div_yield"`
+	EVEBIT          *float64 `json:"ev_ebit"`
+	PFCF            *float64 `json:"p_fcf"`
+	ROE             *float64 `json:"roe"`
+	NetMargin       *float64 `json:"net_margin"`
+	OperatingMargin *float64 `json:"operating_margin"`
+	DebtEBITDA      *float64 `json:"debt_ebitda"`
+	RevenueYoY      *float64 `json:"revenue_yoy"`
+	NetProfitYoY    *float64 `json:"net_profit_yoy"`
+	Score           int      `json:"score"`
+	Anomalies       int      `json:"anomalies"` // data-quality flags over the history
 }
 
 // BuildScreenerRow summarizes one company; quote is nil when none is stored
@@ -47,18 +50,19 @@ func BuildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 	snap := BuildSnapshot(history)
 	sources := Sources(history)
 	row := ScreenerRow{
-		Company:      snap.Company,
-		Category:     snap.Category,
-		Sources:      sources,
-		Comparable:   true,
-		LastPeriod:   snap.LastLabel,
-		ROE:          finite(snap.ROE),
-		NetMargin:    finite(snap.NetMargin),
-		DebtEBITDA:   finite(snap.DebtEBITDA),
-		RevenueYoY:   finite(snap.RevenueYoY),
-		NetProfitYoY: finite(snap.NetProfitYoY),
-		Score:        snap.Score,
-		Anomalies:    len(CheckHistory(history)),
+		Company:         snap.Company,
+		Category:        snap.Category,
+		Sources:         sources,
+		Comparable:      true,
+		LastPeriod:      snap.LastLabel,
+		ROE:             finite(snap.ROE),
+		NetMargin:       finite(snap.NetMargin),
+		OperatingMargin: finite(snap.OperatingMargin),
+		DebtEBITDA:      finite(snap.DebtEBITDA),
+		RevenueYoY:      finite(snap.RevenueYoY),
+		NetProfitYoY:    finite(snap.NetProfitYoY),
+		Score:           snap.Score,
+		Anomalies:       len(CheckHistory(history)),
 	}
 	for _, s := range sources {
 		if !IsComparable(s) {
@@ -72,11 +76,13 @@ func BuildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 		row.EarningsPeriod = cur.EarningsLabel
 		row.Capitalization = finite(cur.Capitalization)
 		row.PE, row.PB, row.DivYield = finite(cur.PE), finite(cur.PB), finite(cur.DivYield)
+		row.EVEBIT, row.PFCF = finite(cur.EVEBIT), finite(cur.PFCF)
 		return row
 	}
 	row.EarningsPeriod = snap.PELabel
 	row.Capitalization = finite(snap.Capitalization)
 	row.PE, row.PB, row.DivYield = positive(snap.PE), finite(snap.PB), finite(snap.DivYield)
+	row.EVEBIT, row.PFCF = finite(snap.EVEBIT), finite(snap.PFCF)
 	return row
 }
 

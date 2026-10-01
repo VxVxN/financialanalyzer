@@ -179,3 +179,46 @@ func TestParseDividendsRow(t *testing.T) {
 		t.Errorf("dividends = %v, want 2023:50.5 2024:0", got)
 	}
 }
+
+func TestParseCashFlowRows(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "CF_test.csv")
+	// Amount rows are read; ratio rows that share a prefix ("Долг/EBITDA",
+	// "CAPEX/Выручка, %") are not, so they never overwrite the amounts.
+	content := "Метрика;2024-Q4\n" +
+		"Долг, млрд руб;500\n" +
+		"Долг/EBITDA;1,2\n" +
+		"Операционная прибыль, млрд руб;120\n" +
+		"Наличность, млрд руб;80\n" +
+		"Операционный денежный поток, млрд руб;150\n" +
+		"CAPEX, млрд руб;-60\n" +
+		"CAPEX/Выручка, %;12\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := NewCSVParser(file).Parse()
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := map[string][]float64{}
+	add := func(name string, v *float64) {
+		if v != nil {
+			got[name] = append(got[name], *v)
+		}
+	}
+	for _, d := range data {
+		add("debt", d.Debt)
+		add("operating_profit", d.OperatingProfit)
+		add("cash", d.Cash)
+		add("operating_cash_flow", d.OperatingCashFlow)
+		add("capex", d.Capex)
+	}
+	want := map[string]float64{"debt": 500, "operating_profit": 120, "cash": 80, "operating_cash_flow": 150, "capex": 60}
+	for name, w := range want {
+		if len(got[name]) != 1 || got[name][0] != w {
+			t.Errorf("%s = %v, want exactly [%v]", name, got[name], w)
+		}
+	}
+	if len(data) != len(want) {
+		t.Errorf("rows = %d, want %d (ratio rows skipped)", len(data), len(want))
+	}
+}

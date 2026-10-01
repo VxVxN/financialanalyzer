@@ -34,18 +34,21 @@ func (r *Repository) Ping(ctx context.Context) error {
 // single-quarter meaning. Any other source change (csv vs smartlab vs a legacy
 // NULL row — all quarterly) merges as usual.
 const (
-	flowIncoming   = `(EXCLUDED.revenue IS NOT NULL OR EXCLUDED.net_profit IS NOT NULL OR EXCLUDED.ebitda IS NOT NULL)`
+	flowIncoming = `(EXCLUDED.revenue IS NOT NULL OR EXCLUDED.net_profit IS NOT NULL OR EXCLUDED.ebitda IS NOT NULL
+            OR EXCLUDED.operating_profit IS NOT NULL OR EXCLUDED.operating_cash_flow IS NOT NULL OR EXCLUDED.capex IS NOT NULL)`
 	periodKindFlip = `(` + flowIncoming + ` AND EXCLUDED.source IS NOT NULL AND EXCLUDED.quarter = 'Q4'
             AND (EXCLUDED.source = 'rsbu') <> (COALESCE(company_financials.source, '') = 'rsbu'))`
 )
 
 func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterData) error {
 	query := `
-    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source, equity, dividends)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source, equity, dividends,
+        cash, operating_profit, operating_cash_flow, capex)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     ON CONFLICT (year, quarter, company)
     DO UPDATE SET
-        -- source says what the flow metrics (revenue/net_profit/ebitda) mean —
+        -- source says what the flow metrics (revenue/net_profit/ebitda,
+        -- operating_profit/operating_cash_flow/capex) mean —
         -- an RSBU Q4 row holds annual figures, a CSV/CBR row one quarter — so
         -- only a write that carries flows may change it (a CSV row with just
         -- dividends must not relabel annual RSBU figures). When incoming flows
@@ -68,7 +71,14 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
         roe = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.roe
             ELSE COALESCE(EXCLUDED.roe, company_financials.roe) END,
         equity = COALESCE(EXCLUDED.equity, company_financials.equity),
-        dividends = COALESCE(EXCLUDED.dividends, company_financials.dividends)`
+        dividends = COALESCE(EXCLUDED.dividends, company_financials.dividends),
+        cash = COALESCE(EXCLUDED.cash, company_financials.cash),
+        operating_profit = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.operating_profit
+            ELSE COALESCE(EXCLUDED.operating_profit, company_financials.operating_profit) END,
+        operating_cash_flow = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.operating_cash_flow
+            ELSE COALESCE(EXCLUDED.operating_cash_flow, company_financials.operating_cash_flow) END,
+        capex = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.capex
+            ELSE COALESCE(EXCLUDED.capex, company_financials.capex) END`
 
 	_, err := r.db.ExecContext(ctx, query,
 		data.Year,
@@ -85,6 +95,10 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
 		nullIfEmpty(data.Source),
 		data.Equity,
 		data.Dividends,
+		data.Cash,
+		data.OperatingProfit,
+		data.OperatingCashFlow,
+		data.Capex,
 	)
 
 	return err
@@ -129,7 +143,8 @@ func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]m
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
-			COALESCE(source, ''), equity, dividends
+			COALESCE(source, ''), equity, dividends,
+			cash, operating_profit, operating_cash_flow, capex
 		FROM company_financials
 		WHERE company = $1
 		ORDER BY year,
@@ -155,6 +170,7 @@ func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]m
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 			&q.Equity, &q.Dividends,
+			&q.Cash, &q.OperatingProfit, &q.OperatingCashFlow, &q.Capex,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}
@@ -179,7 +195,8 @@ func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string
 	query := fmt.Sprintf(`
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
-			COALESCE(source, ''), equity, dividends
+			COALESCE(source, ''), equity, dividends,
+			cash, operating_profit, operating_cash_flow, capex
 		FROM company_financials
 		WHERE company IN (%s)
 		ORDER BY company, year,
@@ -205,6 +222,7 @@ func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string
 			&q.Capitalization, &q.Revenue, &q.NetProfit,
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 			&q.Equity, &q.Dividends,
+			&q.Cash, &q.OperatingProfit, &q.OperatingCashFlow, &q.Capex,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}

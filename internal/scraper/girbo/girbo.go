@@ -75,6 +75,11 @@ type AnnualReport struct {
 	NetProfit *float64 // line 2400
 	Equity    *float64 // line 1300 (capital and reserves)
 	Debt      *float64 // lines 1410 + 1510 (long- + short-term borrowings)
+
+	Cash              *float64 // line 1250 (cash and cash equivalents), year-end
+	OperatingProfit   *float64 // line 2200 (profit from sales: revenue - costs), the EBIT proxy
+	OperatingCashFlow *float64 // line 4100 (net cash flow from operations)
+	Capex             *float64 // line 4221 (payments for non-current assets), positive
 }
 
 // PartialError is returned by FetchAnnual, together with the reports that did
@@ -250,14 +255,21 @@ func parseReportList(body []byte) ([]BfoEntry, error) {
 // All current* fields are in thousands of RUB.
 type detailsItem struct {
 	Balance struct {
+		Current1250 *float64 `json:"current1250"` // cash and cash equivalents
 		Current1300 *float64 `json:"current1300"` // capital and reserves (equity)
 		Current1410 *float64 `json:"current1410"` // long-term borrowings
 		Current1510 *float64 `json:"current1510"` // short-term borrowings
+		Current1600 *float64 `json:"current1600"` // total assets: the balance was filed
 	} `json:"balance"`
 	FinancialResult struct {
 		Current2110 *float64 `json:"current2110"` // revenue
+		Current2200 *float64 `json:"current2200"` // profit (loss) from sales
 		Current2400 *float64 `json:"current2400"` // net profit
 	} `json:"financialResult"`
+	FundsMovement struct {
+		Current4100 *float64 `json:"current4100"` // net operating cash flow (signed)
+		Current4221 *float64 `json:"current4221"` // capex outflow (filed as a positive amount)
+	} `json:"fundsMovement"`
 }
 
 // parseDetails extracts the figures for one year. ok is false when the payload
@@ -273,12 +285,21 @@ func parseDetails(body []byte, year int) (AnnualReport, bool, error) {
 	}
 	it := items[0]
 
+	// An RSBU form omits the lines that are zero, so within a section that
+	// was filed (its total is present) a missing line is a real zero: a
+	// company without borrowings has debt 0, not "unknown". Without the
+	// total the section is treated as absent and the lines stay nil.
+	balance, funds := it.Balance.Current1600 != nil, it.FundsMovement.Current4100 != nil
 	rep := AnnualReport{
-		Year:      year,
-		Revenue:   bln(it.FinancialResult.Current2110),
-		NetProfit: bln(it.FinancialResult.Current2400),
-		Equity:    bln(it.Balance.Current1300),
-		Debt:      sumBln(it.Balance.Current1410, it.Balance.Current1510),
+		Year:              year,
+		Revenue:           bln(it.FinancialResult.Current2110),
+		NetProfit:         bln(it.FinancialResult.Current2400),
+		Equity:            bln(it.Balance.Current1300),
+		Debt:              zeroIf(balance, sumBln(it.Balance.Current1410, it.Balance.Current1510)),
+		Cash:              zeroIf(balance, bln(it.Balance.Current1250)),
+		OperatingProfit:   bln(it.FinancialResult.Current2200),
+		OperatingCashFlow: bln(it.FundsMovement.Current4100),
+		Capex:             zeroIf(funds, absBln(it.FundsMovement.Current4221)),
 	}
 	if nilOrZero(rep.Revenue) && nilOrZero(rep.NetProfit) {
 		return AnnualReport{}, false, nil
@@ -316,6 +337,24 @@ func sumBln(vs ...*float64) *float64 {
 		}
 	}
 	return sum
+}
+
+// absBln is bln of the magnitude: outflow lines are filed as positive amounts,
+// but a filer that typed the sign must not turn capex into an inflow.
+func absBln(v *float64) *float64 {
+	b := bln(v)
+	if b != nil && *b < 0 {
+		*b = -*b
+	}
+	return b
+}
+
+// zeroIf turns an absent line into a reported zero when its section was filed.
+func zeroIf(filed bool, v *float64) *float64 {
+	if v == nil && filed {
+		return new(float64)
+	}
+	return v
 }
 
 func nilOrZero(v *float64) bool { return v == nil || *v == 0 }

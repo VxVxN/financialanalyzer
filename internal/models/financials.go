@@ -46,6 +46,16 @@ type QuarterData struct {
 	// entered by hand through CSV (no free exchange API exists). Like
 	// Capitalization it is a point-in-time value, not a quarterly flow.
 	Dividends *float64
+
+	// Cash is cash and equivalents at period end (RSBU line 1250), a stock
+	// like Debt; net debt = Debt - Cash.
+	Cash *float64
+	// OperatingProfit (RSBU line 2200, profit from sales; the operating
+	// profit row of a CSV), OperatingCashFlow (line 4100) and Capex (line
+	// 4221, stored as a positive outflow) are flows like Revenue.
+	OperatingProfit   *float64
+	OperatingCashFlow *float64
+	Capex             *float64
 }
 
 // IsEmpty reports whether the row carries no metric at all.
@@ -53,7 +63,9 @@ func (q *QuarterData) IsEmpty() bool {
 	return q.Capitalization == nil && q.Revenue == nil &&
 		q.NetProfit == nil && q.EBITDA == nil &&
 		q.Debt == nil && q.PE == nil && q.ROE == nil &&
-		q.Equity == nil && q.Dividends == nil
+		q.Equity == nil && q.Dividends == nil &&
+		q.Cash == nil && q.OperatingProfit == nil &&
+		q.OperatingCashFlow == nil && q.Capex == nil
 }
 
 // Float returns a pointer to v, for filling QuarterData metric fields.

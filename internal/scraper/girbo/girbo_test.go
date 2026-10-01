@@ -73,6 +73,12 @@ func TestParseDetails(t *testing.T) {
 		{"net profit", rep.NetProfit, 403.734771},
 		{"equity", rep.Equity, 1110.183683},
 		{"debt", rep.Debt, 770.703349},
+		//   cash 1250 = 529 000 696, sales profit 2200 = 1 384 144 385,
+		//   operating cash flow 4100 = 2 262 748 444, capex 4221 = 440 565
+		{"cash", rep.Cash, 529.000696},
+		{"operating profit", rep.OperatingProfit, 1384.144385},
+		{"operating cash flow", rep.OperatingCashFlow, 2262.748444},
+		{"capex", rep.Capex, 0.440565},
 	}
 	for _, c := range checks {
 		if c.got == nil {
@@ -119,7 +125,38 @@ func TestParseDetailsAbsentVersusZero(t *testing.T) {
 
 	noDebt := []byte(`[{"balance":{},"financialResult":{"current2110":1000000}}]`)
 	rep, _, _ = parseDetails(noDebt, 2024)
-	if rep.Debt != nil {
-		t.Errorf("debt = %v, want nil when both borrowing lines are absent", *rep.Debt)
+	if rep.Debt != nil || rep.Cash != nil || rep.Capex != nil || rep.OperatingCashFlow != nil {
+		t.Errorf("unfiled sections: debt=%v cash=%v capex=%v ocf=%v, want all nil", rep.Debt, rep.Cash, rep.Capex, rep.OperatingCashFlow)
+	}
+}
+
+// Within a filed section (its total present) a line the form omits is a real
+// zero: a holding with no borrowings and no capex (like OZON's 2025 report).
+// A capex filed with a minus sign still counts as an outflow.
+func TestParseDetailsOmittedLinesInFiledSections(t *testing.T) {
+	body := []byte(`[{"balance":{"current1600":90000000,"current1250":100000,"current1300":80000000},
+		"financialResult":{"current2110":200000,"current2200":100000,"current2400":30300000},
+		"fundsMovement":{"current4100":25000000}}]`)
+	rep, ok, err := parseDetails(body, 2025)
+	if err != nil || !ok {
+		t.Fatalf("parseDetails: ok=%v err=%v", ok, err)
+	}
+	for name, got := range map[string]*float64{"debt": rep.Debt, "capex": rep.Capex} {
+		if got == nil || *got != 0 {
+			t.Errorf("%s = %v, want reported zero", name, got)
+		}
+	}
+	if rep.Cash == nil || *rep.Cash != 0.1 || rep.OperatingCashFlow == nil || *rep.OperatingCashFlow != 25 {
+		t.Errorf("cash = %v, ocf = %v", rep.Cash, rep.OperatingCashFlow)
+	}
+
+	signed := []byte(`[{"financialResult":{"current2110":1000000},
+		"fundsMovement":{"current4100":-5000000,"current4221":-2000000}}]`)
+	rep, _, _ = parseDetails(signed, 2025)
+	if rep.Capex == nil || *rep.Capex != 2 || *rep.OperatingCashFlow != -5 {
+		t.Errorf("signed filing: capex = %v, ocf = %v; want 2 and -5", rep.Capex, rep.OperatingCashFlow)
+	}
+	if rep.OperatingProfit != nil {
+		t.Errorf("operating profit = %v, want nil (line absent)", *rep.OperatingProfit)
 	}
 }

@@ -650,12 +650,52 @@ func formatMetricName(metric string) string {
 		return "CAGR выручки (5 лет)"
 	case "net_profit_cagr5":
 		return "CAGR чистой прибыли (5 лет)"
+	case "operating_profit":
+		return "Операционная прибыль"
+	case "cash":
+		return "Денежные средства"
+	case "net_debt":
+		return "Чистый долг"
+	case "operating_cash_flow":
+		return "Операционный денежный поток"
+	case "capex":
+		return "Капзатраты"
+	case "fcf":
+		return "Свободный денежный поток (FCF)"
+	case "ev":
+		return "EV"
+	case "ev_ebit":
+		return "EV/EBIT"
+	case "p_fcf":
+		return "P/FCF"
+	case "operating_margin":
+		return "Операционная маржа"
 	}
 	return metric
 }
 
 func metricDescription(metric string) string {
 	switch metric {
+	case "operating_profit":
+		return "Прибыль от продаж (РСБУ, стр. 2200) или операционная прибыль из CSV — используется как EBIT"
+	case "cash":
+		return "Денежные средства и эквиваленты на конец периода (РСБУ, стр. 1250)"
+	case "net_debt":
+		return "Долг минус денежные средства; отрицательный — у компании больше денег, чем займов"
+	case "operating_cash_flow":
+		return "Сальдо денежных потоков от текущих операций (РСБУ, стр. 4100)"
+	case "capex":
+		return "Платежи на приобретение и создание внеоборотных активов (РСБУ, стр. 4221)"
+	case "fcf":
+		return "Операционный денежный поток минус капзатраты — деньги, доступные акционерам и кредиторам"
+	case "ev":
+		return "Стоимость бизнеса: капитализация + чистый долг"
+	case "ev_ebit":
+		return "EV / операционная прибыль LTM — оценка с учётом долга; при убытке не считается"
+	case "p_fcf":
+		return "Капитализация / свободный денежный поток LTM; при отрицательном FCF не считается"
+	case "operating_margin":
+		return "Операционная прибыль в % от выручки"
 	case "revenue":
 		return "Выручка (банки: чистый процентный доход + комиссионные доходы)"
 	case "net_margin":
@@ -689,12 +729,12 @@ func metricDescription(metric string) string {
 func getMetricUnit(metric string) string {
 	switch metric {
 	case "roe", "div_yield",
-		"net_margin", "ebitda_margin",
+		"net_margin", "ebitda_margin", "operating_margin",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
 		"revenue_cagr5", "net_profit_cagr5":
 		return "%"
-	case "debt_ebitda", "pb":
+	case "debt_ebitda", "pb", "ev_ebit", "p_fcf":
 		return "x"
 	}
 	return ""

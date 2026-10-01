@@ -20,9 +20,9 @@ tables.
   margins, leverage, growth, score and data-quality flags.
 - **Single-company dashboard** (`/company/{name}`) — KPIs, sparklines, a quality
   score with a transparent breakdown, a trend explorer, and free-text notes.
-- **Derived analytics** — net/EBITDA margins, Debt/EBITDA, P/B, dividend yield,
-  revenue & net-profit YoY and 3y/5y CAGR, all computed on quarterly, TTM, or
-  annual bases.
+- **Derived analytics** — net/EBITDA/operating margins, Debt/EBITDA, net debt,
+  EV, EV/EBIT, free cash flow, P/FCF, P/B, dividend yield, revenue & net-profit
+  YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
 - **Two ingestion paths** — CSV import and a free primary-source fetcher
   (ГИР БО + MOEX ISS for companies, CBR forms 102/101 for banks).
 - **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
@@ -123,7 +123,11 @@ jumps more than 4× year over year so a missing split can be added.
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
 102/101 archives (`FETCH_BANKS`, registry `bank_tickers.txt`; bank revenue is
-net interest income + fee income), and EBITDA is left empty. See package docs for details.
+net interest income + fee income), and EBITDA is left empty; profit from sales
+(line 2200) stands in for EBIT in EV/EBIT. Cash, operating cash flow and capex
+(lines 1250, 4100, 4221) feed net debt, EV and FCF; rows fetched before these
+columns existed get them with `FETCH_FORCE=1 go run ./cmd/fetch`. See package
+docs for details.
 
 ## Configuration
 

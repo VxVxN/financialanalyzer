@@ -162,6 +162,11 @@ func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Clien
 			PE:             peRatio(capPtr, r.NetProfit),
 			ROE:            roePercent(r.NetProfit, r.Equity),
 			Equity:         r.Equity,
+
+			Cash:              r.Cash,
+			OperatingProfit:   r.OperatingProfit,
+			OperatingCashFlow: r.OperatingCashFlow,
+			Capex:             r.Capex,
 		})
 	}
 	return out, skipped + len(out), fetchErr

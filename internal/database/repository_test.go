@@ -326,3 +326,60 @@ func TestFetchRuns(t *testing.T) {
 		t.Errorf("limit ignored: %d runs", len(runs))
 	}
 }
+
+// The cash-flow columns round-trip; operating profit / cash flow / capex are
+// flows (a CSV row carrying only one of them flips an annual RSBU row and
+// replaces the others), cash is a stock that merges.
+func TestSaveQuarterDataCashFlowColumns(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	f := models.Float
+	save := func(q models.QuarterData) {
+		t.Helper()
+		q.Year, q.Quarter, q.Category = 2025, "Q4", "test"
+		if err := repo.SaveQuarterData(ctx, q); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+
+	save(models.QuarterData{Company: "CF", Source: models.SourceRSBU, Revenue: f(100), NetProfit: f(10), Debt: f(0),
+		Cash: f(7.5), OperatingProfit: f(15), OperatingCashFlow: f(20), Capex: f(0)})
+	got := history(t, repo, "CF")
+	assertMetric(t, "cash", got.Cash, f(7.5))
+	assertMetric(t, "operating_profit", got.OperatingProfit, f(15))
+	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(20))
+	assertMetric(t, "capex", got.Capex, f(0)) // a reported zero, not NULL
+
+	// A CSV row with only quarterly operating cash flow: the row turns
+	// quarterly, so the annual flows go, while cash (a stock) stays.
+	save(models.QuarterData{Company: "CF", Source: models.SourceCSV, OperatingCashFlow: f(6)})
+	got = history(t, repo, "CF")
+	if got.Source != models.SourceCSV {
+		t.Errorf("source = %q, want csv", got.Source)
+	}
+	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(6))
+	assertMetric(t, "operating_profit", got.OperatingProfit, nil)
+	assertMetric(t, "capex", got.Capex, nil)
+	assertMetric(t, "revenue", got.Revenue, nil)
+	assertMetric(t, "cash", got.Cash, f(7.5))
+
+	// A CSV row with only cash (a stock) neither flips nor relabels an annual
+	// RSBU row.
+	save(models.QuarterData{Company: "STOCK", Source: models.SourceRSBU, Revenue: f(100), OperatingCashFlow: f(20)})
+	save(models.QuarterData{Company: "STOCK", Source: models.SourceCSV, Cash: f(9)})
+	got = history(t, repo, "STOCK")
+	if got.Source != models.SourceRSBU {
+		t.Errorf("source = %q, want rsbu (a cash-only row carries no flows)", got.Source)
+	}
+	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(20))
+	assertMetric(t, "cash", got.Cash, f(9))
+
+	// Quarterly CSV flows, then annual RSBU ones: the CSV quarter's capex and
+	// operating profit go (the RSBU write did not carry them).
+	save(models.QuarterData{Company: "UP", Source: models.SourceCSV, Revenue: f(25), OperatingProfit: f(4), Capex: f(2)})
+	save(models.QuarterData{Company: "UP", Source: models.SourceRSBU, Revenue: f(100), OperatingCashFlow: f(30)})
+	got = history(t, repo, "UP")
+	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(30))
+	assertMetric(t, "operating_profit", got.OperatingProfit, nil)
+	assertMetric(t, "capex", got.Capex, nil)
+}

@@ -39,7 +39,8 @@ type Series []Point
 // rather than a stock or ratio (last-observed value wins).
 func IsFlow(metric string) bool {
 	switch metric {
-	case "revenue", "net_profit", "ebitda":
+	case "revenue", "net_profit", "ebitda",
+		"operating_profit", "operating_cash_flow", "capex":
 		return true
 	}
 	return false
@@ -51,6 +52,7 @@ func IsDerived(metric string) bool {
 	switch metric {
 	case "net_margin", "ebitda_margin", "debt_ebitda",
 		"pb", "div_yield",
+		"net_debt", "ev", "operating_margin", "ev_ebit", "fcf", "p_fcf",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
 		"revenue_cagr5", "net_profit_cagr5":
@@ -61,10 +63,11 @@ func IsDerived(metric string) bool {
 
 // AllMetrics is the canonical order of metrics shown to the user.
 var AllMetrics = []string{
-	"revenue", "net_profit", "ebitda",
-	"capitalization", "debt", "equity", "dividends",
-	"pe", "roe", "pb", "div_yield",
-	"net_margin", "ebitda_margin", "debt_ebitda",
+	"revenue", "net_profit", "ebitda", "operating_profit",
+	"capitalization", "debt", "cash", "net_debt", "equity", "dividends",
+	"operating_cash_flow", "capex", "fcf",
+	"pe", "roe", "pb", "div_yield", "ev", "ev_ebit", "p_fcf",
+	"net_margin", "ebitda_margin", "operating_margin", "debt_ebitda",
 	"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 	"revenue_cagr3", "net_profit_cagr3",
 	"revenue_cagr5", "net_profit_cagr5",
@@ -160,6 +163,14 @@ func rawValue(q models.QuarterData, metric string) float64 {
 		return models.ValueOrNaN(q.Equity)
 	case "dividends":
 		return models.ValueOrNaN(q.Dividends)
+	case "cash":
+		return models.ValueOrNaN(q.Cash)
+	case "operating_profit":
+		return models.ValueOrNaN(q.OperatingProfit)
+	case "operating_cash_flow":
+		return models.ValueOrNaN(q.OperatingCashFlow)
+	case "capex":
+		return models.ValueOrNaN(q.Capex)
 	}
 	return math.NaN()
 }
@@ -328,7 +339,33 @@ func DerivedSeries(history []models.QuarterData, metric string, base Period) Ser
 		}
 	}
 
+	// pickFlow pairs a flow with point-in-time figures: a single quarter's
+	// flow against a balance-sheet value would understate it fourfold, so the
+	// quarterly base uses the trailing twelve months.
+	pickFlow := func(m string) Series {
+		if base == PeriodQuarter {
+			return SeriesFor(history, m, PeriodTTM)
+		}
+		return SeriesFor(history, m, base)
+	}
+
 	switch metric {
+	case "net_debt":
+		// Both are year-end (or quarter-end) balances.
+		return combine(pick("debt"), pick("cash"), -1)
+	case "ev":
+		return combine(pick("capitalization"), DerivedSeries(history, "net_debt", base), 1)
+	case "operating_margin":
+		return ratio(pick("operating_profit"), pick("revenue"), 100)
+	case "ev_ebit":
+		// EBIT is profit from sales (RSBU line 2200) or a CSV's operating
+		// profit. Like P/E, a loss gives no multiple.
+		// A non-positive EV (cash above cap + debt) would read as "cheapest".
+		return ratio(positiveOnly(DerivedSeries(history, "ev", base)), positiveOnly(pickFlow("operating_profit")), 1)
+	case "fcf":
+		return combine(SeriesFor(history, "operating_cash_flow", base), SeriesFor(history, "capex", base), -1)
+	case "p_fcf":
+		return ratio(pick("capitalization"), positiveOnly(pickFlow("fcf")), 1)
 	case "net_margin":
 		return ratio(pick("net_profit"), pick("revenue"), 100)
 	case "ebitda_margin":
@@ -406,6 +443,27 @@ func ratio(num, den Series, scale float64) Series {
 		val := math.NaN()
 		if ok && !math.IsNaN(p.Value) && !math.IsNaN(d) && d != 0 {
 			val = p.Value / d * scale
+		}
+		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val, Standalone: p.Standalone})
+	}
+	return out
+}
+
+// combine returns a + sign*b per label (NaN when either side is missing),
+// keeping a's labels and kind.
+func combine(a, b Series, sign float64) Series {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	bByLabel := make(map[string]Point, len(b))
+	for _, p := range b {
+		bByLabel[p.Label] = p
+	}
+	out := make(Series, 0, len(a))
+	for _, p := range a {
+		val := math.NaN()
+		if q, ok := bByLabel[p.Label]; ok && !math.IsNaN(p.Value) && !math.IsNaN(q.Value) && q.Standalone == p.Standalone {
+			val = p.Value + sign*q.Value
 		}
 		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val, Standalone: p.Standalone})
 	}
@@ -528,6 +586,15 @@ type Snapshot struct {
 	PBLabel                                string  // period PB was taken from ("" when PB is NaN)
 	DivYield                               float64 // dividends / market cap, %, latest period that has both
 	DivYieldLabel                          string  // period DivYield was taken from
+	NetDebt                                float64 // debt - cash, latest period that has both
+	NetDebtLabel                           string
+	EVEBIT                                 float64 // (cap + net debt) / TTM operating profit, latest period that has it
+	EVEBITLabel                            string
+	FCF                                    float64 // TTM operating cash flow - TTM capex
+	FCFLabel                               string  // period FCF was taken from
+	PFCF                                   float64 // cap / TTM FCF, latest period that has it
+	PFCFLabel                              string
+	OperatingMargin                        float64 // TTM operating profit / TTM revenue
 	NetMargin                              float64 // TTM net_profit / TTM revenue
 	EBITDAMargin                           float64 // TTM
 	DebtEBITDA                             float64 // last debt / TTM ebitda
@@ -569,6 +636,12 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 		NetProfitCAGR5: math.NaN(),
 		PB:             math.NaN(),
 		DivYield:       math.NaN(),
+
+		NetDebt:         math.NaN(),
+		EVEBIT:          math.NaN(),
+		FCF:             math.NaN(),
+		PFCF:            math.NaN(),
+		OperatingMargin: math.NaN(),
 	}
 	if len(hist) == 0 {
 		return snap
@@ -604,6 +677,20 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	if p, ok := LatestValid(DerivedSeries(hist, "div_yield", PeriodQuarter)); ok {
 		snap.DivYield, snap.DivYieldLabel = p.Value, p.Label
 	}
+	if p, ok := LatestValid(DerivedSeries(hist, "net_debt", PeriodQuarter)); ok {
+		snap.NetDebt, snap.NetDebtLabel = p.Value, p.Label
+	}
+	// The quarterly base pairs each period's EV / cap with TTM flows.
+	if p, ok := LatestValid(DerivedSeries(hist, "ev_ebit", PeriodQuarter)); ok {
+		snap.EVEBIT, snap.EVEBITLabel = p.Value, p.Label
+	}
+	if p, ok := LatestValid(DerivedSeries(hist, "p_fcf", PeriodQuarter)); ok {
+		snap.PFCF, snap.PFCFLabel = p.Value, p.Label
+	}
+	if p, ok := LatestValid(DerivedSeries(hist, "fcf", PeriodTTM)); ok {
+		snap.FCF, snap.FCFLabel = p.Value, p.Label
+	}
+	snap.OperatingMargin = lastNonNaN(DerivedSeries(hist, "operating_margin", PeriodTTM))
 
 	snap.RevenueYoY = lastNonNaN(DerivedSeries(hist, "revenue_yoy", PeriodTTM))
 	snap.NetProfitYoY = lastNonNaN(DerivedSeries(hist, "net_profit_yoy", PeriodTTM))
@@ -718,6 +805,10 @@ type Current struct {
 	EquityLabel    string
 	DivYield       float64 // latest year's dividends / cap, %
 	DividendsLabel string
+	EVEBIT         float64 // (cap + latest net debt) / TTM operating profit (NaN for a loss)
+	EBITLabel      string
+	PFCF           float64 // cap / TTM free cash flow (NaN when FCF is not positive)
+	FCFLabel       string
 	// Stale is set when a fundamental exists but ended more than
 	// MaxFundamentalAge before the quote; its multiple is then NaN and its
 	// label says "too old" rather than silently pairing today's price with
@@ -755,6 +846,8 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 		PE:             math.NaN(),
 		PB:             math.NaN(),
 		DivYield:       math.NaN(),
+		EVEBIT:         math.NaN(),
+		PFCF:           math.NaN(),
 	}
 	if q.Capitalization <= 0 {
 		cur.Capitalization = math.NaN()
@@ -784,6 +877,37 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 	if p, ok := LatestValid(QuarterlySeries(history, "dividends")); ok {
 		if fresh(p, &cur.DividendsLabel) {
 			cur.DivYield = p.Value / q.Capitalization * 100
+		}
+	}
+	// EV/EBIT and P/FCF report a too-old input in their own label rather than
+	// through Stale, which keeps meaning "P/E, P/B or yield withheld" — cash
+	// or capex missing from recent CSV years must not mark a company whose
+	// P/E is current as stale.
+	recent := func(p Point, label *string) bool {
+		*label = p.Label
+		if monthsBetween(p, q.PriceDate) > MaxFundamentalAge {
+			*label = p.Label + " (устарело)"
+			return false
+		}
+		return true
+	}
+	if p, ok := LatestValid(TTMSeries(history, "operating_profit")); ok {
+		if recent(p, &cur.EBITLabel) && p.Value > 0 {
+			// EV needs a current net debt as well.
+			if nd, ok := LatestValid(DerivedSeries(history, "net_debt", PeriodQuarter)); ok {
+				var ndLabel string
+				switch {
+				case !recent(nd, &ndLabel):
+					cur.EBITLabel += ", чистый долг на " + ndLabel
+				case q.Capitalization+nd.Value > 0:
+					cur.EVEBIT = (q.Capitalization + nd.Value) / p.Value
+				}
+			}
+		}
+	}
+	if p, ok := LatestValid(DerivedSeries(history, "fcf", PeriodTTM)); ok {
+		if recent(p, &cur.FCFLabel) && p.Value > 0 {
+			cur.PFCF = q.Capitalization / p.Value
 		}
 	}
 	return cur

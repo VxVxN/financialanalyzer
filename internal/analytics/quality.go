@@ -59,7 +59,7 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	// case this check is for.
 	if revenue >= 0 && capitalization > 0 && revenue < capitalization*minRevenueCapRatio {
 		add(fmt.Sprintf("выручка меньше %.0f%% капитализации — вероятно, отчётность холдинга", minRevenueCapRatio*100),
-			"revenue", "capitalization")
+			holdingMetrics("revenue", "capitalization")...)
 	}
 	// A parent company living on dividends from subsidiaries books them below
 	// revenue, so its net profit can exceed revenue. For an operating company
@@ -69,9 +69,17 @@ func CheckRow(q models.QuarterData) []Anomaly {
 	// legitimately out-earn it; the check is skipped for CBR rows.
 	if q.Source != models.SourceCBR102 && revenue >= 0 && netProfit > revenue {
 		add("чистая прибыль больше выручки — доход, вероятно, дивиденды дочерних компаний (отчётность холдинга)",
-			"revenue", "net_profit", "pe", "roe")
+			holdingMetrics("revenue", "net_profit", "pe", "roe")...)
 	}
 	return out
+}
+
+// holdingMetrics adds to a holding-company anomaly the figures a parent
+// entity's statements distort besides the given ones: its operating profit
+// comes from a sliver of sales, and its operating cash flow often carries
+// subsidiaries' dividends, so EV/EBIT, FCF and P/FCF built on them mislead.
+func holdingMetrics(metrics ...string) []string {
+	return append(metrics, "operating_profit", "operating_cash_flow")
 }
 
 // CheckHistory runs CheckRow over a history, returning anomalies chronologically.
@@ -96,6 +104,18 @@ func metricInputs(metric string) []string {
 		return []string{"capitalization", "equity"}
 	case "div_yield":
 		return []string{"dividends", "capitalization"}
+	case "net_debt":
+		return []string{"debt", "cash"}
+	case "ev":
+		return []string{"capitalization", "debt", "cash"}
+	case "operating_margin":
+		return []string{"operating_profit", "revenue"}
+	case "ev_ebit":
+		return []string{"capitalization", "debt", "cash", "operating_profit"}
+	case "fcf":
+		return []string{"operating_cash_flow", "capex"}
+	case "p_fcf":
+		return []string{"capitalization", "operating_cash_flow", "capex"}
 	case "revenue_yoy", "revenue_cagr3", "revenue_cagr5":
 		return []string{"revenue"}
 	case "net_profit_yoy", "net_profit_cagr3", "net_profit_cagr5":
@@ -172,7 +192,7 @@ func SourceNote(source string) string {
 	switch source {
 	case models.SourceRSBU:
 		return "Годовая неконсолидированная РСБУ юрлица-эмитента из ГИР БО, а не МСФО группы. " +
-			"У холдингов выручка и прибыль — в основном внутригрупповые дивиденды, поэтому P/E и ROE несопоставимы."
+			"У холдингов выручка и прибыль — в основном внутригрупповые дивиденды, поэтому P/E, ROE, EV/EBIT и P/FCF несопоставимы."
 	case models.SourceCBR102:
 		return "РСБУ самого банка из форм ЦБ 102/101, а не МСФО группы. Выручка — чистый процентный доход + комиссионные доходы (комиссионные расходы не вычтены)."
 	case models.SourceCSV:

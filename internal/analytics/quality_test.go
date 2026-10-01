@@ -31,22 +31,22 @@ func TestCheckRow(t *testing.T) {
 		{"ROE below -100%", row(1000, 500, -50, 0, -120), [][]string{{"roe"}}},
 		// МКПАО «Озон» 2025: revenue 0.19 bln, profit 30.3 bln (dividends), cap ~900.
 		{"holding (Ozon-like)", row(900, 0.19, 30.3, 29.7, 19.8), [][]string{
-			{"revenue", "capitalization"},
-			{"revenue", "net_profit", "pe", "roe"},
+			{"revenue", "capitalization", "operating_profit", "operating_cash_flow"},
+			{"revenue", "net_profit", "pe", "roe", "operating_profit", "operating_cash_flow"},
 		}},
 		// ПАО «КЦ ИКС 5» 2025: revenue 85.7, profit 124.5 — only the profit>revenue rule fires.
-		{"holding (X5-like)", row(700, 85.7, 124.5, 5.6, 29.2), [][]string{{"revenue", "net_profit", "pe", "roe"}}},
+		{"holding (X5-like)", row(700, 85.7, 124.5, 5.6, 29.2), [][]string{{"revenue", "net_profit", "pe", "roe", "operating_profit", "operating_cash_flow"}}},
 		{"bank: revenue not reported", withoutRevenue(row(7000, 0, 1500, 4.7, 24)), nil},
 		// A bank quarter with a big provision release out-earns the NII + fee
 		// revenue proxy; that is not the holding signature.
 		{"bank: profit above revenue proxy", withSource(row(7000, 300, 400, 4.7, 24), models.SourceCBR102), nil},
 		{"non-bank: profit above revenue still flagged", withSource(row(7000, 300, 400, 4.7, 24), models.SourceCSV),
-			[][]string{{"revenue", "net_profit", "pe", "roe"}}},
+			[][]string{{"revenue", "net_profit", "pe", "roe", "operating_profit", "operating_cash_flow"}}},
 		{"no cap: revenue/cap rule skipped", withoutCap(row(0, 0.1, 0.05, 0, 5)), nil},
 		// A reported zero revenue is a real figure: a pure holding with no sales.
 		{"holding with zero revenue", row(900, 0, 30, 30, 20), [][]string{
-			{"revenue", "capitalization"},
-			{"revenue", "net_profit", "pe", "roe"},
+			{"revenue", "capitalization", "operating_profit", "operating_cash_flow"},
+			{"revenue", "net_profit", "pe", "roe", "operating_profit", "operating_cash_flow"},
 		}},
 	}
 	for _, tt := range tests {
@@ -115,4 +115,24 @@ func TestSources(t *testing.T) {
 func withSource(q models.QuarterData, source string) models.QuarterData {
 	q.Source = source
 	return q
+}
+
+// A holding's anomaly reaches the cash-flow multiples too (X5's 2025 RSBU:
+// net profit 124.5 > revenue 85.7, EV/EBIT 110x).
+func TestHoldingAnomalyConcernsCashFlowMetrics(t *testing.T) {
+	f := models.Float
+	row := models.QuarterData{Year: 2025, Quarter: "Q4", Source: models.SourceRSBU,
+		Revenue: f(85.7), NetProfit: f(124.5), Capitalization: f(817)}
+	anoms := CheckRow(row)
+	if len(anoms) != 1 {
+		t.Fatalf("anomalies = %+v, want the net-profit-over-revenue one", anoms)
+	}
+	for _, m := range []string{"ev_ebit", "fcf", "p_fcf", "operating_margin", "pe"} {
+		if !anoms[0].Concerns(m) {
+			t.Errorf("holding anomaly does not concern %s", m)
+		}
+	}
+	if anoms[0].Concerns("net_debt") || anoms[0].Concerns("cash") {
+		t.Error("balance-sheet figures are not distorted by a holding's income")
+	}
 }
