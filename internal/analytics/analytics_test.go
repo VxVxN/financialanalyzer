@@ -518,3 +518,71 @@ func TestSnapshotStockFiguresFromLatestPeriod(t *testing.T) {
 		t.Errorf("labels = %q %q %q, want 2025-Q4", s.PELabel, s.ROELabel, s.CapLabel)
 	}
 }
+
+// A manual entry is an annual, comparable figure: it is its own TTM value,
+// and growth compares it with other group figures but not with RSBU years.
+func TestManualRowsAreAnnualGroupFigures(t *testing.T) {
+	f := models.Float
+	h := models.ApplyManual([]models.QuarterData{
+		{Year: 2023, Quarter: "Q4", Company: "M", Source: models.SourceRSBU, Revenue: f(50)},
+		{Year: 2024, Quarter: "Q4", Company: "M", Source: models.SourceRSBU, Revenue: f(60)},
+	}, []models.ManualFinancials{
+		{Company: "M", Year: 2024, Revenue: f(1000)},
+		{Company: "M", Year: 2025, Revenue: f(1200)},
+	})
+	if p, _ := LatestValid(TTMSeries(h, "revenue")); p.Value != 1200 {
+		t.Errorf("TTM revenue = %v, want 1200 (a manual Q4 row is annual)", p.Value)
+	}
+	yoy := DerivedSeries(h, "revenue_yoy", PeriodAnnual)
+	byYear := map[int]float64{}
+	for _, p := range yoy {
+		byYear[p.Year] = p.Value
+	}
+	if !approx(byYear[2025], 20, 1e-9) || !math.IsNaN(byYear[2024]) {
+		t.Errorf("YoY = %v; want 2025 +20%% and none for 2024 (RSBU -> manual)", byYear)
+	}
+	if !IsComparable(models.SourceManual) || SourceLabel(models.SourceManual) != "ввод вручную" {
+		t.Error("manual source must be comparable and labelled")
+	}
+}
+
+// A manual year among CSV quarters (the reviewer's case): the quarterly YoY
+// never compares the annual Q4 figure with a single quarter, and the TTM of
+// the next quarters still sums four quarters through the replaced Q4.
+func TestManualYearAmongCSVQuarters(t *testing.T) {
+	f := models.Float
+	var fetched []models.QuarterData
+	for year := 2024; year <= 2026; year++ {
+		for _, q := range []string{"Q1", "Q2", "Q3", "Q4"} {
+			if year == 2026 && (q == "Q3" || q == "Q4") {
+				continue
+			}
+			fetched = append(fetched, models.QuarterData{Year: year, Quarter: q, Company: "C", Source: models.SourceCSV,
+				Revenue: f(100), NetProfit: f(10)})
+		}
+	}
+	h := models.ApplyManual(fetched, []models.ManualFinancials{{Company: "C", Year: 2025, Revenue: f(420), NetProfit: f(44)}})
+
+	for _, p := range DerivedSeries(h, "revenue_yoy", PeriodQuarter) {
+		if p.Label == "2025-Q4" && !math.IsNaN(p.Value) {
+			t.Errorf("quarterly YoY at the manual year = %v, want NaN (a year vs a quarter)", p.Value)
+		}
+	}
+	ttm := map[string]float64{}
+	for _, p := range TTMSeries(h, "net_profit") {
+		ttm[p.Label] = p.Value
+	}
+	if ttm["2025-Q4"] != 44 || ttm["2026-Q1"] != 40 || ttm["2026-Q2"] != 40 {
+		t.Errorf("TTM = %v; want 44 at the manual year and 40 after it", ttm)
+	}
+	if p, _ := LatestValid(TTMSeries(h, "net_profit")); p.Label != "2026-Q2" {
+		t.Errorf("latest TTM at %s, want 2026-Q2 (newer quarters are not lost)", p.Label)
+	}
+
+	// A dividends-only entry for a year with no row does not claim to be a
+	// manual statement.
+	h = models.ApplyManual(fetched, []models.ManualFinancials{{Company: "C", Year: 2023, Dividends: f(5)}})
+	if h[0].Year != 2023 || h[0].Source != models.SourceCSV {
+		t.Errorf("dividends-only row = %+v, want source csv", h[0])
+	}
+}

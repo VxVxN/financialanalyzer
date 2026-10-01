@@ -181,6 +181,8 @@ func SourceLabel(source string) string {
 		return "импорт CSV"
 	case models.SourceSmartLab:
 		return "smart-lab"
+	case models.SourceManual:
+		return "ввод вручную"
 	case "":
 		return "неизвестно"
 	}
@@ -199,6 +201,8 @@ func SourceNote(source string) string {
 		return "Импортировано из CSV-файла; точность зависит от файла (обычно МСФО группы)."
 	case models.SourceSmartLab:
 		return "МСФО группы, собранные smart-lab.ru."
+	case models.SourceManual:
+		return "Годовые данные, введённые вручную на дашборде (обычно МСФО группы); они заменяют загруженную отчётность за этот год."
 	case "":
 		return "Загружено до того, как начали учитывать источник."
 	}

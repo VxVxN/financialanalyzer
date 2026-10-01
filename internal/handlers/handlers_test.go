@@ -35,6 +35,11 @@ type fakeRepo struct {
 	quotes map[string]models.MarketQuote
 	runs   []models.FetchRun
 
+	manual      []models.ManualFinancials
+	savedManual []models.ManualFinancials
+	deletedYear int
+	manualErr   error
+
 	savedCompany string
 	savedNote    string
 	deleted      []string
@@ -84,6 +89,28 @@ func (f *fakeRepo) RecentFetchRuns(_ context.Context, limit int) ([]models.Fetch
 	return f.runs, nil
 }
 
+func (f *fakeRepo) GetManualFinancials(_ context.Context, company string) ([]models.ManualFinancials, error) {
+	return f.manual, nil
+}
+func (f *fakeRepo) SaveManualFinancials(_ context.Context, m models.ManualFinancials) error {
+	known := false
+	for _, c := range f.companies {
+		known = known || c == m.Company
+	}
+	if !known {
+		return fmt.Errorf("%w: %s", database.ErrCompanyNotFound, m.Company)
+	}
+	f.savedManual = append(f.savedManual, m)
+	return nil
+}
+func (f *fakeRepo) DeleteManualFinancials(_ context.Context, company string, year int) error {
+	if f.manualErr != nil {
+		return f.manualErr
+	}
+	f.deletedYear = year
+	return nil
+}
+
 // testNow pins the controller clock so quote freshness is deterministic.
 var testNow = time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 
@@ -106,6 +133,9 @@ func newTestServer(repo Repository) *chi.Mux {
 	r.Get("/api/company-note", c.GetCompanyNote)
 	r.Post("/api/company-note", c.SaveCompanyNote)
 	r.Delete("/api/company-note", c.DeleteCompanyNote)
+	r.Get("/api/manual-financials", c.GetManualFinancials)
+	r.Put("/api/manual-financials", c.SaveManualFinancials)
+	r.Delete("/api/manual-financials", c.DeleteManualFinancials)
 	return r
 }
 

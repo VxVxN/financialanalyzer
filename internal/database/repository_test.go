@@ -34,7 +34,7 @@ func openTestDB(t *testing.T) *database.Repository {
 	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs`); err != nil {
+	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs, manual_financials`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return database.NewRepository(db)
@@ -382,4 +382,75 @@ func TestSaveQuarterDataCashFlowColumns(t *testing.T) {
 	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(30))
 	assertMetric(t, "operating_profit", got.OperatingProfit, nil)
 	assertMetric(t, "capex", got.Capex, nil)
+}
+
+func TestManualFinancials(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	f := models.Float
+
+	if err := repo.SaveQuarterData(ctx, models.QuarterData{Year: 2025, Quarter: "Q4", Company: "X5", Category: "retail",
+		Source: models.SourceRSBU, Capitalization: f(800), Revenue: f(85), NetProfit: f(124), Debt: f(119)}); err != nil {
+		t.Fatalf("save fetched: %v", err)
+	}
+	if err := repo.SaveManualFinancials(ctx, models.ManualFinancials{Company: "NOPE", Year: 2025, Dividends: f(1)}); !errors.Is(err, database.ErrCompanyNotFound) {
+		t.Errorf("entry for an unknown company: %v, want ErrCompanyNotFound", err)
+	}
+
+	entry := models.ManualFinancials{Company: "X5", Year: 2025, Revenue: f(4000), NetProfit: f(100), Dividends: f(0)}
+	if err := repo.SaveManualFinancials(ctx, entry); err != nil {
+		t.Fatalf("save manual: %v", err)
+	}
+	got := history(t, repo, "X5")
+	if got.Source != models.SourceManual {
+		t.Errorf("source = %q, want manual", got.Source)
+	}
+	assertMetric(t, "revenue", got.Revenue, f(4000))
+	assertMetric(t, "debt", got.Debt, nil) // the fetched RSBU debt is replaced
+	assertMetric(t, "dividends", got.Dividends, f(0))
+	assertMetric(t, "pe", got.PE, f(8))
+	all, err := repo.GetCompaniesHistory(ctx, []string{"X5"})
+	if err != nil || len(all["X5"]) != 1 || all["X5"][0].Source != models.SourceManual {
+		t.Errorf("GetCompaniesHistory = %+v, %v", all, err)
+	}
+
+	// A later save replaces the entry entirely; a fetch run never touches it.
+	entry.Revenue, entry.Dividends = nil, nil
+	entry.NetProfit = f(200)
+	if err := repo.SaveManualFinancials(ctx, entry); err != nil {
+		t.Fatalf("resave manual: %v", err)
+	}
+	if err := repo.SaveQuarterData(ctx, models.QuarterData{Year: 2025, Quarter: "Q4", Company: "X5",
+		Source: models.SourceRSBU, Revenue: f(90)}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.GetManualFinancials(ctx, "X5")
+	if err != nil || len(list) != 1 || list[0].Revenue != nil || *list[0].NetProfit != 200 || list[0].UpdatedAt.IsZero() {
+		t.Fatalf("manual list = %+v, %v", list, err)
+	}
+	assertMetric(t, "manual revenue survives the fetch", history(t, repo, "X5").Revenue, nil)
+
+	// Deleting the entry brings the fetched figures back.
+	if err := repo.DeleteManualFinancials(ctx, "X5", 2025); err != nil {
+		t.Fatalf("delete manual: %v", err)
+	}
+	got = history(t, repo, "X5")
+	if got.Source != models.SourceRSBU {
+		t.Errorf("source after delete = %q, want rsbu", got.Source)
+	}
+	assertMetric(t, "revenue", got.Revenue, f(90))
+	if err := repo.DeleteManualFinancials(ctx, "X5", 2025); !errors.Is(err, database.ErrManualNotFound) {
+		t.Errorf("second delete: %v, want ErrManualNotFound", err)
+	}
+
+	// Deleting the company removes its manual entries too.
+	if err := repo.SaveManualFinancials(ctx, models.ManualFinancials{Company: "X5", Year: 2024, Dividends: f(5)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteCompany(ctx, "X5"); err != nil {
+		t.Fatalf("delete company: %v", err)
+	}
+	if list, _ := repo.GetManualFinancials(ctx, "X5"); len(list) != 0 {
+		t.Errorf("manual entries left after DeleteCompany: %+v", list)
+	}
 }

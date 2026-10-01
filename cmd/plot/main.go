@@ -196,6 +196,7 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 	r.Get("/api/company-note", controller.GetCompanyNote)
 	r.Get("/updates", controller.UpdatesHandler)
 	r.Get("/api/fetch-runs", controller.FetchRunsAPI)
+	r.Get("/api/manual-financials", controller.GetManualFinancials)
 
 	// State-changing endpoints: Basic Auth when configured, and JSON-only
 	// bodies so they cannot be triggered by a cross-site form post.
@@ -207,6 +208,8 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		r.Delete("/api/companies", controller.DeleteCompany)
 		r.Post("/api/company-note", controller.SaveCompanyNote)
 		r.Delete("/api/company-note", controller.DeleteCompanyNote)
+		r.Put("/api/manual-financials", controller.SaveManualFinancials)
+		r.Delete("/api/manual-financials", controller.DeleteManualFinancials)
 	})
 	return r
 }

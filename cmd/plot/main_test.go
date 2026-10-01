@@ -47,6 +47,8 @@ var writeRoutes = []routeCase{
 	{http.MethodDelete, "/api/companies", `{"company":"SBER"}`},
 	{http.MethodPost, "/api/company-note", `{"company":"SBER","note":"x"}`},
 	{http.MethodDelete, "/api/company-note?company=SBER", ""},
+	{http.MethodPut, "/api/manual-financials", `{"company":"SBER","year":2025,"dividends":800}`},
+	{http.MethodDelete, "/api/manual-financials?company=SBER&year=2025", ""},
 }
 
 func serve(h http.Handler, rc routeCase, auth bool) *httptest.ResponseRecorder {
@@ -91,7 +93,7 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 
 func TestRouterReadEndpointsStayOpen(t *testing.T) {
 	h, _ := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	for _, target := range []string{"/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs"} {
+	for _, target := range []string{"/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/manual-financials?company=SBER"} {
 		rec := serve(h, routeCase{method: http.MethodGet, target: target}, false)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status = %d, want 200", target, rec.Code)
@@ -145,3 +147,12 @@ func TestSchedulerJobs(t *testing.T) {
 		t.Errorf("bad spec: err = %v, want one naming SCHEDULE_QUOTES", err)
 	}
 }
+
+func (s *stubRepo) GetManualFinancials(context.Context, string) ([]models.ManualFinancials, error) {
+	return nil, nil
+}
+func (s *stubRepo) SaveManualFinancials(context.Context, models.ManualFinancials) error {
+	s.writes++
+	return nil
+}
+func (s *stubRepo) DeleteManualFinancials(context.Context, string, int) error { s.writes++; return nil }

@@ -25,6 +25,9 @@ tables.
   YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
 - **Two ingestion paths** — CSV import and a free primary-source fetcher
   (ГИР БО + MOEX ISS for companies, CBR forms 102/101 for banks).
+- **Manual IFRS / dividends entry** — type a year's group figures from the annual
+  report on the dashboard; they replace the fetched RSBU for that year and no
+  automatic refresh overwrites them (stored separately, overlaid on read).
 - **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
   quotes daily and financials weekly, catching up slots missed while it was
   down; `/updates` shows the timetable, quote freshness and every run's outcome.
@@ -169,6 +172,7 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/api/categories`                 | List categories                      |
 | GET    | `/api/companies-with-categories`  | Companies with their category        |
 | GET/POST/DELETE | `/api/company-note`      | Read / save 🔒 / delete 🔒 a company note |
+| GET/PUT/DELETE | `/api/manual-financials`  | Read / save 🔒 / delete 🔒 a company-year manual entry |
 | GET    | `/healthz`                        | Liveness probe                       |
 | GET    | `/readyz`                         | Readiness probe (checks the DB)      |
 | GET    | `/version`                        | Build metadata                       |

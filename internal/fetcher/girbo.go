@@ -181,20 +181,8 @@ func capitalization(v float64, err error) *float64 {
 	return &v
 }
 
-// peRatio returns capitalization / net profit, or nil when it is undefined
-// (no cap, no profit figure, or non-positive earnings).
-func peRatio(capitalization, netProfit *float64) *float64 {
-	if capitalization == nil || netProfit == nil || *netProfit <= 0 {
-		return nil
-	}
-	return models.Float(*capitalization / *netProfit)
-}
-
-// roePercent returns net profit / equity as a percentage, or nil when undefined
-// (either figure missing, or non-positive equity).
-func roePercent(netProfit, equity *float64) *float64 {
-	if netProfit == nil || equity == nil || *equity <= 0 {
-		return nil
-	}
-	return models.Float(*netProfit / *equity * 100)
-}
+// peRatio and roePercent are the shared definitions (see models).
+var (
+	peRatio    = models.PERatio
+	roePercent = models.ROEPercent
+)

@@ -27,6 +27,9 @@ type Repository interface {
 	GetMarketQuote(ctx context.Context, company string) (models.MarketQuote, bool, error)
 	GetMarketQuotes(ctx context.Context) (map[string]models.MarketQuote, error)
 	RecentFetchRuns(ctx context.Context, limit int) ([]models.FetchRun, error)
+	GetManualFinancials(ctx context.Context, company string) ([]models.ManualFinancials, error)
+	SaveManualFinancials(ctx context.Context, m models.ManualFinancials) error
+	DeleteManualFinancials(ctx context.Context, company string, year int) error
 }
 
 // ScheduleSource reports the data-refresh timetable (*scheduler.Scheduler).

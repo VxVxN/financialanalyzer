@@ -12,6 +12,10 @@ const (
 	SourceCBR102   = "cbr_102"  // CBR form 102/123 of the bank legal entity (RSBU)
 	SourceCSV      = "csv"      // manual CSV import (usually group IFRS figures)
 	SourceSmartLab = "smartlab" // smart-lab.ru aggregator (legacy rows; scraper removed)
+	// SourceManual marks a row overlaid from manual_financials (figures typed
+	// in on the dashboard, usually the group's IFRS annual report). It is
+	// never stored in company_financials.
+	SourceManual = "manual"
 )
 
 // QuarterData is one company-period row. Source is row-level and "last writer
@@ -56,6 +60,12 @@ type QuarterData struct {
 	OperatingProfit   *float64
 	OperatingCashFlow *float64
 	Capex             *float64
+
+	// Quarterly is set only on a manual annual row that replaced a fetched
+	// single-quarter Q4 row (CSV, CBR): that row, kept so trailing-twelve-
+	// month windows of the next three quarters can still sum four quarters
+	// across the year end. Never stored.
+	Quarterly *QuarterData
 }
 
 // IsEmpty reports whether the row carries no metric at all.

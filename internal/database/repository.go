@@ -139,7 +139,22 @@ func (r *Repository) ExistingPeriods(ctx context.Context, company string) (map[s
 	return out, nil
 }
 
+// GetCompanyHistory returns a company's history with its manual entries
+// overlaid (models.ApplyManual), ordered by period.
 func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]models.QuarterData, error) {
+	history, err := r.fetchedHistory(ctx, company)
+	if err != nil {
+		return nil, err
+	}
+	manual, err := r.GetManualFinancials(ctx, company)
+	if err != nil {
+		return nil, err
+	}
+	return models.ApplyManual(history, manual), nil
+}
+
+// fetchedHistory reads a company's company_financials rows, ordered by period.
+func (r *Repository) fetchedHistory(ctx context.Context, company string) ([]models.QuarterData, error) {
 	query := `
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
@@ -182,7 +197,24 @@ func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]m
 	return out, nil
 }
 
+// GetCompaniesHistory is GetCompanyHistory for several companies at once.
 func (r *Repository) GetCompaniesHistory(ctx context.Context, companies []string) (map[string][]models.QuarterData, error) {
+	histories, err := r.fetchedHistories(ctx, companies)
+	if err != nil {
+		return nil, err
+	}
+	manual, err := r.manualFor(ctx, companies)
+	if err != nil {
+		return nil, err
+	}
+	for company, entries := range manual {
+		histories[company] = models.ApplyManual(histories[company], entries)
+	}
+	return histories, nil
+}
+
+// fetchedHistories reads several companies' company_financials rows.
+func (r *Repository) fetchedHistories(ctx context.Context, companies []string) (map[string][]models.QuarterData, error) {
 	if len(companies) == 0 {
 		return map[string][]models.QuarterData{}, nil
 	}
@@ -322,12 +354,17 @@ func (r *Repository) DeleteCompany(ctx context.Context, company string) error {
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
-	// The quote goes too, or it would resurface, stale, if the company were
-	// imported again. It is deleted even when no financial rows exist, so an
-	// orphaned quote (e.g. a fetch racing a delete) can still be removed.
+	// The quote and the manual entries go too, or they would resurface if
+	// the company were imported again. They are deleted even when no
+	// financial rows exist, so orphans (e.g. a fetch racing a delete) can
+	// still be removed.
 	quotes, err := tx.ExecContext(ctx, `DELETE FROM market_quotes WHERE company = $1`, company)
 	if err != nil {
 		return fmt.Errorf("error deleting market quote %s: %w", company, err)
+	}
+	manual, err := tx.ExecContext(ctx, `DELETE FROM manual_financials WHERE company = $1`, company)
+	if err != nil {
+		return fmt.Errorf("error deleting manual financials %s: %w", company, err)
 	}
 	rows, err := tx.ExecContext(ctx, `DELETE FROM company_financials WHERE company = $1`, company)
 	if err != nil {
@@ -342,7 +379,11 @@ func (r *Repository) DeleteCompany(ctx context.Context, company string) error {
 	if err != nil {
 		return fmt.Errorf("error getting rows affected: %w", err)
 	}
-	if nQuotes+nRows == 0 {
+	nManual, err := manual.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %w", err)
+	}
+	if nQuotes+nRows+nManual == 0 {
 		return fmt.Errorf("%w: %s", ErrCompanyNotFound, company)
 	}
 
@@ -555,4 +596,100 @@ func splitList(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// ErrManualNotFound is returned by DeleteManualFinancials when no entry matches.
+var ErrManualNotFound = errors.New("manual entry not found")
+
+const manualColumns = `company, year, revenue, net_profit, ebitda, operating_profit, operating_cash_flow, capex,
+	debt, cash, equity, dividends, updated_at`
+
+func scanManual(rows *sql.Rows) (models.ManualFinancials, error) {
+	var m models.ManualFinancials
+	err := rows.Scan(&m.Company, &m.Year, &m.Revenue, &m.NetProfit, &m.EBITDA, &m.OperatingProfit,
+		&m.OperatingCashFlow, &m.Capex, &m.Debt, &m.Cash, &m.Equity, &m.Dividends, &m.UpdatedAt)
+	return m, err
+}
+
+// GetManualFinancials returns a company's manual entries, by year.
+func (r *Repository) GetManualFinancials(ctx context.Context, company string) ([]models.ManualFinancials, error) {
+	m, err := r.manualFor(ctx, []string{company})
+	if err != nil {
+		return nil, err
+	}
+	return m[company], nil
+}
+
+// manualFor returns the manual entries of the given companies, by year.
+func (r *Repository) manualFor(ctx context.Context, companies []string) (map[string][]models.ManualFinancials, error) {
+	out := make(map[string][]models.ManualFinancials)
+	if len(companies) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+manualColumns+`
+		FROM manual_financials WHERE company = ANY($1) ORDER BY company, year`, pq.Array(companies))
+	if err != nil {
+		return nil, fmt.Errorf("query manual financials: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		m, err := scanManual(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan manual financials: %w", err)
+		}
+		out[m.Company] = append(out[m.Company], m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate manual financials: %w", err)
+	}
+	return out, nil
+}
+
+// SaveManualFinancials stores a company-year entry, replacing any previous
+// one for that year entirely (a field left nil clears it). The company must
+// have fetched or imported rows, checked in the same statement so a
+// concurrent DeleteCompany cannot leave an orphan entry behind; otherwise it
+// returns ErrCompanyNotFound.
+func (r *Repository) SaveManualFinancials(ctx context.Context, m models.ManualFinancials) error {
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO manual_financials (company, year, revenue, net_profit, ebitda, operating_profit,
+			operating_cash_flow, capex, debt, cash, equity, dividends, updated_at)
+		SELECT $1::varchar, $2::integer, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric,
+			$9::numeric, $10::numeric, $11::numeric, $12::numeric, CURRENT_TIMESTAMP
+		WHERE EXISTS (SELECT 1 FROM company_financials WHERE company = $1::varchar)
+		ON CONFLICT (company, year) DO UPDATE SET
+			revenue = EXCLUDED.revenue, net_profit = EXCLUDED.net_profit, ebitda = EXCLUDED.ebitda,
+			operating_profit = EXCLUDED.operating_profit, operating_cash_flow = EXCLUDED.operating_cash_flow,
+			capex = EXCLUDED.capex, debt = EXCLUDED.debt, cash = EXCLUDED.cash, equity = EXCLUDED.equity,
+			dividends = EXCLUDED.dividends, updated_at = CURRENT_TIMESTAMP`,
+		m.Company, m.Year, m.Revenue, m.NetProfit, m.EBITDA, m.OperatingProfit, m.OperatingCashFlow,
+		m.Capex, m.Debt, m.Cash, m.Equity, m.Dividends)
+	if err != nil {
+		return fmt.Errorf("save manual financials %s %d: %w", m.Company, m.Year, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("save manual financials %s %d: %w", m.Company, m.Year, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", ErrCompanyNotFound, m.Company)
+	}
+	return nil
+}
+
+// DeleteManualFinancials removes a company-year entry; the fetched figures
+// for that year show again.
+func (r *Repository) DeleteManualFinancials(ctx context.Context, company string, year int) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM manual_financials WHERE company = $1 AND year = $2`, company, year)
+	if err != nil {
+		return fmt.Errorf("delete manual financials %s %d: %w", company, year, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete manual financials %s %d: %w", company, year, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s %d", ErrManualNotFound, company, year)
+	}
+	return nil
 }

@@ -30,6 +30,10 @@ type Point struct {
 	// Standalone marks figures from a standalone source (RSBU/CBR legal
 	// entity) rather than group ones; growth rates never compare the two.
 	Standalone bool
+	// Annual marks, on a quarterly series, a Q4 point holding a whole year's
+	// flows (an RSBU or manual row); growth rates never compare it with a
+	// single quarter.
+	Annual bool
 }
 
 // Series is a chronologically ordered sequence of Points for one metric.
@@ -112,17 +116,18 @@ func quarterSeq(q models.QuarterData) int {
 	return q.Year*4 + idx - 1
 }
 
-// isAnnualFigure reports whether a row's flow metrics cover the whole year:
-// ГИР БО RSBU is annual-only and stored on Q4. (CBR bank rows are true single
-// quarters, as are CSV rows.)
 // standalone reports whether a row's figures are a single legal entity's
 // (RSBU/CBR) rather than group figures.
 func standalone(q models.QuarterData) bool {
 	return !IsComparable(q.Source)
 }
 
+// isAnnualFigure reports whether a row's flow metrics cover the whole year:
+// ГИР БО RSBU is annual-only and stored on Q4, and so is a manual entry (a
+// year typed in from the annual report). CBR bank rows are true single
+// quarters, as are CSV rows.
 func isAnnualFigure(q models.QuarterData) bool {
-	return q.Source == models.SourceRSBU && q.Quarter == "Q4"
+	return (q.Source == models.SourceRSBU || q.Source == models.SourceManual) && q.Quarter == "Q4"
 }
 
 func qLabel(year int, quarter string) string {
@@ -201,6 +206,7 @@ func QuarterlySeries(history []models.QuarterData, metric string) Series {
 			Value: rawValue(q, metric),
 
 			Standalone: standalone(q),
+			Annual:     isAnnualFigure(q),
 		})
 	}
 	return out
@@ -231,8 +237,14 @@ func TTMSeries(history []models.QuarterData, metric string) Series {
 				sum := 0.0
 				present := 0
 				for j := i - 3; j <= i; j++ {
-					val := rawValue(hist[j], metric)
-					if !math.IsNaN(val) && !isAnnualFigure(hist[j]) && standalone(hist[j]) == standalone(q) {
+					row := hist[j]
+					if isAnnualFigure(row) && row.Quarterly != nil {
+						// A manual year replaced this Q4 quarter; the
+						// window still needs the quarter itself.
+						row = *row.Quarterly
+					}
+					val := rawValue(row, metric)
+					if !math.IsNaN(val) && !isAnnualFigure(row) && standalone(row) == standalone(q) {
 						sum += val
 						present++
 					}
@@ -496,7 +508,7 @@ func indexPoints(s Series) map[int]Point {
 func YearAgo(s Series, p Point, base Period, n int) (Point, bool) {
 	for _, q := range s {
 		if q.Index == p.Index-yearsBack(base, n) {
-			return q, q.Standalone == p.Standalone && !math.IsNaN(q.Value)
+			return q, comparablePoints(p, q) && !math.IsNaN(q.Value)
 		}
 	}
 	return Point{}, false
@@ -513,6 +525,12 @@ func yearsBack(base Period, n int) int {
 	return n * 10
 }
 
+// comparablePoints reports whether two points of one series may be compared
+// for growth: same kind of entity and same span (a year vs a quarter).
+func comparablePoints(a, b Point) bool {
+	return a.Standalone == b.Standalone && a.Annual == b.Annual
+}
+
 // yoy computes year-over-year percentage change against the same period one
 // calendar year earlier (NaN when that period is absent).
 func yoy(s Series, base Period) Series {
@@ -523,7 +541,7 @@ func yoy(s Series, base Period) Series {
 	out := make(Series, 0, len(s))
 	for _, p := range s {
 		val := math.NaN()
-		if q, ok := byIndex[p.Index-yearsBack(base, 1)]; ok && q.Standalone == p.Standalone {
+		if q, ok := byIndex[p.Index-yearsBack(base, 1)]; ok && comparablePoints(p, q) {
 			prev := q.Value
 			if !math.IsNaN(prev) && !math.IsNaN(p.Value) && prev != 0 {
 				val = (p.Value/prev - 1) * 100
@@ -544,7 +562,7 @@ func rollingCAGR(s Series, base Period, years int) Series {
 	out := make(Series, 0, len(s))
 	for _, p := range s {
 		val := math.NaN()
-		if q, ok := byIndex[p.Index-yearsBack(base, years)]; ok && q.Standalone == p.Standalone {
+		if q, ok := byIndex[p.Index-yearsBack(base, years)]; ok && comparablePoints(p, q) {
 			prev, cur := q.Value, p.Value
 			if !math.IsNaN(prev) && !math.IsNaN(cur) && prev > 0 && cur > 0 {
 				val = (math.Pow(cur/prev, 1.0/float64(years)) - 1) * 100

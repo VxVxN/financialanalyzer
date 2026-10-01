@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -22,9 +24,11 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "company is required", http.StatusBadRequest)
 		return
 	}
-	theme := r.URL.Query().Get("theme")
-	if theme == "" {
-		theme = "light"
+	// The theme is echoed into links and attributes: only the two known
+	// values may pass, never raw query text.
+	theme := "light"
+	if r.URL.Query().Get("theme") == "dark" {
+		theme = "dark"
 	}
 
 	history, err := controller.repo.GetCompanyHistory(r.Context(), company)
@@ -38,6 +42,11 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 		controller.logger.Warn("failed to load company note", "company", company, "error", err)
 	}
 	snap := analytics.BuildSnapshot(history)
+	// Like the note, failing to load manual entries only hides them.
+	manual, err := controller.repo.GetManualFinancials(r.Context(), company)
+	if err != nil {
+		controller.logger.Warn("failed to load manual financials", "company", company, "error", err)
+	}
 	// Like the note, a missing quote only hides the current-valuation block.
 	quote, hasQuote, err := controller.repo.GetMarketQuote(r.Context(), company)
 	if err != nil {
@@ -260,6 +269,7 @@ a:hover { text-decoration: underline; }
 	renderSparklines(w, history)
 	renderDashboardChart(w, history, theme)
 	renderScoreBreakdown(w, snap)
+	renderManual(w, company, manual, controller.now().Year()-1)
 	renderNotes(w, company, note)
 
 	fmt.Fprintf(w, `</div>
@@ -294,7 +304,7 @@ function reloadChart() {
 }
 
 async function saveNote() {
-  const company = %q;
+  const company = %s;
   const note = document.getElementById('noteText').value;
   const status = document.getElementById('noteStatus');
   status.textContent = 'Сохранение…';
@@ -312,7 +322,17 @@ async function saveNote() {
   }
 }
 </script>
-</body></html>`, company)
+</body></html>`, jsonForScript(company))
+}
+
+// jsonForScript encodes v as a JavaScript literal for an inline <script>:
+// json.Marshal escapes <, > and &, so the value cannot close the script.
+func jsonForScript(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return string(b)
 }
 
 type palette struct {
@@ -713,8 +733,10 @@ func renderNotes(w http.ResponseWriter, company, note string) {
 </div>`, html.EscapeString(note))
 }
 
+// urlEscapeCSV escapes a company name for the chart's ?companies= list: a
+// query-escaped value cannot break out of the attribute it is written into.
 func urlEscapeCSV(s string) string {
-	return strings.ReplaceAll(s, ",", "%2C")
+	return url.QueryEscape(s)
 }
 
 func orDash(s string) string {
