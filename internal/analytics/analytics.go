@@ -623,6 +623,9 @@ type Snapshot struct {
 	RevenueCAGR5Y                          float64
 	NetProfitCAGR5                         float64
 	Score                                  int // 0-100 composite long-term-investor score
+	// PEPoint, PBPoint, DivYieldPoint are the periods PE, PB and DivYield
+	// were taken from (zero when NaN); Standalone tells their reporting kind.
+	PEPoint, PBPoint, DivYieldPoint Point
 }
 
 func lastNonNaN(s Series) float64 {
@@ -676,7 +679,9 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	}
 	latest("capitalization", &snap.Capitalization, &snap.CapLabel)
 	latest("debt", &snap.Debt, &snap.DebtLabel)
-	latest("pe", &snap.PE, &snap.PELabel)
+	if p, ok := LatestValid(QuarterlySeries(hist, "pe")); ok {
+		snap.PE, snap.PELabel, snap.PEPoint = p.Value, p.Label, p
+	}
 	latest("roe", &snap.ROE, &snap.ROELabel)
 
 	snap.Revenue = lastNonNaN(TTMSeries(hist, "revenue"))
@@ -690,10 +695,10 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	// Q1-Q3 with profit only; take the latest period that has them and keep
 	// its label so the dashboard can say how old the figure is.
 	if p, ok := LatestValid(DerivedSeries(hist, "pb", PeriodQuarter)); ok {
-		snap.PB, snap.PBLabel = p.Value, p.Label
+		snap.PB, snap.PBLabel, snap.PBPoint = p.Value, p.Label, p
 	}
 	if p, ok := LatestValid(DerivedSeries(hist, "div_yield", PeriodQuarter)); ok {
-		snap.DivYield, snap.DivYieldLabel = p.Value, p.Label
+		snap.DivYield, snap.DivYieldLabel, snap.DivYieldPoint = p.Value, p.Label, p
 	}
 	if p, ok := LatestValid(DerivedSeries(hist, "net_debt", PeriodQuarter)); ok {
 		snap.NetDebt, snap.NetDebtLabel = p.Value, p.Label
@@ -832,6 +837,9 @@ type Current struct {
 	// label says "too old" rather than silently pairing today's price with
 	// figures from years ago.
 	Stale bool
+	// EarningsPoint, EquityPoint, DividendsPoint are the fundamentals PE, PB
+	// and DivYield rest on (zero when none); Standalone tells their kind.
+	EarningsPoint, EquityPoint, DividendsPoint Point
 }
 
 // MaxFundamentalAge is how far a fundamental's period end may lag the quote
@@ -884,17 +892,17 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 	}
 	if p, ok := LatestValid(TTMSeries(history, "net_profit")); ok {
 		if fresh(p, &cur.EarningsLabel) && p.Value > 0 {
-			cur.PE = q.Capitalization / p.Value
+			cur.PE, cur.EarningsPoint = q.Capitalization/p.Value, p
 		}
 	}
 	if p, ok := LatestValid(positiveOnly(QuarterlySeries(history, "equity"))); ok {
 		if fresh(p, &cur.EquityLabel) {
-			cur.PB = q.Capitalization / p.Value
+			cur.PB, cur.EquityPoint = q.Capitalization/p.Value, p
 		}
 	}
 	if p, ok := LatestValid(QuarterlySeries(history, "dividends")); ok {
 		if fresh(p, &cur.DividendsLabel) {
-			cur.DivYield = p.Value / q.Capitalization * 100
+			cur.DivYield, cur.DividendsPoint = p.Value/q.Capitalization*100, p
 		}
 	}
 	// EV/EBIT and P/FCF report a too-old input in their own label rather than

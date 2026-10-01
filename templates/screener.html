@@ -154,10 +154,12 @@
         <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
         <b>Сопоставимость</b>: неконсолидированная РСБУ / данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
         <b>Замечания</b>: аномалии качества данных в истории компании — подробности на дашборде.
-        <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории (нужно не меньше двух);
+        <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории с актуальной оценкой
+        (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
         <b>перцентиль истории</b> — доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего:
         низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
-        <b>Медиана</b> внизу таблицы считается по показанным компаниям: выберите категорию, чтобы получить медиану сектора.
+        <b>Медиана</b> внизу таблицы — простая медиана по показанным компаниям (с самой компанией, без отбора по типу
+        отчётности и давности), поэтому может отличаться от медианы сектора в подсказках.
     </p>
 </div>
 
@@ -210,13 +212,17 @@
     for (const r of ROWS) r.pe_vs_sector = vsSector(r.pe, r.pe_sector);
     const pctText = (v) => Math.round(v) + '%';
     // Tooltip of a valuation cell: the sector median and the history percentile.
-    const BAND = { pe: ['pe_sector', 'pe_hist_pct'], pb: ['pb_sector', 'pb_hist_pct'], div_yield: ['div_yield_sector', 'div_yield_hist_pct'] };
+    const BAND = {
+        pe: ['pe_sector', 'pe_hist_pct', 'pe_sector_peers'],
+        pb: ['pb_sector', 'pb_hist_pct', 'pb_sector_peers'],
+        div_yield: ['div_yield_sector', 'div_yield_hist_pct', 'div_yield_sector_peers'],
+    };
     function bandTitle(col, row) {
         const keys = BAND[col.key];
         if (!keys) return '';
         const parts = [];
         const med = row[keys[0]], pct = row[keys[1]];
-        if (med !== null && med !== undefined) parts.push('медиана сектора ' + fmt(col, med) + ' (аналогов: ' + row.sector_peers + ')');
+        if (med !== null && med !== undefined) parts.push('медиана сектора ' + fmt(col, med) + ' (аналогов: ' + row[keys[2]] + ')');
         if (pct !== null && pct !== undefined) parts.push('перцентиль истории ' + pctText(pct));
         return parts.join(' · ');
     }
@@ -320,7 +326,7 @@
 
     // Median row over the companies shown: with a category selected, the
     // sector median (this company included).
-    const NO_MEDIAN = new Set(['score', 'anomalies']);
+    const NO_MEDIAN = new Set(['score', 'anomalies', 'pe_vs_sector', 'pe_hist_pct']);
     function renderFoot(rows) {
         if (rows.length < 2) { $('foot').innerHTML = ''; return; }
         $('foot').innerHTML = '<tr>' + COLUMNS.map((c, i) => {

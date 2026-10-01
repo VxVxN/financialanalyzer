@@ -3,6 +3,7 @@ package analytics
 import (
 	"math"
 	"slices"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -53,23 +54,36 @@ func historySeries(history []models.QuarterData, metric string) Series {
 	return nil
 }
 
+// kindMatters reports whether a band metric depends on the reporting entity:
+// P/E and P/B rest on the profit or equity of a legal entity (standalone
+// RSBU/CBR) or of the group, while a dividend yield is the company's payout
+// over its market cap whatever the source of the row.
+func kindMatters(metric string) bool { return metric != "div_yield" }
+
 // HistoricalBand places current — the multiple at the latest quote, or the
-// latest stored one — among the metric's values over the last BandYears.
-// Only periods of the same kind as the latest one count (standalone RSBU/CBR
-// multiples never mix with group ones). ok is false when current is unknown or
-// fewer than MinBandPoints periods qualify.
-func HistoricalBand(history []models.QuarterData, metric string, current float64) (HistoryBand, bool) {
+// latest stored one — among the metric's values over the BandYears up to the
+// latest qualifying period. For P/E and P/B only periods of the kind of the
+// figure current rests on count (standalone says which: standalone RSBU/CBR
+// multiples never mix with group ones); the yield band takes every period.
+// ok is false when current is unknown or fewer than MinBandPoints periods
+// qualify.
+func HistoricalBand(history []models.QuarterData, metric string, current float64, standalone bool) (HistoryBand, bool) {
 	if math.IsNaN(current) || math.IsInf(current, 0) {
 		return HistoryBand{}, false
 	}
-	s := historySeries(history, metric)
-	last, ok := LatestValid(s)
-	if !ok {
+	var s Series
+	for _, p := range historySeries(history, metric) {
+		if !math.IsNaN(p.Value) && !math.IsInf(p.Value, 0) && (!kindMatters(metric) || p.Standalone == standalone) {
+			s = append(s, p)
+		}
+	}
+	if len(s) == 0 {
 		return HistoryBand{}, false
 	}
+	last := s[len(s)-1]
 	var pts []Point
 	for _, p := range s {
-		if !math.IsNaN(p.Value) && !math.IsInf(p.Value, 0) && p.Standalone == last.Standalone && p.Year > last.Year-BandYears {
+		if p.Year > last.Year-BandYears {
 			pts = append(pts, p)
 		}
 	}
@@ -115,25 +129,43 @@ func Median(vals []float64) float64 {
 	return (s[m-1] + s[m]) / 2
 }
 
-// metricValue reads a band metric off a screener row.
-func (r ScreenerRow) metricValue(metric string) *float64 {
+// sectorFields returns a row's value and its sector median and peer
+// count fields for a band metric.
+func (r *ScreenerRow) sectorFields(metric string) (v *float64, median **float64, peers *int) {
 	switch metric {
 	case "pe":
-		return r.PE
+		return r.PE, &r.PESector, &r.PESectorPeers
 	case "pb":
-		return r.PB
+		return r.PB, &r.PBSector, &r.PBSectorPeers
 	case "div_yield":
-		return r.DivYield
+		return r.DivYield, &r.DivYieldSector, &r.DivYieldSectorPeers
 	}
-	return nil
+	return nil, nil, nil
+}
+
+// CurrentAt reports whether the row's value of metric can stand for today's
+// valuation at now: priced at a live quote (BuildCurrent already withholds
+// too-old fundamentals), or a stored figure whose period ended at most
+// MaxFundamentalAge before now. A stored valuation has no age bound
+// elsewhere, but a 2016 P/E says nothing about what a sector costs today.
+func (r ScreenerRow) CurrentAt(metric string, now time.Time) bool {
+	v, _, _ := r.sectorFields(metric)
+	basis, ok := r.Basis[metric]
+	if v == nil || !ok {
+		return false
+	}
+	return r.Current || monthsBetween(basis, now) <= MaxFundamentalAge
 }
 
 // ApplySectorMedians fills each row's sector medians: per band metric, the
-// median over the other companies of the same category that have it (the
-// company itself is left out, so it is compared with its peers), when at
-// least MinSectorPeers have. SectorPeers is the number of other companies in
-// the category. Rows without a category get none.
-func ApplySectorMedians(rows []ScreenerRow) {
+// median over the other companies of the same category (the company itself is
+// left out, so it is compared with its peers), when at least MinSectorPeers
+// qualify; *SectorPeers counts them. A peer qualifies when its value is
+// current at now (CurrentAt) and, for P/E and P/B, rests on figures of the
+// same kind (standalone or group) as the row's own. A row without a current
+// value of the metric, or without a category, gets no median: there is
+// nothing to compare.
+func ApplySectorMedians(rows []ScreenerRow, now time.Time) {
 	byCat := map[string][]int{}
 	for i, r := range rows {
 		if r.Category != "" {
@@ -142,26 +174,29 @@ func ApplySectorMedians(rows []ScreenerRow) {
 	}
 	for _, idx := range byCat {
 		for _, i := range idx {
-			rows[i].SectorPeers = len(idx) - 1
 			for _, m := range BandMetrics {
+				_, median, peers := rows[i].sectorFields(m)
+				*median, *peers = nil, 0
+				if !rows[i].CurrentAt(m, now) {
+					continue
+				}
+				own := rows[i].Basis[m].Standalone
 				var vals []float64
 				for _, j := range idx {
-					if v := rows[j].metricValue(m); j != i && v != nil {
-						vals = append(vals, *v)
+					if j == i || !rows[j].CurrentAt(m, now) {
+						continue
 					}
+					if kindMatters(m) && rows[j].Basis[m].Standalone != own {
+						continue
+					}
+					v, _, _ := rows[j].sectorFields(m)
+					vals = append(vals, *v)
 				}
 				if len(vals) < MinSectorPeers {
 					continue
 				}
 				med := Median(vals)
-				switch m {
-				case "pe":
-					rows[i].PESector = &med
-				case "pb":
-					rows[i].PBSector = &med
-				case "div_yield":
-					rows[i].DivYieldSector = &med
-				}
+				*median, *peers = &med, len(vals)
 			}
 		}
 	}

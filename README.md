@@ -18,8 +18,9 @@ tables.
 - **Screener** (`/screener`) — every company in one sortable, filterable table:
   current P/E, P/B and dividend yield at the latest exchange close, ROE,
   margins, leverage, growth, score and data-quality flags; P/E against the
-  sector median and its percentile within the company's own history, and a
-  median row (the sector median when a category is selected).
+  median of comparable sector peers with a current valuation and its
+  percentile within the company's own history, and a median row over the
+  shown companies.
 - **Single-company dashboard** (`/company/{name}`) — KPIs, sparklines, P/E, P/B
   and yield against the company's 10-year history and its sector's median, a
   quality score with a transparent breakdown, a trend explorer, and free-text

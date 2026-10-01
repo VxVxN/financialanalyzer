@@ -43,7 +43,7 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 		}
 		rows = append(rows, analytics.BuildScreenerRow(history, quote))
 	}
-	analytics.ApplySectorMedians(rows)
+	analytics.ApplySectorMedians(rows, controller.now())
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Company < rows[j].Company })
 	return rows, nil
 }

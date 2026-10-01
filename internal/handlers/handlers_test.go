@@ -525,19 +525,28 @@ func TestRelativeValuation(t *testing.T) {
 		}
 		// Peers B, C: median of 6 and 12. A's 3 is the lowest of 4 years:
 		// a tie with itself counts half.
-		if row["pe_sector"] != 9.0 || row["sector_peers"] != 2.0 || row["pe_hist_pct"] != 12.5 {
+		if row["pe_sector"] != 9.0 || row["pe_sector_peers"] != 2.0 || row["pe_hist_pct"] != 12.5 {
 			t.Errorf("A row = %v", row)
 		}
 	}
 
 	body := do(t, r, http.MethodGet, "/company/A", "").Body.String()
 	for _, want := range []string{
-		"Оценка относительно истории и сектора · по последним сохранённым данным за 2025-Q4",
-		"дёшево относительно истории", "дешевле сектора (-67%)", "3.00 – 10.00 (4 пер., 2022-Q4 – 2025-Q4)",
+		"Оценка относительно истории и сектора · по последним сохранённым данным",
+		`3.00 <span class="muted">(2025-Q4)</span>`, "9.00 (2)",
+		"дёшево относительно истории", "дешевле сектора (-67%)", "3.00 – 10.00 (4 периода, 2022-Q4 – 2025-Q4)",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard lacks %q", want)
 		}
+	}
+
+	// A company the batch read does not return (written after it) is still
+	// valued against the peers.
+	repo.companies = []string{"B", "C"}
+	body = do(t, r, http.MethodGet, "/company/A", "").Body.String()
+	if !strings.Contains(body, "дешевле сектора (-67%)") || !strings.Contains(body, "дёшево относительно истории") {
+		t.Error("a company missing from the batch read should still get the sector median")
 	}
 
 	// Peers that cannot be loaded hide only the sector column.

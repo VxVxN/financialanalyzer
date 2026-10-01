@@ -47,28 +47,51 @@ type ScreenerRow struct {
 	PEHistPct       *float64 `json:"pe_hist_pct"`
 	PBHistPct       *float64 `json:"pb_hist_pct"`
 	DivYieldHistPct *float64 `json:"div_yield_hist_pct"`
-	// *Sector: median over the other companies of the category
-	// (ApplySectorMedians); SectorPeers counts those companies.
-	PESector       *float64 `json:"pe_sector"`
-	PBSector       *float64 `json:"pb_sector"`
-	DivYieldSector *float64 `json:"div_yield_sector"`
-	SectorPeers    int      `json:"sector_peers"`
+	// *Sector: median over the comparable other companies of the category
+	// (ApplySectorMedians); *SectorPeers counts the companies it rests on.
+	PESector            *float64 `json:"pe_sector"`
+	PBSector            *float64 `json:"pb_sector"`
+	DivYieldSector      *float64 `json:"div_yield_sector"`
+	PESectorPeers       int      `json:"pe_sector_peers"`
+	PBSectorPeers       int      `json:"pb_sector_peers"`
+	DivYieldSectorPeers int      `json:"div_yield_sector_peers"`
+
+	// Basis holds, per band metric with a value, the period it rests on: the
+	// fundamental priced at the quote, or the stored multiple's period. Its
+	// Standalone picks the kind of the history band and of the sector peers.
+	Basis map[string]Point `json:"-"`
+	// Bands holds the HistoricalBand of each band metric that has one.
+	Bands map[string]HistoryBand `json:"-"`
 }
 
-// setHistPcts places the row's valuation within the company's history.
-func (r *ScreenerRow) setHistPcts(history []models.QuarterData) {
+// setBands places the row's valuation within the company's history.
+func (r *ScreenerRow) setBands(history []models.QuarterData) {
+	r.Bands = map[string]HistoryBand{}
 	pct := func(metric string, v *float64) *float64 {
-		if v == nil {
+		basis, ok := r.Basis[metric]
+		if v == nil || !ok {
 			return nil
 		}
-		if b, ok := HistoricalBand(history, metric, *v); ok {
-			return &b.Percentile
+		b, ok := HistoricalBand(history, metric, *v, basis.Standalone)
+		if !ok {
+			return nil
 		}
-		return nil
+		r.Bands[metric] = b
+		return &b.Percentile
 	}
 	r.PEHistPct = pct("pe", r.PE)
 	r.PBHistPct = pct("pb", r.PB)
 	r.DivYieldHistPct = pct("div_yield", r.DivYield)
+}
+
+// setBasis records the period behind each band metric that has a value.
+func (r *ScreenerRow) setBasis(pe, pb, divYield Point) {
+	r.Basis = map[string]Point{}
+	for m, p := range map[string]Point{"pe": pe, "pb": pb, "div_yield": divYield} {
+		if v, _, _ := r.sectorFields(m); v != nil {
+			r.Basis[m] = p
+		}
+	}
 }
 
 // BuildScreenerRow summarizes one company; quote is nil when none is stored
@@ -77,7 +100,7 @@ func (r *ScreenerRow) setHistPcts(history []models.QuarterData) {
 // medians need every row: ApplySectorMedians fills them afterwards.
 func BuildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) ScreenerRow {
 	row := buildScreenerRow(history, quote)
-	row.setHistPcts(history)
+	row.setBands(history)
 	return row
 }
 
@@ -112,12 +135,14 @@ func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 		row.Capitalization = finite(cur.Capitalization)
 		row.PE, row.PB, row.DivYield = finite(cur.PE), finite(cur.PB), finite(cur.DivYield)
 		row.EVEBIT, row.PFCF = finite(cur.EVEBIT), finite(cur.PFCF)
+		row.setBasis(cur.EarningsPoint, cur.EquityPoint, cur.DividendsPoint)
 		return row
 	}
 	row.EarningsPeriod = snap.PELabel
 	row.Capitalization = finite(snap.Capitalization)
 	row.PE, row.PB, row.DivYield = positive(snap.PE), finite(snap.PB), finite(snap.DivYield)
 	row.EVEBIT, row.PFCF = finite(snap.EVEBIT), finite(snap.PFCF)
+	row.setBasis(snap.PEPoint, snap.PBPoint, snap.DivYieldPoint)
 	return row
 }
 

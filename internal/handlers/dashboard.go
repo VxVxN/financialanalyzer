@@ -276,7 +276,7 @@ a:hover { text-decoration: underline; }
 		fmt.Fprintf(w, `<div class="section-title">Текущая оценка</div><p class="stale-note">Последняя сохранённая цена закрытия от %s — слишком старая для оценки (обновите: <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
 			html.EscapeString(quote.PriceDate.Format("2006-01-02")))
 	}
-	renderRelativeValuation(w, history, ownRow, peersKnown)
+	renderRelativeValuation(w, ownRow, peersKnown, controller.now())
 	renderKPIs(w, snap)
 	renderSparklines(w, history)
 	renderDashboardChart(w, history, theme)
@@ -363,7 +363,7 @@ func (controller *Controller) relativeValuationRow(ctx context.Context, company 
 		return own, false
 	}
 	rows = append(rows, own)
-	analytics.ApplySectorMedians(rows)
+	analytics.ApplySectorMedians(rows, controller.now())
 	return rows[len(rows)-1], true
 }
 
