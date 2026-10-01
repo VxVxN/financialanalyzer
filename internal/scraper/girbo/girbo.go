@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	BaseURL          = "https://bo.nalog.gov.ru"
+	DefaultBaseURL   = "https://bo.nalog.gov.ru"
 	defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 		"(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 	defaultDelay   = 700 * time.Millisecond
@@ -48,6 +48,7 @@ const (
 )
 
 type Client struct {
+	BaseURL   string // DefaultBaseURL; overridable for tests
 	HTTP      *http.Client
 	UserAgent string
 	Delay     time.Duration
@@ -57,6 +58,7 @@ type Client struct {
 
 func NewClient() *Client {
 	return &Client{
+		BaseURL:   DefaultBaseURL,
 		HTTP:      &http.Client{Timeout: defaultTimeout},
 		UserAgent: defaultUserAgent,
 		Delay:     defaultDelay,
@@ -75,10 +77,27 @@ type AnnualReport struct {
 	Debt      *float64 // lines 1410 + 1510 (long- + short-term borrowings)
 }
 
+// PartialError is returned by FetchAnnual, together with the reports that did
+// parse, when some years' detail calls failed: the caller keeps what it got but
+// should not treat the company as complete.
+type PartialError struct {
+	Failed int   // years whose details could not be fetched or parsed
+	Err    error // the last such failure
+}
+
+func (e *PartialError) Error() string {
+	return fmt.Sprintf("%d report(s) failed, last: %v", e.Failed, e.Err)
+}
+
+func (e *PartialError) Unwrap() error { return e.Err }
+
 // FetchAnnual resolves an INN to its organization, then returns one
 // AnnualReport per published year, most recent first. Years whose detail
-// payload is empty (e.g. simplified filings) are skipped.
-func (c *Client) FetchAnnual(ctx context.Context, inn string) ([]AnnualReport, error) {
+// payload is empty (e.g. simplified filings) are skipped, as are years for
+// which skip (may be nil) returns true — their detail call is not made. When
+// some years fail and others parse, the parsed ones come with a *PartialError;
+// when every fetched year fails, the last error comes alone.
+func (c *Client) FetchAnnual(ctx context.Context, inn string, skip func(year int) bool) ([]AnnualReport, error) {
 	orgID, err := c.SearchByINN(ctx, inn)
 	if err != nil {
 		return nil, fmt.Errorf("search inn %s: %w", inn, err)
@@ -91,32 +110,41 @@ func (c *Client) FetchAnnual(ctx context.Context, inn string) ([]AnnualReport, e
 
 	out := make([]AnnualReport, 0, len(entries))
 	var lastErr error
+	failed := 0
 	for _, e := range entries {
+		if skip != nil && skip(e.Year) {
+			continue
+		}
 		rep, ok, err := c.fetchReport(ctx, e)
 		if err != nil {
 			// One year's detail call failing (a transient HTTP error or an odd
 			// payload) must not throw away the years that did parse. Honour
 			// cancellation immediately, otherwise remember the error and move
-			// on; it is surfaced only if every report fails.
+			// on.
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			lastErr = fmt.Errorf("report %d (%d): %w", e.ID, e.Year, err)
+			failed++
 			continue
 		}
 		if ok {
 			out = append(out, rep)
 		}
 	}
-	if len(out) == 0 && lastErr != nil {
-		return nil, lastErr
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Year > out[j].Year })
-	return out, nil
+	switch {
+	case lastErr == nil:
+		return out, nil
+	case len(out) == 0:
+		return nil, lastErr
+	default:
+		return out, &PartialError{Failed: failed, Err: lastErr}
+	}
 }
 
 func (c *Client) fetchReport(ctx context.Context, e BfoEntry) (AnnualReport, bool, error) {
-	body, err := c.get(ctx, fmt.Sprintf("%s/nbo/bfo/%d/details", BaseURL, e.ID))
+	body, err := c.get(ctx, fmt.Sprintf("%s/nbo/bfo/%d/details", c.BaseURL, e.ID))
 	if err != nil {
 		return AnnualReport{}, false, err
 	}
@@ -129,7 +157,7 @@ func (c *Client) fetchReport(ctx context.Context, e BfoEntry) (AnnualReport, boo
 
 // SearchByINN returns the ГИР БО organization id for an exact INN match.
 func (c *Client) SearchByINN(ctx context.Context, inn string) (int, error) {
-	url := fmt.Sprintf("%s/advanced-search/organizations/search?query=%s&page=0", BaseURL, inn)
+	url := fmt.Sprintf("%s/advanced-search/organizations/search?query=%s&page=0", c.BaseURL, inn)
 	body, err := c.get(ctx, url)
 	if err != nil {
 		return 0, err
@@ -139,7 +167,7 @@ func (c *Client) SearchByINN(ctx context.Context, inn string) (int, error) {
 
 // ListReports returns the per-year report entries for an organization.
 func (c *Client) ListReports(ctx context.Context, orgID int) ([]BfoEntry, error) {
-	url := fmt.Sprintf("%s/nbo/organizations/%d/bfo", BaseURL, orgID)
+	url := fmt.Sprintf("%s/nbo/organizations/%d/bfo", c.BaseURL, orgID)
 	body, err := c.get(ctx, url)
 	if err != nil {
 		return nil, err
@@ -162,7 +190,7 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 		"User-Agent":      {c.UserAgent},
 		"Accept":          {"application/json, text/plain, */*"},
 		"Accept-Language": {"ru,en;q=0.8"},
-		"Referer":         {BaseURL + "/"},
+		"Referer":         {c.BaseURL + "/"},
 	}, c.Retry)
 }
 

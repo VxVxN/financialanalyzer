@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Обновление данных — Финансовый анализатор</title>
+    <script>
+        // Apply the saved theme before first paint (shared with the index page).
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem('theme'); } catch (e) {}
+            if (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
+            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        })();
+    </script>
+    <style>
+        :root {
+            --bg-page: #fafbfc;
+            --bg-surface: #ffffff;
+            --bg-muted: #f4f5f7;
+            --bg-hover: #eef0f3;
+            --border: #e6e8eb;
+            --text-1: #0d121c;
+            --text-2: #3d4453;
+            --text-3: #6b7280;
+            --accent: #4f46e5;
+            --accent-bg: #eef0ff;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --radius-sm: 6px;
+            --radius-md: 10px;
+        }
+        [data-theme="dark"] {
+            --bg-page: #0b0e15;
+            --bg-surface: #11151d;
+            --bg-muted: #1a2030;
+            --bg-hover: #232a3a;
+            --border: #242a38;
+            --text-1: #f0f2f5;
+            --text-2: #c5cad4;
+            --text-3: #8a93a3;
+            --accent: #7c7af6;
+            --accent-bg: #1d1f3e;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--bg-page); color: var(--text-1);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+            font-size: 14px;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+        .topline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        h1 { margin: 8px 0 4px; font-size: 24px; }
+        h2 { margin: 24px 0 8px; font-size: 16px; }
+        .sub { color: var(--text-3); margin: 0 0 16px; }
+        button {
+            font: inherit; color: var(--text-1); background: var(--bg-surface);
+            border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; cursor: pointer;
+        }
+        button:hover { background: var(--bg-hover); }
+
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+        .card {
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 12px 16px;
+        }
+        .card .title { font-weight: 600; margin-bottom: 4px; }
+        .card .line { color: var(--text-2); }
+        .muted { color: var(--text-3); font-size: 12px; }
+        .note {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+            padding: 12px 16px; color: var(--text-2); line-height: 1.5;
+        }
+        code { background: var(--bg-muted); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface); }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+        th { background: var(--bg-muted); color: var(--text-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
+        td.nowrap { white-space: nowrap; }
+        tbody tr:hover { background: var(--bg-hover); }
+        .pill {
+            display: inline-block; padding: 1px 8px; border-radius: 10px; white-space: nowrap;
+            background: var(--bg-muted); color: var(--text-2); font-size: 12px;
+        }
+        .pill.ok { color: var(--success); }
+        .pill.partial, .pill.abandoned, .pill.canceled { color: var(--warning); }
+        .pill.failed { color: var(--danger); }
+        .pill.running { background: var(--accent-bg); color: var(--accent); }
+        .details { color: var(--text-3); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+        .details .err { color: var(--danger); }
+        .empty { padding: 32px; text-align: center; color: var(--text-3); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="topline">
+        <a href="/">← Сравнение</a>
+        <button id="themeToggle" type="button">Тема</button>
+    </div>
+    <h1>Обновление данных</h1>
+    <p class="sub">Расписание автоматической загрузки, свежесть котировок и история запусков. Время московское.</p>
+
+    <h2>Расписание</h2>
+    {{if .SchedulerEnabled}}
+    <div class="cards">
+        {{range .Jobs}}
+        <div class="card">
+            <div class="title">{{.Label}}</div>
+            <div class="line">{{.Schedule}}</div>
+            {{if .Running}}<div class="line"><span class="pill running">выполняется сейчас</span></div>
+            {{else}}<div class="muted">Следующий запуск: {{.Next}}</div>{{end}}
+        </div>
+        {{else}}
+        <div class="note">Все задачи расписания отключены (<code>SCHEDULE_QUOTES=off</code>, <code>SCHEDULE_FINANCIALS=off</code>).</div>
+        {{end}}
+    </div>
+    {{else}}
+    <div class="note">
+        Автоматическое обновление выключено: данные обновляются только ручным запуском <code>cmd/fetch</code>.
+        Чтобы сервер обновлял их сам, запустите его с <code>SCHEDULER_ENABLED=1</code>
+        (по умолчанию котировки — ежедневно в 07:00, отчётность — по воскресеньям в 05:00;
+        настраивается через <code>SCHEDULE_QUOTES</code> и <code>SCHEDULE_FINANCIALS</code>).
+    </div>
+    {{end}}
+
+    <h2>Котировки</h2>
+    <div class="cards">
+        <div class="card">
+            {{if .Quotes.Total}}
+            <div class="title">Последняя цена закрытия: {{.Quotes.Latest}}</div>
+            <div class="line">Актуальны {{.Quotes.Fresh}} из {{.Quotes.Total}}</div>
+            <div class="muted">Котировка старше {{.QuoteMaxAgeDays}} дней не используется для текущей оценки.</div>
+            {{else}}
+            <div class="title">Котировок нет</div>
+            <div class="muted">Они появятся после первой загрузки.</div>
+            {{end}}
+        </div>
+    </div>
+
+    <h2>История запусков</h2>
+    <div class="table-wrap">
+        {{if .Runs}}
+        <table>
+            <thead>
+            <tr><th>Начало</th><th>Что</th><th>Запуск</th><th>Статус</th><th>Длительность</th><th>Результат</th></tr>
+            </thead>
+            <tbody>
+            {{range .Runs}}
+            <tr>
+                <td class="nowrap">{{.Started}}</td>
+                <td>{{.Kind}}<div class="details">{{.Scope}}</div></td>
+                <td class="nowrap">{{.Trigger}}</td>
+                <td><span class="pill {{.StatusClass}}">{{.Status}}</span></td>
+                <td class="nowrap">{{.Duration}}</td>
+                <td>
+                    {{.Summary}}
+                    {{if .Failed}}<div class="details">Не загружены: {{.Failed}}</div>{{end}}
+                    {{if .QuotesFailed}}<div class="details">Без котировки: {{.QuotesFailed}}</div>{{end}}
+                    {{if .HasError}}<div class="details"><span class="err">Запуск завершился ошибкой — подробности в журнале сервера.</span></div>{{end}}
+                </td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <div class="empty">Запусков пока не было.</div>
+        {{end}}
+    </div>
+</div>
+<script>
+    document.getElementById('themeToggle').addEventListener('click', function () {
+        var dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        else document.documentElement.removeAttribute('data-theme');
+        try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
+    });
+</script>
+</body>
+</html>

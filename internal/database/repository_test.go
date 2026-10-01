@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func openTestDB(t *testing.T) *database.Repository {
 	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes`); err != nil {
+	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return database.NewRepository(db)
@@ -250,4 +251,78 @@ func TestSaveQuarterDataSourceSemantics(t *testing.T) {
 	got = history(t, repo, "SWITCH")
 	assertMetric(t, "revenue", got.Revenue, f(120))
 	assertMetric(t, "net_profit", got.NetProfit, f(13))
+}
+
+func TestFetchRuns(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	base := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+
+	start := func(kind string, full bool, at time.Time) models.FetchRun {
+		t.Helper()
+		run := models.FetchRun{Kind: kind, Trigger: "cli", Scope: "stored", FullScope: full, Status: models.RunRunning, StartedAt: at}
+		id, err := repo.StartFetchRun(ctx, run)
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		run.ID = id
+		return run
+	}
+	finish := func(run models.FetchRun, status string) {
+		t.Helper()
+		end := run.StartedAt.Add(time.Minute)
+		run.Status, run.FinishedAt = status, &end
+		run.Updated, run.Rows, run.QuotesSaved = 2, 5, 7
+		run.Failed, run.QuotesFailed = []string{"LKOH", "MGNT"}, nil
+		if err := repo.FinishFetchRun(ctx, run); err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+	}
+
+	if _, ok, err := repo.LastCompletedRun(ctx, []string{"quotes"}); err != nil || ok {
+		t.Fatalf("empty table: ok=%v err=%v", ok, err)
+	}
+
+	finish(start("quotes", true, base), models.RunOK)
+	finish(start("financials", true, base.Add(time.Hour)), models.RunPartial)
+	finish(start("quotes", false, base.Add(2*time.Hour)), models.RunOK)    // subset: not full scope
+	finish(start("quotes", true, base.Add(3*time.Hour)), models.RunFailed) // not completed
+	stale := start("financials", true, base.Add(4*time.Hour))              // process died
+	fresh := start("quotes", true, time.Now().Add(-time.Minute))           // still running
+
+	got, ok, err := repo.LastCompletedRun(ctx, []string{"quotes"})
+	if err != nil || !ok || !got.Equal(base) {
+		t.Errorf("last quotes run = %v,%v,%v; want %v", got, ok, err, base)
+	}
+	got, _, _ = repo.LastCompletedRun(ctx, []string{"quotes", "financials"})
+	if !got.Equal(base.Add(time.Hour)) {
+		t.Errorf("last quotes|financials run = %v, want %v", got, base.Add(time.Hour))
+	}
+
+	if n, err := repo.AbandonStaleRuns(ctx, time.Hour, nil); err != nil || n != 1 {
+		t.Errorf("abandoned = %d, %v; want 1", n, err)
+	}
+	// A recent run of one of the given triggers goes too; others stay.
+	if n, err := repo.AbandonStaleRuns(ctx, time.Hour, []string{"schedule"}); err != nil || n != 0 {
+		t.Errorf("abandoned by trigger = %d, %v; want 0 (fresh run is cli)", n, err)
+	}
+
+	runs, err := repo.RecentFetchRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("recent: %v", err)
+	}
+	if len(runs) != 6 || runs[0].ID != fresh.ID || runs[0].Status != models.RunRunning || runs[0].FinishedAt != nil {
+		t.Fatalf("recent = %+v", runs)
+	}
+	if runs[1].ID != stale.ID || runs[1].Status != models.RunAbandoned {
+		t.Errorf("stale run = %+v", runs[1])
+	}
+	last := runs[5]
+	if last.Kind != "quotes" || !last.FullScope || last.Duration() != time.Minute || last.Rows != 5 || last.QuotesSaved != 7 ||
+		strings.Join(last.Failed, ",") != "LKOH,MGNT" || last.QuotesFailed != nil {
+		t.Errorf("oldest run = %+v", last)
+	}
+	if runs, _ := repo.RecentFetchRuns(ctx, 2); len(runs) != 2 {
+		t.Errorf("limit ignored: %d runs", len(runs))
+	}
 }

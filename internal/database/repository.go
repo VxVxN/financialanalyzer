@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/models"
+	"github.com/lib/pq"
 )
 
 // ErrCompanyNotFound is returned by DeleteCompany when no rows match. Callers
@@ -439,4 +440,101 @@ func (r *Repository) GetMarketQuote(ctx context.Context, company string) (q mode
 		return models.MarketQuote{}, false, fmt.Errorf("get market quote %s: %w", company, err)
 	}
 	return q, true, nil
+}
+
+// StartFetchRun logs a run as started and returns its id.
+func (r *Repository) StartFetchRun(ctx context.Context, run models.FetchRun) (int64, error) {
+	var id int64
+	err := r.db.QueryRowContext(ctx, `
+		INSERT INTO fetch_runs (kind, trigger, scope, full_scope, status, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		run.Kind, run.Trigger, run.Scope, run.FullScope, run.Status, run.StartedAt).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("start fetch run: %w", err)
+	}
+	return id, nil
+}
+
+// FinishFetchRun stores a run's outcome (status, counts, failures) by id.
+func (r *Repository) FinishFetchRun(ctx context.Context, run models.FetchRun) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE fetch_runs SET status = $2, finished_at = $3, updated = $4, up_to_date = $5,
+			rows_saved = $6, quotes_saved = $7, failed = $8, quotes_failed = $9, error = $10
+		WHERE id = $1`,
+		run.ID, run.Status, run.FinishedAt, run.Updated, run.UpToDate, run.Rows, run.QuotesSaved,
+		strings.Join(run.Failed, ","), strings.Join(run.QuotesFailed, ","), run.Error)
+	if err != nil {
+		return fmt.Errorf("finish fetch run %d: %w", run.ID, err)
+	}
+	return nil
+}
+
+// RecentFetchRuns returns the latest runs, newest first.
+func (r *Repository) RecentFetchRuns(ctx context.Context, limit int) ([]models.FetchRun, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, kind, trigger, scope, full_scope, status, started_at, finished_at,
+			updated, up_to_date, rows_saved, quotes_saved, failed, quotes_failed, error
+		FROM fetch_runs ORDER BY started_at DESC, id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query fetch runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.FetchRun
+	for rows.Next() {
+		var run models.FetchRun
+		var finished sql.NullTime
+		var failed, quotesFailed string
+		if err := rows.Scan(&run.ID, &run.Kind, &run.Trigger, &run.Scope, &run.FullScope, &run.Status,
+			&run.StartedAt, &finished, &run.Updated, &run.UpToDate, &run.Rows, &run.QuotesSaved,
+			&failed, &quotesFailed, &run.Error); err != nil {
+			return nil, fmt.Errorf("scan fetch run: %w", err)
+		}
+		if finished.Valid {
+			run.FinishedAt = &finished.Time
+		}
+		run.Failed = splitList(failed)
+		run.QuotesFailed = splitList(quotesFailed)
+		out = append(out, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate fetch runs: %w", err)
+	}
+	return out, nil
+}
+
+// LastCompletedRun returns when the latest full-scope run of one of the kinds
+// that finished (ok or partial) started; ok is false when there is none.
+func (r *Repository) LastCompletedRun(ctx context.Context, kinds []string) (started time.Time, ok bool, err error) {
+	var t sql.NullTime
+	err = r.db.QueryRowContext(ctx, `
+		SELECT MAX(started_at) FROM fetch_runs
+		WHERE full_scope AND status IN ($1, $2) AND kind = ANY($3)`,
+		models.RunOK, models.RunPartial, pq.Array(kinds)).Scan(&t)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("last completed fetch run: %w", err)
+	}
+	return t.Time, t.Valid, nil
+}
+
+// AbandonStaleRuns marks as abandoned the runs still "running" that started
+// more than olderThan ago or carry one of triggers (whatever their age): their
+// process died without recording an outcome.
+func (r *Repository) AbandonStaleRuns(ctx context.Context, olderThan time.Duration, triggers []string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE fetch_runs SET status = $1
+		WHERE status = $2 AND (started_at < $3 OR trigger = ANY($4))`,
+		models.RunAbandoned, models.RunRunning, time.Now().Add(-olderThan), pq.Array(triggers))
+	if err != nil {
+		return 0, fmt.Errorf("abandon stale fetch runs: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// splitList parses a stored comma-separated list ("" = none).
+func splitList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }

@@ -90,3 +90,23 @@ func TestValidateAuthPairing(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfigScheduler(t *testing.T) {
+	for _, k := range []string{"SCHEDULER_ENABLED", "SCHEDULE_QUOTES", "SCHEDULE_FINANCIALS"} {
+		t.Setenv(k, "")
+	}
+	cfg := LoadConfig()
+	if cfg.SchedulerEnabled || cfg.ScheduleQuotes != "07:00" || cfg.ScheduleFinancials != "sun 05:00" {
+		t.Errorf("defaults = %v %q %q", cfg.SchedulerEnabled, cfg.ScheduleQuotes, cfg.ScheduleFinancials)
+	}
+	for in, want := range map[string]bool{"1": true, "TRUE": true, " yes ": true, "on": true, "0": false, "no": false, "nope": false} {
+		t.Setenv("SCHEDULER_ENABLED", in)
+		if got := LoadConfig().SchedulerEnabled; got != want {
+			t.Errorf("SCHEDULER_ENABLED=%q -> %v, want %v", in, got, want)
+		}
+	}
+	t.Setenv("SCHEDULE_QUOTES", "off")
+	if got := LoadConfig().ScheduleQuotes; got != "off" {
+		t.Errorf("ScheduleQuotes = %q", got)
+	}
+}

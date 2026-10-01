@@ -91,7 +91,7 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 
 func TestRouterReadEndpointsStayOpen(t *testing.T) {
 	h, _ := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	for _, target := range []string{"/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER"} {
+	for _, target := range []string{"/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs"} {
 		rec := serve(h, routeCase{method: http.MethodGet, target: target}, false)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status = %d, want 200", target, rec.Code)
@@ -125,4 +125,23 @@ func (s *stubRepo) GetMarketQuote(context.Context, string) (models.MarketQuote, 
 }
 func (s *stubRepo) GetMarketQuotes(context.Context) (map[string]models.MarketQuote, error) {
 	return nil, nil
+}
+func (s *stubRepo) RecentFetchRuns(context.Context, int) ([]models.FetchRun, error) {
+	return nil, nil
+}
+
+func TestSchedulerJobs(t *testing.T) {
+	jobs, err := schedulerJobs(&config.Config{ScheduleQuotes: "07:30", ScheduleFinancials: "sat 04:00"})
+	if err != nil || len(jobs) != 2 || jobs[0].Name() != "quotes" || jobs[0].Spec.String() != "07:30" ||
+		jobs[1].Name() != "financials" || jobs[1].Spec.String() != "sat 04:00" {
+		t.Errorf("jobs = %+v, %v", jobs, err)
+	}
+	jobs, err = schedulerJobs(&config.Config{ScheduleQuotes: "OFF", ScheduleFinancials: "sun 05:00"})
+	if err != nil || len(jobs) != 1 || jobs[0].Name() != "financials" {
+		t.Errorf("quotes off: jobs = %+v, %v", jobs, err)
+	}
+	if _, err := schedulerJobs(&config.Config{ScheduleQuotes: "7am", ScheduleFinancials: "off"}); err == nil ||
+		!strings.Contains(err.Error(), "SCHEDULE_QUOTES") {
+		t.Errorf("bad spec: err = %v, want one naming SCHEDULE_QUOTES", err)
+	}
 }

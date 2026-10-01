@@ -26,12 +26,19 @@ type Repository interface {
 	DeleteCompanyNote(ctx context.Context, company string) error
 	GetMarketQuote(ctx context.Context, company string) (models.MarketQuote, bool, error)
 	GetMarketQuotes(ctx context.Context) (map[string]models.MarketQuote, error)
+	RecentFetchRuns(ctx context.Context, limit int) ([]models.FetchRun, error)
+}
+
+// ScheduleSource reports the data-refresh timetable (*scheduler.Scheduler).
+type ScheduleSource interface {
+	Status() []models.ScheduledJob
 }
 
 type Controller struct {
-	repo   Repository
-	logger *slog.Logger
-	now    func() time.Time // clock for quote freshness; tests pin it
+	repo     Repository
+	logger   *slog.Logger
+	now      func() time.Time // clock for quote freshness; tests pin it
+	schedule ScheduleSource   // nil when the scheduler is disabled
 }
 
 func NewController(repo Repository, logger *slog.Logger) *Controller {
@@ -43,6 +50,11 @@ func NewController(repo Repository, logger *slog.Logger) *Controller {
 		logger: logger,
 		now:    time.Now,
 	}
+}
+
+// SetSchedule makes the updates page show the scheduler's timetable.
+func (controller *Controller) SetSchedule(s ScheduleSource) {
+	controller.schedule = s
 }
 
 // serverError logs the underlying cause and returns a generic 500 to the client

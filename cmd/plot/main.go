@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/application"
 	"github.com/VxVxN/financialanalyzer/internal/config"
+	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/handlers"
+	"github.com/VxVxN/financialanalyzer/internal/scheduler"
 	"github.com/VxVxN/financialanalyzer/internal/version"
 
 	"github.com/go-chi/chi/v5"
@@ -60,6 +63,31 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	controller := handlers.NewController(app.Repo, logger)
 
+	// Cancel the scheduler on every return path (a failed ListenAndServe
+	// included), and wait for it to stop before the deferred app.Close drops
+	// the database pool under a running fetch. Deferred in this order, the
+	// cancel runs before the wait.
+	ctx, cancel := context.WithCancel(ctx)
+	schedDone := make(chan struct{})
+	defer func() { <-schedDone }()
+	defer cancel()
+
+	sched, err := newScheduler(cfg, app, logger)
+	if err != nil {
+		close(schedDone)
+		return err
+	}
+	if sched != nil {
+		controller.SetSchedule(sched)
+		go func() {
+			defer close(schedDone)
+			sched.Run(ctx)
+		}()
+	} else {
+		close(schedDone)
+		logger.Info("Scheduler disabled; data refreshes only via cmd/fetch (set SCHEDULER_ENABLED=1)")
+	}
+
 	r := newRouter(cfg, controller)
 
 	info := version.Get()
@@ -104,6 +132,45 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	return nil
 }
 
+// newScheduler builds the data-refresh scheduler from the config, or returns
+// nil when it is disabled. A malformed schedule is a startup error.
+func newScheduler(cfg *config.Config, app *application.Application, logger *slog.Logger) (*scheduler.Scheduler, error) {
+	if !cfg.SchedulerEnabled {
+		return nil, nil
+	}
+	jobs, err := schedulerJobs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	run := func(ctx context.Context, req fetcher.Request, trigger string) error {
+		_, err := fetcher.RunRecorded(ctx, app.Repo, req, trigger, logger)
+		return err
+	}
+	return scheduler.New(jobs, app.Repo, run, logger), nil
+}
+
+// schedulerJobs parses the configured slots; "off" leaves a job out.
+func schedulerJobs(cfg *config.Config) ([]scheduler.Job, error) {
+	var jobs []scheduler.Job
+	for _, j := range []struct {
+		env, value string
+		job        func(scheduler.Spec) scheduler.Job
+	}{
+		{"SCHEDULE_QUOTES", cfg.ScheduleQuotes, scheduler.QuotesJob},
+		{"SCHEDULE_FINANCIALS", cfg.ScheduleFinancials, scheduler.FinancialsJob},
+	} {
+		if strings.EqualFold(strings.TrimSpace(j.value), "off") {
+			continue
+		}
+		spec, err := scheduler.ParseSpec(j.value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", j.env, err)
+		}
+		jobs = append(jobs, j.job(spec))
+	}
+	return jobs, nil
+}
+
 // newRouter wires every HTTP route. It is separate from run so the route table,
 // including which endpoints sit behind auth, can be tested without a database.
 func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler {
@@ -127,6 +194,8 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 	r.Get("/screener", controller.ScreenerHandler)
 	r.Get("/api/screener", controller.ScreenerAPI)
 	r.Get("/api/company-note", controller.GetCompanyNote)
+	r.Get("/updates", controller.UpdatesHandler)
+	r.Get("/api/fetch-runs", controller.FetchRunsAPI)
 
 	// State-changing endpoints: Basic Auth when configured, and JSON-only
 	// bodies so they cannot be triggered by a cross-site form post.

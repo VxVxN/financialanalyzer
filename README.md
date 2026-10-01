@@ -25,6 +25,9 @@ tables.
   annual bases.
 - **Two ingestion paths** — CSV import and a free primary-source fetcher
   (ГИР БО + MOEX ISS for companies, CBR forms 102/101 for banks).
+- **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
+  quotes daily and financials weekly, catching up slots missed while it was
+  down; `/updates` shows the timetable, quote freshness and every run's outcome.
 - **Self-contained binaries** — migrations and templates are embedded, so every
   binary runs from any working directory with nothing on disk beside it.
 - **Light/dark themes** on every page.
@@ -37,6 +40,8 @@ cmd/
   import  one-shot CSV ingestion
   fetch   free primary-source fetcher (ГИР БО RSBU + MOEX market cap)
 internal/
+  fetcher      the fetch pipelines, shared by cmd/fetch and the scheduler
+  scheduler    timetable that runs the fetcher inside cmd/plot
   application  composition root (wires config → db → repo)
   config       env-var configuration + validation
   database     connection pool, repository, embedded migrations
@@ -51,7 +56,8 @@ templates/     server-rendered HTML (embedded)
 
 The data model is a single fact table `company_financials`, keyed by
 `(year, quarter, company)` with one column per metric, plus a `company_notes`
-table. Writes use a `COALESCE`-based upsert so a partial import never wipes
+table, `market_quotes` (latest close per company) and `fetch_runs` (a log of
+every data refresh). Writes use a `COALESCE`-based upsert so a partial import never wipes
 previously-stored metrics. An unreported metric is stored as `NULL`; a reported
 zero from a primary source (e.g. no debt) is stored as `0` (CSV zeros are
 treated as placeholders and skipped). All entrypoints run migrations on startup.
@@ -98,6 +104,14 @@ FETCH_ALL=1 go run ./cmd/fetch
 FETCH_QUOTES_ONLY=1 go run ./cmd/fetch
 ```
 
+Instead of running `cmd/fetch` by hand, the server can refresh the stored
+companies itself: start it with `SCHEDULER_ENABLED=1` and it refreshes quotes
+daily at 07:00 and financials (incrementally, then quotes) on Sundays at 05:00,
+Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off` disables a job).
+Runs are sequential; a slot missed while the server was down is caught up 30 s
+after startup. New companies are still added with `cmd/fetch`. Every run, from
+either binary, is logged in `fetch_runs` and shown on `/updates`.
+
 Dividends have no free exchange API, so they come from CSV: a row starting with
 `Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
 means "no payout").
@@ -127,6 +141,9 @@ All configuration is via environment variables (`internal/config`):
 | `CSV_PATH`    | _(empty)_     | CSV file path for `cmd/import`           |
 | `AUTH_USER`   | _(empty)_     | Basic Auth user for write endpoints      |
 | `AUTH_PASSWORD` | _(empty)_   | Basic Auth password (set with `AUTH_USER`) |
+| `SCHEDULER_ENABLED` | _(off)_ | `1` makes `cmd/plot` refresh data on a schedule |
+| `SCHEDULE_QUOTES` | `07:00`   | Daily quotes slot, Moscow time (`off` disables) |
+| `SCHEDULE_FINANCIALS` | `sun 05:00` | Weekly financials slot, Moscow time (`off` disables) |
 
 The server logs a warning if the default database password is in use, or if
 `AUTH_USER`/`AUTH_PASSWORD` are unset (write endpoints are then open). See
@@ -141,6 +158,8 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/company/{name}`                 | Single-company dashboard             |
 | GET    | `/screener`                       | Cross-company screener               |
 | GET    | `/api/screener`                   | Screener rows as JSON (null = no data) |
+| GET    | `/updates`                        | Refresh timetable, quote freshness, run history |
+| GET    | `/api/fetch-runs`                 | Scheduler jobs and the latest 50 runs as JSON |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |

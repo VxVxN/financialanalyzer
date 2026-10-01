@@ -33,6 +33,7 @@ type fakeRepo struct {
 	deleteErr    error
 
 	quotes map[string]models.MarketQuote
+	runs   []models.FetchRun
 
 	savedCompany string
 	savedNote    string
@@ -74,6 +75,13 @@ func (f *fakeRepo) GetMarketQuote(_ context.Context, company string) (models.Mar
 }
 func (f *fakeRepo) GetMarketQuotes(_ context.Context) (map[string]models.MarketQuote, error) {
 	return f.quotes, nil
+}
+
+func (f *fakeRepo) RecentFetchRuns(_ context.Context, limit int) ([]models.FetchRun, error) {
+	if len(f.runs) > limit {
+		return f.runs[:limit], nil
+	}
+	return f.runs, nil
 }
 
 // testNow pins the controller clock so quote freshness is deterministic.

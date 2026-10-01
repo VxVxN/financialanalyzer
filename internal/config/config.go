@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // defaultDBPassword is the value LoadConfig falls back to when DB_PASSWORD is
@@ -27,6 +28,14 @@ type Config struct {
 	// state-changing endpoints. Both empty disables auth (dev only).
 	AuthUser     string
 	AuthPassword string
+
+	// SchedulerEnabled makes cmd/plot run the fetch pipelines on a timetable
+	// (off by default so a dev server never calls the external sources).
+	// ScheduleQuotes/ScheduleFinancials are Moscow-time slots, "HH:MM" daily or
+	// "DAY HH:MM" weekly (see scheduler.ParseSpec); "off" disables that job.
+	SchedulerEnabled   bool
+	ScheduleQuotes     string
+	ScheduleFinancials string
 }
 
 func LoadConfig() *Config {
@@ -42,6 +51,10 @@ func LoadConfig() *Config {
 
 		AuthUser:     getEnv("AUTH_USER", ""),
 		AuthPassword: getEnv("AUTH_PASSWORD", ""),
+
+		SchedulerEnabled:   getEnvBool("SCHEDULER_ENABLED"),
+		ScheduleQuotes:     getEnv("SCHEDULE_QUOTES", "07:00"),
+		ScheduleFinancials: getEnv("SCHEDULE_FINANCIALS", "sun 05:00"),
 	}
 }
 
@@ -85,6 +98,16 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// getEnvBool reports whether a variable is set to a true value (1, true, yes,
+// on; case-insensitive).
+func getEnvBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func getEnvInt(key string, defaultValue int) int {

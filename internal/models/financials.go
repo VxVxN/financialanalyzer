@@ -76,3 +76,73 @@ type MarketQuote struct {
 	Capitalization float64   // billions of RUB
 	PriceDate      time.Time // trade date of Price
 }
+
+// Fetch run kinds (fetch_runs.kind).
+const (
+	RunKindQuotes     = "quotes"     // only the latest exchange closes
+	RunKindFinancials = "financials" // both pipelines, then quotes
+)
+
+// Fetch run triggers (fetch_runs.trigger).
+const (
+	TriggerCLI      = "cli"      // cmd/fetch
+	TriggerSchedule = "schedule" // cmd/plot scheduler, at its slot
+	TriggerCatchUp  = "catchup"  // cmd/plot scheduler, a missed slot on startup
+)
+
+// Moscow is the data-refresh schedule's time zone. Moscow has had no DST since
+// 2014, so a fixed offset avoids depending on the tzdata database.
+var Moscow = time.FixedZone("MSK", 3*60*60)
+
+// ScheduledJob is one scheduler job as shown on the updates page. The slot is
+// Moscow wall-clock time: daily, or weekly on Weekday.
+type ScheduledJob struct {
+	Name     string       `json:"name"`     // a RunKind*
+	Schedule string       `json:"schedule"` // e.g. "07:00" or "sun 05:00"
+	Weekly   bool         `json:"-"`
+	Weekday  time.Weekday `json:"-"`
+	Hour     int          `json:"-"`
+	Minute   int          `json:"-"`
+	Next     time.Time    `json:"next"`
+	Running  bool         `json:"running"`
+}
+
+// Fetch run statuses (fetch_runs.status).
+const (
+	RunRunning   = "running"
+	RunOK        = "ok"        // every company fetched or already up to date
+	RunPartial   = "partial"   // finished, but some companies or quotes failed
+	RunFailed    = "failed"    // the run as a whole could not proceed
+	RunCanceled  = "canceled"  // stopped by shutdown
+	RunAbandoned = "abandoned" // left "running" by a process that died
+)
+
+// FetchRun is one data refresh (a cmd/fetch run or a scheduled one in
+// cmd/plot), as logged in fetch_runs.
+type FetchRun struct {
+	ID           int64      `json:"id"`
+	Kind         string     `json:"kind"`    // fetcher.KindQuotes / KindFinancials
+	Trigger      string     `json:"trigger"` // cli | schedule | catchup
+	Scope        string     `json:"scope"`
+	FullScope    bool       `json:"full_scope"`
+	Status       string     `json:"status"`
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at"`
+	Updated      int        `json:"updated"`
+	UpToDate     int        `json:"up_to_date"`
+	Rows         int        `json:"rows"`
+	QuotesSaved  int        `json:"quotes_saved"`
+	Failed       []string   `json:"failed"`
+	QuotesFailed []string   `json:"quotes_failed"`
+	// Error is the raw error chain of a failed run. It is kept for operators
+	// (psql, logs) and never served over HTTP: it may hold database details.
+	Error string `json:"-"`
+}
+
+// Duration is how long a finished run took (0 while running).
+func (r FetchRun) Duration() time.Duration {
+	if r.FinishedAt == nil {
+		return 0
+	}
+	return r.FinishedAt.Sub(r.StartedAt)
+}
