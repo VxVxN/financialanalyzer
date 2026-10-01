@@ -84,7 +84,7 @@ func TestDashboardManualBlock(t *testing.T) {
 	}}
 	body := do(t, newTestServer(repo), http.MethodGet, "/company/X5", "").Body.String()
 	for _, want := range []string{
-		"Ручные данные (годовой отчёт МСФО)",
+		"Ручные данные</h2>",
 		"<td>2025</td><td>4000.5</td>", // entered value
 		"<td>0</td>",                   // a reported zero dividend, not "—"
 		`onclick="editManual(2025)"`, `onclick="deleteManual(2025)"`,
@@ -113,10 +113,11 @@ func TestDashboardEscapesReflectedInput(t *testing.T) {
 	if strings.Contains(body, "onerror=alert(1)") {
 		t.Error("theme parameter is reflected unescaped")
 	}
-	if !strings.Contains(body, `href="/?theme=light"`) {
-		t.Error("an unknown theme should fall back to light")
-	}
-	if got := urlEscapeCSV(`A"B&C,D`); got != "A%22B%26C%2CD" {
-		t.Errorf("urlEscapeCSV = %q", got)
+	// The company name reaches the page only escaped (HTML) or as a JSON
+	// literal (the inline script).
+	xss := &fakeRepo{companyHist: []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: `<b>"X`, Revenue: models.Float(1)}}}
+	body = do(t, newTestServer(xss), http.MethodGet, "/company/%3Cb%3E%22X", "").Body.String()
+	if strings.Contains(body, `<b>"X`) || !strings.Contains(body, `&lt;b&gt;&#34;X`) {
+		t.Error("company name reached the card unescaped")
 	}
 }

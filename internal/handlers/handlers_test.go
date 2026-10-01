@@ -122,14 +122,16 @@ func newTestServer(repo Repository) *chi.Mux {
 	r.Get("/healthz", c.Health)
 	r.Get("/readyz", c.Ready)
 	r.Get("/version", c.Version)
-	r.Get("/", c.IndexHandler)
+	r.Handle("/static/*", StaticHandler())
+	r.Get("/", c.ScreenerHandler)
+	r.Get("/compare", c.CompareHandler)
 	r.Get("/api/companies", c.GetCompanies)
 	r.Delete("/api/companies", c.DeleteCompany)
 	r.Get("/api/categories", c.GetCategories)
 	r.Get("/api/companies-with-categories", c.GetCompaniesWithCategories)
 	r.Get("/chart/{metric}", c.ChartHandler)
 	r.Get("/company/{name}", c.DashboardHandler)
-	r.Get("/screener", c.ScreenerHandler)
+	r.Get("/screener", c.ScreenerRedirect)
 	r.Get("/api/screener", c.ScreenerAPI)
 	r.Get("/api/company-note", c.GetCompanyNote)
 	r.Post("/api/company-note", c.SaveCompanyNote)
@@ -327,14 +329,49 @@ func TestChartHasCSVExport(t *testing.T) {
 	}
 }
 
-func TestIndex(t *testing.T) {
+func TestPagesShareLayout(t *testing.T) {
 	r := newTestServer(&fakeRepo{})
-	rec := do(t, r, http.MethodGet, "/", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/compare": `href="/compare" aria-current="page"`} {
+		rec := do(t, r, http.MethodGet, path, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", path, rec.Code)
+		}
+		body := rec.Body.String()
+		for _, want := range []string{active, `/static/app.css?v=` + assetVersions["app.css"], `/static/app.js?v=`, `id="palette"`, `id="compareTray"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s lacks %q", path, want)
+			}
+		}
 	}
-	if rec.Body.Len() == 0 {
-		t.Errorf("empty index body")
+
+	// The former screener address now lives at the home page.
+	rec := do(t, r, http.MethodGet, "/screener", "")
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/" {
+		t.Errorf("/screener: status %d, location %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestStaticAssets(t *testing.T) {
+	r := newTestServer(&fakeRepo{})
+	rec := do(t, r, http.MethodGet, "/static/app.css?v="+assetVersions["app.css"], "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "text/css") {
+		t.Fatalf("app.css: status %d, type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Errorf("a versioned asset should be immutable, got %q", rec.Header().Get("Cache-Control"))
+	}
+	rec = do(t, r, http.MethodGet, "/static/app.css?v=old", "")
+	if strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Error("a stale version must not be cached as immutable")
+	}
+	rec = do(t, r, http.MethodGet, "/static/fonts/golos-text-cyrillic.woff2", "")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "font/woff2" {
+		t.Errorf("font: status %d, type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	for _, path := range []string{"/static/", "/static/fonts/", "/static/missing.css", "/static/../embed.go"} {
+		if rec := do(t, r, http.MethodGet, path, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", path, rec.Code)
+		}
 	}
 }
 
@@ -353,7 +390,7 @@ func TestChartShowsSourceAndFlags(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"<th>Источник</th>",
+		`<th class="left">Источник</th>`,
 		`class="source warn"`, // X5: RSBU is not comparable
 		"РСБУ (эмитент)",
 		`<td class="source" `, // SBER: smart-lab is comparable, no warning
@@ -445,7 +482,7 @@ func TestScreener(t *testing.T) {
 		t.Errorf("unknown metric should be null: %v", sber["debt_ebitda"])
 	}
 
-	page := do(t, r, http.MethodGet, "/screener", "")
+	page := do(t, r, http.MethodGet, "/", "")
 	if page.Code != http.StatusOK {
 		t.Fatalf("page status = %d", page.Code)
 	}

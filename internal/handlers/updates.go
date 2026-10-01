@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"html/template"
 	"net/http"
 	"strings"
 	"time"
 
-	financialanalyzer "github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -17,9 +15,7 @@ import (
 // updatesRunLimit is how many recent runs the updates page and API list.
 const updatesRunLimit = 50
 
-var updatesTemplate = template.Must(
-	template.ParseFS(financialanalyzer.TemplatesFS, "templates/updates.html"),
-)
+var updatesTemplate = parsePage("updates.html")
 
 var weekdaysRu = [...]string{"воскресеньям", "понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам"}
 
@@ -166,12 +162,14 @@ func (controller *Controller) UpdatesHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	data := struct {
+		Meta             pageMeta
 		SchedulerEnabled bool
 		Jobs             []jobView
 		Quotes           quotesView
 		Runs             []runView
 		QuoteMaxAgeDays  int
 	}{
+		Meta:             pageMeta{Title: "Обновление данных", Active: "updates"},
 		SchedulerEnabled: controller.schedule != nil,
 		Quotes:           quotesSummary(quotes, controller.now()),
 		QuoteMaxAgeDays:  int(analytics.QuoteMaxAge / (24 * time.Hour)),

@@ -29,21 +29,17 @@ var manualFields = []manualField{
 }
 
 const manualCSS = `
-.manual-card { background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border); margin-top: 24px; }
-.manual-card p.hint { color: var(--text-secondary); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
-.manual-card .table-wrap { overflow-x: auto; margin-bottom: 16px; }
-.manual-card table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
-.manual-card th, .manual-card td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
-.manual-card th:first-child, .manual-card td:first-child { text-align: left; }
-.manual-card th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
-.manual-card td.actions button { margin-left: 6px; }
-.manual-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; }
-.manual-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
-.manual-form input { padding: 7px 9px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; }
-.manual-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-.manual-card button { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.manual-card button.primary { background: var(--accent); color: white; border-color: var(--accent); }
-.manual-card .status { font-size: 12px; color: var(--text-muted); }
+.manual-card { padding: 20px; }
+.manual-card p.hint { color: var(--text-2); font-size: 13px; margin: 0 0 16px; line-height: 1.6; max-width: 820px; }
+.manual-card .table-wrap { margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+.manual-card td.actions { white-space: nowrap; }
+.manual-card td.actions button { margin-left: 4px; }
+.manual-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 16px; }
+.manual-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-3); font-weight: 500; }
+.manual-form input { min-height: 40px; padding: 8px 10px; background: var(--surface); color: var(--text-1); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
+.manual-form input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+.manual-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.manual-card .status { font-size: 13px; color: var(--text-3); }
 `
 
 // fmtManual renders a stored figure for the entries table ("—" when not entered).
@@ -57,16 +53,14 @@ func fmtManual(v *float64) string {
 // renderManual renders the manual-entry block: the stored entries and a form
 // that saves (PUT) or deletes them through /api/manual-financials.
 func renderManual(w http.ResponseWriter, company string, entries []models.ManualFinancials, defaultYear int) {
-	fmt.Fprintf(w, `<style>%s</style>
-<div class="manual-card">
-  <div class="section-title" style="margin-top:0">Ручные данные (годовой отчёт МСФО)</div>
+	fmt.Fprint(w, `<div class="card manual-card">
   <p class="hint">Показатели за год в млрд ₽ — обычно из годового отчёта МСФО группы. Если указан хоть один показатель
   отчётности, он <b>заменяет загруженную отчётность за этот год целиком</b> (РСБУ, CSV): незаполненные поля станут пустыми,
   рыночная капитализация сохранится, P/E и ROE пересчитаются. Если указаны только дивиденды — они просто дополняют загруженные данные.
-  Автоматическая загрузка ручные данные не затирает; удаление записи возвращает загруженные цифры.</p>`, manualCSS)
+  Автоматическая загрузка ручные данные не затирает; удаление записи возвращает загруженные цифры.</p>`)
 
 	if len(entries) > 0 {
-		fmt.Fprintf(w, `<div class="table-wrap"><table><thead><tr><th>Год</th>`)
+		fmt.Fprintf(w, `<div class="table-wrap"><table class="table"><thead><tr><th>Год</th>`)
 		for _, f := range manualFields {
 			fmt.Fprintf(w, `<th>%s</th>`, html.EscapeString(f.label))
 		}
@@ -76,7 +70,7 @@ func renderManual(w http.ResponseWriter, company string, entries []models.Manual
 			for _, f := range manualFields {
 				fmt.Fprintf(w, `<td>%s</td>`, fmtManual(f.get(m)))
 			}
-			fmt.Fprintf(w, `<td class="actions"><button type="button" onclick="editManual(%d)">Изменить</button><button type="button" onclick="deleteManual(%d)">Удалить</button></td></tr>`,
+			fmt.Fprintf(w, `<td class="actions"><button type="button" class="btn btn-sm" onclick="editManual(%d)">Изменить</button><button type="button" class="btn btn-sm btn-danger" onclick="deleteManual(%d)">Удалить</button></td></tr>`,
 				m.Year, m.Year)
 		}
 		fmt.Fprintf(w, `</tbody></table></div>`)
@@ -94,8 +88,8 @@ func renderManual(w http.ResponseWriter, company string, entries []models.Manual
 	}
 	fmt.Fprintf(w, `</div>
   <div class="manual-actions">
-    <button type="button" class="primary" onclick="saveManual()">Сохранить год</button>
-    <button type="button" onclick="clearManual()">Очистить форму</button>
+    <button type="button" class="btn btn-primary" onclick="saveManual()">Сохранить год</button>
+    <button type="button" class="btn btn-ghost" onclick="clearManual()">Очистить форму</button>
     <span class="status" id="manual-status"></span>
   </div>
 </div>

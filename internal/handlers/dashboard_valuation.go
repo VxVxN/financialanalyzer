@@ -5,6 +5,7 @@ import (
 	"html"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
@@ -89,12 +90,13 @@ func renderRelativeValuation(w http.ResponseWriter, row analytics.ScreenerRow, p
 	if row.Current {
 		basis = "по цене закрытия " + row.PriceDate
 	}
-	fmt.Fprintf(w, `<div class="section-title">Оценка относительно истории и сектора · %s</div>
-<div class="score-breakdown rel-val"><div class="table-scroll"><table>
-<thead><tr><th>Показатель</th><th class="num">Сейчас</th><th class="num">Медиана истории</th><th class="num">Диапазон</th><th class="num">Перцентиль</th><th>Относительно истории</th>`,
-		html.EscapeString(basis))
+	fmt.Fprintf(w, `<div class="sub-title">Оценка относительно истории и сектора · %s</div>`, html.EscapeString(basis))
+	renderValuationRulers(w, row, peersKnown)
+	fmt.Fprint(w, `<details class="more"><summary>Подробная таблица</summary>
+<div class="card rel-val"><div class="table-wrap"><table class="table">
+<thead><tr><th>Показатель</th><th class="num">Сейчас</th><th class="num">Медиана истории</th><th class="num">Диапазон</th><th class="num">Перцентиль</th><th class="left">Относительно истории</th>`)
 	if peersKnown {
-		fmt.Fprintf(w, `<th class="num">Медиана сектора (аналогов)</th><th>Относительно сектора</th>`)
+		fmt.Fprintf(w, `<th class="num">Медиана сектора (аналогов)</th><th class="left">Относительно сектора</th>`)
 	}
 	fmt.Fprintf(w, `</tr></thead><tbody>`)
 
@@ -121,7 +123,7 @@ func renderRelativeValuation(w http.ResponseWriter, row analytics.ScreenerRow, p
 				hist = verdict(historyVerdict(m, b.Percentile))
 			}
 		}
-		fmt.Fprintf(w, `<tr><td>%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td>%s</td>`,
+		fmt.Fprintf(w, `<tr><td>%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="left">%s</td>`,
 			html.EscapeString(bandMetricNames[m]), cur, html.EscapeString(med),
 			html.EscapeString(rng), html.EscapeString(pct), hist)
 		if peersKnown {
@@ -141,7 +143,7 @@ func renderRelativeValuation(w http.ResponseWriter, row analytics.ScreenerRow, p
 					}
 				}
 			}
-			fmt.Fprintf(w, `<td class="num">%s</td><td>%s</td>`, html.EscapeString(smed), sv)
+			fmt.Fprintf(w, `<td class="num">%s</td><td class="left">%s</td>`, html.EscapeString(smed), sv)
 		}
 		fmt.Fprintf(w, `</tr>`)
 	}
@@ -151,6 +153,79 @@ func renderRelativeValuation(w http.ResponseWriter, row analytics.ScreenerRow, p
 		fmt.Fprintf(w, ` Медиана сектора — по остальным компаниям категории «%s» с оценкой по рыночной цене или по данным не старше %d месяцев, для P/E и P/B — того же типа отчётности; в скобках — число таких компаний, нужно не меньше %d. РСБУ материнской компании и данные ЦБ между компаниями сопоставимы плохо.`,
 			html.EscapeString(orDash(row.Category)), analytics.MaxFundamentalAge, analytics.MinSectorPeers)
 	}
-	fmt.Fprintf(w, `</div>
-</div>`)
+	fmt.Fprint(w, `</div></div></details>`)
+}
+
+// renderValuationRulers draws each band metric on one scale: the company's
+// historical range (bar), its historical median (short tick), the sector
+// median (tall tick) and the current value (ring, blue when cheap against its
+// history, orange when dear). The table below carries the exact figures.
+func renderValuationRulers(w http.ResponseWriter, row analytics.ScreenerRow, peersKnown bool) {
+	values := map[string]*float64{"pe": row.PE, "pb": row.PB, "div_yield": row.DivYield}
+	sector := map[string]*float64{"pe": row.PESector, "pb": row.PBSector, "div_yield": row.DivYieldSector}
+	drawn := 0
+	fmt.Fprint(w, `<div class="rulers">`)
+	for _, m := range analytics.BandMetrics {
+		v := values[m]
+		if v == nil {
+			continue
+		}
+		hint := "ниже — дешевле"
+		if analytics.HigherIsCheaper(m) {
+			hint = "выше — дешевле"
+		}
+		b, hasBand := row.Bands[m]
+		var sec *float64
+		if peersKnown {
+			sec = sector[m]
+		}
+		lo, hi := *v, *v
+		if hasBand {
+			lo, hi = math.Min(lo, b.Min), math.Max(hi, b.Max)
+		}
+		if sec != nil {
+			lo, hi = math.Min(lo, *sec), math.Max(hi, *sec)
+		}
+		if hi == lo {
+			lo, hi = lo-1, hi+1
+		}
+		pos := func(x float64) float64 { return (x - lo) / (hi - lo) * 100 }
+
+		var marks strings.Builder
+		marks.WriteString(`<div class="track"></div>`)
+		cls, pct, label := "", "мало истории", bandMetricNames[m]+" "+fmtBandValue(m, *v)
+		if hasBand {
+			fmt.Fprintf(&marks, `<div class="range" style="left:%.1f%%;width:%.1f%%"></div><div class="median" style="left:%.1f%%"></div>`,
+				pos(b.Min), pos(b.Max)-pos(b.Min), pos(b.Median))
+			text, c := historyVerdict(m, b.Percentile)
+			cls, pct = c, fmt.Sprintf("%.0f-й перцентиль", b.Percentile)
+			label += fmt.Sprintf(", %s, история %s – %s, медиана %s", text,
+				fmtBandValue(m, b.Min), fmtBandValue(m, b.Max), fmtBandValue(m, b.Median))
+		}
+		if sec != nil {
+			fmt.Fprintf(&marks, `<div class="sector" style="left:%.1f%%"></div>`, pos(*sec))
+			label += ", медиана сектора " + fmtBandValue(m, *sec)
+		}
+		fmt.Fprintf(&marks, `<div class="now %s" style="left:%.1f%%"></div><span class="lo">%s</span><span class="hi">%s</span>`,
+			cls, pos(*v), html.EscapeString(fmtBandValue(m, lo)), html.EscapeString(fmtBandValue(m, hi)))
+
+		fmt.Fprintf(w, `<div class="ruler-row">
+  <div><div class="name">%s</div><div class="hint">%s</div></div>
+  <div class="scale" role="img" aria-label="%s">%s</div>
+  <div class="val"><div class="v %s">%s</div><div class="small muted">%s</div></div>
+</div>`, html.EscapeString(bandMetricNames[m]), hint, html.EscapeString(label), marks.String(),
+			cls, html.EscapeString(fmtBandValue(m, *v)), html.EscapeString(pct))
+		drawn++
+	}
+	fmt.Fprint(w, `</div>`)
+	if drawn == 0 {
+		fmt.Fprint(w, `<p class="muted">Нет оценки: не хватает капитализации или прибыли.</p>`)
+		return
+	}
+	fmt.Fprint(w, `<div class="ruler-legend"><span><i style="width:24px;height:8px;border-radius:4px;background:var(--border-strong)"></i>диапазон за 10 лет</span>`+
+		`<span><i style="width:2px;height:12px;background:var(--text-3)"></i>медиана истории</span>`)
+	if peersKnown {
+		fmt.Fprint(w, `<span><i style="width:2px;height:16px;background:var(--text-1)"></i>медиана по сектору</span>`)
+	}
+	fmt.Fprint(w, `<span><i style="width:12px;height:12px;border-radius:50%;border:3px solid var(--cheap)"></i>сейчас</span></div>`)
 }

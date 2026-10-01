@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+{{template "head" .Meta}}
+<style>
+    .compare-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .picker { position: sticky; top: 76px; display: flex; flex-direction: column; max-height: calc(100vh - 92px); }
+    .picker-head { padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+    .picker-head h2 { font-size: 16px; font-weight: 600; }
+    .picker-search { min-height: 36px; }
+    .cat-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cat-tabs .chip-btn { min-height: 28px; padding: 0 10px; font-size: 12px; }
+    .company-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+    .company-item { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); padding-right: 4px; }
+    .company-item:hover { background: var(--hover); }
+    .company-item.is-selected { background: var(--accent-soft); }
+    .company-item label { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px; cursor: pointer; }
+    .company-item label .t { font-weight: 600; }
+    .company-item label .c { color: var(--text-3); font-size: 12px; }
+    .company-item input { width: 16px; height: 16px; accent-color: var(--accent); }
+    .company-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+    .company-item:hover .company-actions, .company-item:focus-within .company-actions { opacity: 1; }
+    .act {
+        width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm);
+        background: transparent; color: var(--text-3);
+    }
+    .act:hover { background: var(--surface); color: var(--text-1); text-decoration: none; }
+    .act.danger:hover { color: var(--down); }
+    .act.has-note { color: var(--accent); }
+    .act svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .picker-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .picker-foot .count { flex: 1; color: var(--text-3); font-size: 13px; }
+
+    .stage { min-height: 480px; }
+    .stage-empty { padding: 72px 24px; text-align: center; color: var(--text-3); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .stage-empty h2 { font-family: var(--font-serif); font-size: 24px; color: var(--text-1); }
+    .stage-head { padding: 16px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+    .stage-head .selected { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+    .metric-groups { padding: 12px 20px 4px; display: flex; flex-direction: column; gap: 10px; }
+    .metric-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .metric-group-label { width: 120px; flex-shrink: 0; font-size: 12px; color: var(--text-3); font-weight: 500; }
+    .metric-group .chip-btn { min-height: 30px; font-size: 12px; }
+    .period-help { color: var(--text-3); font-size: 12px; }
+    .chart-frame { width: 100%; border: 0; display: none; min-height: 640px; background: transparent; }
+    .chart-frame.active { display: block; }
+    #chartContainer { padding: 8px 8px 12px; }
+
+    dialog.modal {
+        width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: var(--radius-lg);
+        background: var(--surface); color: var(--text-1); padding: 20px; box-shadow: var(--shadow-lg);
+    }
+    dialog.modal::backdrop { background: rgba(10, 14, 20, .45); }
+    dialog.modal h3 { font-size: 18px; margin-bottom: 12px; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+    .modal-actions .left { margin-right: auto; }
+    .modal-status { color: var(--down); font-size: 13px; margin-top: 8px; min-height: 1em; }
+
+    @media (max-width: 900px) {
+        .compare-layout { grid-template-columns: 1fr; }
+        .picker { position: static; max-height: 420px; }
+        .company-actions { opacity: 1; }
+        .metric-group-label { width: 100%; }
+    }
+</style>
+</head>
+<body>
+{{template "topbar" .Meta}}
+<main id="main" class="page">
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Сравнение компаний</h1>
+            <p class="page-sub">Отметьте компании слева или добавьте их из скринера — графики покажут выбранные показатели бок о бок.</p>
+        </div>
+    </div>
+
+    <div class="compare-layout">
+        <section class="card picker" aria-labelledby="pickerTitle">
+            <div class="picker-head">
+                <h2 id="pickerTitle">Компании</h2>
+                <input class="input picker-search" id="pickerSearch" type="search" placeholder="Фильтр по тикеру" aria-label="Фильтр по тикеру">
+                <div class="cat-tabs" id="categoryTabs" role="group" aria-label="Сектор"></div>
+            </div>
+            <ul class="company-list" id="companiesList" aria-live="polite"><li class="empty">Загрузка компаний…</li></ul>
+            <div class="picker-foot">
+                <span class="count" id="selectedCount">Выбрано: 0</span>
+                <button type="button" class="btn btn-sm btn-ghost" id="selectAllBtn">Выбрать показанные</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="deselectAllBtn">Сбросить</button>
+            </div>
+        </section>
+
+        <section class="card stage" aria-label="Графики">
+            <div class="stage-empty" id="stageEmpty">
+                <h2>Выберите компании</h2>
+                <p>Отметьте хотя бы одну компанию в списке слева.</p>
+            </div>
+            <div id="stageContent" hidden>
+                <div class="stage-head">
+                    <div class="selected" id="selectedPills"></div>
+                    <div class="segmented" role="group" aria-label="Период" id="periodSwitcher">
+                        <button type="button" data-period="quarter" aria-pressed="false">Квартал</button>
+                        <button type="button" data-period="ttm" aria-pressed="true">LTM</button>
+                        <button type="button" data-period="annual" aria-pressed="false">Год</button>
+                    </div>
+                </div>
+                <div class="metric-groups" id="metricGroups"></div>
+                <p class="period-help" style="padding: 0 20px">LTM — сумма за последние 4 квартала, сглаживает сезонность.</p>
+                <div id="chartContainer"></div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<dialog class="modal" id="noteDialog" aria-labelledby="noteTitle">
+    <h3 id="noteTitle">Заметка</h3>
+    <label class="visually-hidden" for="noteText">Текст заметки</label>
+    <textarea class="textarea" id="noteText" placeholder="Инвестиционная идея, напоминания, результаты анализа…"></textarea>
+    <div class="modal-status" id="noteStatus" role="status"></div>
+    <div class="modal-actions">
+        <button type="button" class="btn btn-danger left" id="deleteNoteBtn">Удалить</button>
+        <button type="button" class="btn" id="cancelNoteBtn">Отмена</button>
+        <button type="button" class="btn btn-primary" id="saveNoteBtn">Сохранить</button>
+    </div>
+</dialog>
+
+<dialog class="modal" id="deleteDialog" aria-labelledby="deleteTitle">
+    <h3 id="deleteTitle">Удалить компанию?</h3>
+    <p id="deleteText"></p>
+    <div class="modal-status" id="deleteStatus" role="status"></div>
+    <div class="modal-actions">
+        <button type="button" class="btn" id="cancelDeleteBtn">Отмена</button>
+        <button type="button" class="btn btn-primary" id="confirmDeleteBtn" style="background:var(--down);border-color:var(--down);color:#fff">Удалить</button>
+    </div>
+</dialog>
+
+{{template "footer" .Meta}}
+<script>
+(function () {
+    'use strict';
+    const FA = window.FA, esc = FA.esc;
+    const $ = (id) => document.getElementById(id);
+    const metricGroups = {{.MetricGroups}};
+    const ICONS = {
+        card: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>',
+        note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>',
+        trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    };
+
+    const state = {
+        companies: [],       // [{company, category}]
+        categories: [],
+        category: 'all',
+        selected: [],        // shared with the comparison tray (FA.compare)
+        metric: null,
+        period: 'ttm',
+        charts: {},
+        notes: {},
+    };
+
+    // The selection lives in FA.compare, so the screener's tray and this
+    // page agree. ?companies=A,B (the tray's link) replaces it.
+    const param = new URLSearchParams(location.search).get('companies');
+    let truncated = false;
+    if (param !== null) {
+        truncated = !FA.compare.set(param.split(',').map((s) => s.trim()).filter(Boolean));
+    }
+    state.selected = FA.compare.list();
+    const limitText = () => 'Выбрано: ' + state.selected.length + ' — больше ' + FA.compare.max + ' компаний на одном графике не сравнить';
+    // The address always names the selection, so the page can be shared.
+    history.replaceState(null, '', state.selected.length ? FA.compare.url(state.selected) : '/compare');
+
+    // ------------------------------------------------------------ data
+    async function getJSON(url) {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+    }
+    async function loadData() {
+        try {
+            const [companies, cats] = await Promise.all([getJSON('/api/companies-with-categories'), getJSON('/api/categories')]);
+            const seen = new Set();
+            state.companies = (companies || []).filter((c) => c && c.company && !seen.has(c.company) && seen.add(c.company));
+            state.categories = (cats || []).filter(Boolean);
+            // Drop selections of companies that no longer exist.
+            const known = new Set(state.companies.map((c) => c.company));
+            const kept = state.selected.filter((c) => known.has(c));
+            if (kept.length !== state.selected.length) FA.compare.set(kept);
+            renderTabs();
+            renderList();
+            if (truncated) $('selectedCount').textContent = limitText();
+            loadNotes();
+        } catch (err) {
+            $('companiesList').innerHTML = '<li class="empty">Не удалось загрузить компании. Обновите страницу.</li>';
+        }
+    }
+
+    // ------------------------------------------------------------ picker
+    function renderTabs() {
+        const tabs = [['all', 'Все']].concat(state.categories.map((c) => [c, c]));
+        $('categoryTabs').innerHTML = tabs.map(([v, l]) =>
+            '<button type="button" class="chip-btn" data-category="' + esc(v) + '" aria-pressed="' + (state.category === v) + '">' + esc(l) + '</button>').join('');
+    }
+    $('categoryTabs').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-category]');
+        if (!b) return;
+        state.category = b.dataset.category;
+        renderTabs();
+        renderList();
+    });
+    $('pickerSearch').addEventListener('input', renderList);
+
+    function shownCompanies() {
+        const q = $('pickerSearch').value.trim().toLowerCase();
+        return state.companies.filter((c) =>
+            (state.category === 'all' || c.category === state.category) && (!q || c.company.toLowerCase().includes(q)));
+    }
+    function renderList() {
+        const list = shownCompanies();
+        if (!state.companies.length) {
+            $('companiesList').innerHTML = '<li class="empty">Компаний пока нет.</li>';
+        } else if (!list.length) {
+            $('companiesList').innerHTML = '<li class="empty">Ничего не найдено.</li>';
+        } else {
+            $('companiesList').innerHTML = list.map((c, i) => {
+                const on = state.selected.includes(c.company);
+                const id = 'cmp-' + i;
+                return '<li class="company-item' + (on ? ' is-selected' : '') + '" data-company="' + esc(c.company) + '">' +
+                    '<label for="' + id + '"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '>' +
+                    '<span class="t">' + esc(c.company) + '</span><span class="c">' + esc(c.category || '') + '</span></label>' +
+                    '<span class="company-actions">' +
+                    '<a class="act" href="/company/' + encodeURIComponent(c.company) + '" title="Карточка компании" aria-label="Карточка ' + esc(c.company) + '">' + ICONS.card + '</a>' +
+                    '<button type="button" class="act' + (state.notes[c.company] ? ' has-note' : '') + '" data-action="note" title="Заметка" aria-label="Заметка о ' + esc(c.company) + '">' + ICONS.note + '</button>' +
+                    '<button type="button" class="act danger" data-action="delete" title="Удалить компанию" aria-label="Удалить ' + esc(c.company) + '">' + ICONS.trash + '</button>' +
+                    '</span></li>';
+            }).join('');
+        }
+        $('selectedCount').textContent = 'Выбрано: ' + state.selected.length;
+    }
+    // syncList reflects the selection and notes on the rendered rows in place,
+    // so focus and hover survive a change.
+    function syncList() {
+        $('companiesList').querySelectorAll('.company-item').forEach((li) => {
+            const name = li.dataset.company;
+            const on = state.selected.includes(name);
+            li.classList.toggle('is-selected', on);
+            const box = li.querySelector('input[type="checkbox"]');
+            if (box) box.checked = on;
+            const note = li.querySelector('[data-action="note"]');
+            if (note) note.classList.toggle('has-note', !!state.notes[name]);
+        });
+        $('selectedCount').textContent = 'Выбрано: ' + state.selected.length;
+    }
+    $('companiesList').addEventListener('change', (e) => {
+        const item = e.target.closest('.company-item');
+        if (!item) return;
+        const name = item.dataset.company;
+        if (e.target.checked) {
+            if (!FA.compare.add(name)) {
+                e.target.checked = false;
+                $('selectedCount').textContent = limitText();
+            }
+        } else {
+            FA.compare.remove(name);
+        }
+    });
+    $('companiesList').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-action]');
+        if (!b) return;
+        const name = b.closest('.company-item').dataset.company;
+        if (b.dataset.action === 'note') openNote(name);
+        if (b.dataset.action === 'delete') openDelete(name);
+    });
+    $('selectAllBtn').addEventListener('click', () => {
+        const names = state.selected.slice();
+        shownCompanies().forEach((c) => { if (!names.includes(c.company)) names.push(c.company); });
+        if (!FA.compare.set(names)) $('selectedCount').textContent = limitText();
+    });
+    $('deselectAllBtn').addEventListener('click', () => FA.compare.clear());
+
+    FA.compare.onChange((list) => {
+        const before = state.selected.join(',');
+        state.selected = list;
+        syncList();
+        if (before !== list.join(',')) refreshCharts();
+        history.replaceState(null, '', list.length ? FA.compare.url(list) : '/compare');
+    });
+
+    // ------------------------------------------------------------ charts
+    function chartUrl(metric) {
+        const p = new URLSearchParams();
+        p.set('theme', FA.theme());
+        p.set('period', state.period);
+        p.set('companies', state.selected.join(','));
+        return '/chart/' + metric + '?' + p.toString();
+    }
+    function fitFrame(iframe) {
+        try {
+            const doc = iframe.contentDocument;
+            if (doc && doc.documentElement) iframe.style.height = doc.documentElement.scrollHeight + 'px';
+        } catch (e) { /* same origin; nothing to do otherwise */ }
+    }
+    function renderMetricGroups() {
+        $('metricGroups').innerHTML = metricGroups.map((g) =>
+            '<div class="metric-group"><span class="metric-group-label">' + esc(g.name) + '</span>' +
+            g.items.map((it) => '<button type="button" class="chip-btn" data-metric="' + esc(it.id) + '" aria-pressed="' + (state.metric === it.id) + '">' + esc(it.label) + '</button>').join('') +
+            '</div>').join('');
+    }
+    $('metricGroups').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-metric]');
+        if (b) showChart(b.dataset.metric);
+    });
+    function frameFor(metric) {
+        if (state.charts[metric]) return state.charts[metric];
+        const iframe = document.createElement('iframe');
+        iframe.className = 'chart-frame';
+        iframe.title = 'График';
+        iframe.addEventListener('load', () => fitFrame(iframe));
+        iframe.src = chartUrl(metric);
+        $('chartContainer').appendChild(iframe);
+        state.charts[metric] = iframe;
+        return iframe;
+    }
+    function showChart(metric) {
+        state.metric = metric;
+        const iframe = frameFor(metric);
+        // A frame hidden while the period, theme or selection changed is
+        // loaded only now: a chart initialised in a hidden frame has no width.
+        if (iframe.dataset.stale) {
+            delete iframe.dataset.stale;
+            iframe.src = chartUrl(metric);
+        }
+        Object.values(state.charts).forEach((f) => f.classList.toggle('active', f === iframe));
+        renderMetricGroups();
+    }
+    function reloadCharts() {
+        Object.entries(state.charts).forEach(([metric, f]) => {
+            if (metric === state.metric) f.src = chartUrl(metric);
+            else f.dataset.stale = '1';
+        });
+    }
+    function refreshCharts() {
+        const has = state.selected.length > 0;
+        $('stageEmpty').hidden = has;
+        $('stageContent').hidden = !has;
+        $('selectedPills').innerHTML = state.selected.map((c) => '<span class="pill pill-accent">' + esc(c) + '</span>').join('');
+        if (!has) return;
+        if (!state.metric) {
+            const first = metricGroups[0] && metricGroups[0].items[0];
+            if (first) showChart(first.id);
+        } else {
+            reloadCharts();
+            renderMetricGroups();
+        }
+    }
+    $('periodSwitcher').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-period]');
+        if (!b) return;
+        state.period = b.dataset.period;
+        $('periodSwitcher').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        reloadCharts();
+    });
+    FA.onThemeChange(reloadCharts);
+
+    // ------------------------------------------------------------ notes
+    async function loadNotes() {
+        for (const c of state.companies) {
+            try {
+                const data = await getJSON('/api/company-note?company=' + encodeURIComponent(c.company));
+                if (data.note) { state.notes[c.company] = data.note; syncList(); }
+            } catch (e) { /* a missing note only hides the marker */ }
+        }
+    }
+    let noteCompany = null;
+    async function openNote(name) {
+        noteCompany = name;
+        $('noteTitle').textContent = 'Заметка · ' + name;
+        $('noteStatus').textContent = '';
+        $('noteText').value = state.notes[name] || '';
+        try {
+            const data = await getJSON('/api/company-note?company=' + encodeURIComponent(name));
+            $('noteText').value = data.note || '';
+        } catch (e) { /* show what we have */ }
+        $('deleteNoteBtn').hidden = !$('noteText').value;
+        $('noteDialog').showModal();
+        $('noteText').focus();
+    }
+    $('cancelNoteBtn').addEventListener('click', () => $('noteDialog').close());
+    $('saveNoteBtn').addEventListener('click', async () => {
+        const note = $('noteText').value.trim();
+        try {
+            const resp = await fetch('/api/company-note', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ company: noteCompany, note: note }),
+            });
+            if (!resp.ok) throw new Error();
+            if (note) state.notes[noteCompany] = note; else delete state.notes[noteCompany];
+            $('noteDialog').close();
+            syncList();
+        } catch (e) { $('noteStatus').textContent = 'Не удалось сохранить заметку'; }
+    });
+    $('deleteNoteBtn').addEventListener('click', async () => {
+        try {
+            const resp = await fetch('/api/company-note?company=' + encodeURIComponent(noteCompany), { method: 'DELETE' });
+            if (!resp.ok) throw new Error();
+            delete state.notes[noteCompany];
+            $('noteDialog').close();
+            syncList();
+        } catch (e) { $('noteStatus').textContent = 'Не удалось удалить заметку'; }
+    });
+
+    // ------------------------------------------------------------ delete company
+    let deleteCompany = null;
+    function openDelete(name) {
+        deleteCompany = name;
+        $('deleteText').innerHTML = 'Удалить <b>' + esc(name) + '</b> и все её данные: отчётность, котировку, заметку и ручные записи? Это нельзя отменить.';
+        $('deleteStatus').textContent = '';
+        $('deleteDialog').showModal();
+        $('cancelDeleteBtn').focus();
+    }
+    $('cancelDeleteBtn').addEventListener('click', () => $('deleteDialog').close());
+    $('confirmDeleteBtn').addEventListener('click', async () => {
+        try {
+            const resp = await fetch('/api/companies', {
+                method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ company: deleteCompany }),
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            await fetch('/api/company-note?company=' + encodeURIComponent(deleteCompany), { method: 'DELETE' });
+            delete state.notes[deleteCompany];
+            // The charts plot the deleted company: drop them before the
+            // selection change would reload them, keeping the chosen metric.
+            state.charts = {};
+            $('chartContainer').replaceChildren();
+            $('deleteDialog').close();
+            FA.compare.remove(deleteCompany);
+            await loadData();
+            if (state.metric && state.selected.length) showChart(state.metric);
+        } catch (err) {
+            $('deleteStatus').textContent = 'Ошибка удаления: ' + (err.message || 'неизвестная');
+        }
+    });
+
+    loadData();
+    refreshCharts();
+})();
+</script>
+</body>
+</html>

@@ -13,18 +13,21 @@ tables.
 
 ## Features
 
-- **Cross-company comparison** — overlay any metric for any set of companies on a
-  single interactive chart (`/chart/{metric}`), with a data table underneath.
-- **Screener** (`/screener`) — every company in one sortable, filterable table:
+- **Screener as the home page** (`/`) — every company in one sortable, filterable table:
   current P/E, P/B and dividend yield at the latest exchange close, ROE,
   margins, leverage, growth, score and data-quality flags; P/E against the
   median of comparable sector peers with a current valuation and its
   percentile within the company's own history, and a median row over the
-  shown companies.
-- **Single-company dashboard** (`/company/{name}`) — KPIs, sparklines, P/E, P/B
-  and yield against the company's 10-year history and its sector's median, a
-  quality score with a transparent breakdown, a trend explorer, and free-text
-  notes.
+  shown companies. Ready-made and saved selections, filter chips, optional
+  columns, a summary drawer per company and a comparison tray.
+- **Cross-company comparison** (`/compare`) — overlay any metric for the
+  companies picked here or collected in the screener's tray on one interactive
+  chart (`/chart/{metric}`), with a data table underneath.
+- **Company card** (`/company/{name}`) — laid out like an analyst's note: a
+  one-line valuation verdict, P/E, P/B and yield drawn against the company's
+  10-year range and its sector's median, sparklines, a trend explorer, every
+  figure grouped, the score breakdown, sources, data-quality caveats and notes.
+- **Company search** from any page: press `/` (or Ctrl+K).
 - **Derived analytics** — net/EBITDA/operating margins, Debt/EBITDA, net debt,
   EV, EV/EBIT, free cash flow, P/FCF, P/B, dividend yield, revenue & net-profit
   YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
@@ -38,9 +41,11 @@ tables.
   down; `/updates` shows the timetable, quote freshness and every run's outcome.
   Refreshes never overlap (a Postgres advisory lock makes a second run wait),
   and a failed or partial run can be reported to Telegram.
-- **Self-contained binaries** — migrations and templates are embedded, so every
-  binary runs from any working directory with nothing on disk beside it.
-- **Light/dark themes** on every page.
+- **Self-contained binaries** — migrations, templates and the UI's stylesheet,
+  script and fonts (Golos Text, Literata — SIL OFL, `static/fonts/`) are
+  embedded, so every binary runs from any working directory with nothing on
+  disk beside it.
+- **Light/dark themes** on every page (follows the system until switched).
 
 ## Architecture
 
@@ -173,10 +178,12 @@ The server logs a warning if the default database password is in use, or if
 
 | Method | Path                              | Description                          |
 |--------|-----------------------------------|--------------------------------------|
-| GET    | `/`                               | Comparison UI                        |
+| GET    | `/`                               | Screener (home page)                 |
+| GET    | `/compare`                        | Comparison UI (`?companies=A,B`)     |
 | GET    | `/chart/{metric}`                 | Chart + table page (`?companies=`, `?theme=`, `?period=`) |
-| GET    | `/company/{name}`                 | Single-company dashboard             |
-| GET    | `/screener`                       | Cross-company screener               |
+| GET    | `/company/{name}`                 | Company card                         |
+| GET    | `/screener`                       | Redirects to `/`                     |
+| GET    | `/static/*`                       | Embedded stylesheet, script, fonts   |
 | GET    | `/api/screener`                   | Screener rows as JSON (null = no data) |
 | GET    | `/updates`                        | Refresh timetable, quote freshness, run history |
 | GET    | `/api/fetch-runs`                 | Scheduler jobs and the latest 50 runs as JSON |

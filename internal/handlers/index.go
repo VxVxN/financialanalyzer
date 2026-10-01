@@ -1,17 +1,12 @@
 package handlers
 
 import (
-	"html/template"
+	"bytes"
 	"net/http"
-
-	financialanalyzer "github.com/VxVxN/financialanalyzer"
 )
 
-// indexTemplate is parsed once from the embedded FS at startup. A parse failure
-// is a programmer error (the template ships inside the binary), so we panic.
-var indexTemplate = template.Must(
-	template.ParseFS(financialanalyzer.TemplatesFS, "templates/index.html"),
-)
+// compareTemplate is parsed once from the embedded FS at startup.
+var compareTemplate = parsePage("compare.html")
 
 type metricItem struct {
 	ID    string `json:"id"`
@@ -82,15 +77,22 @@ var indexMetricGroups = []metricGroup{
 	},
 }
 
-func (controller *Controller) IndexHandler(w http.ResponseWriter, r *http.Request) {
+// CompareHandler renders /compare: pick companies (or arrive with
+// ?companies=A,B from the comparison tray) and chart their metrics side by side.
+func (controller *Controller) CompareHandler(w http.ResponseWriter, r *http.Request) {
 	data := struct {
+		Meta         pageMeta
 		MetricGroups []metricGroup
 	}{
+		Meta:         pageMeta{Title: "Сравнение", Active: "compare"},
 		MetricGroups: indexMetricGroups,
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	if err := indexTemplate.Execute(w, data); err != nil {
-		controller.htmlServerError(w, "failed to render index", err)
+	var buf bytes.Buffer
+	if err := compareTemplate.Execute(&buf, data); err != nil {
+		controller.htmlServerError(w, "failed to render compare page", err)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }

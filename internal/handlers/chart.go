@@ -12,7 +12,6 @@ import (
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
-	"github.com/go-echarts/go-echarts/v2/types"
 
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
@@ -24,13 +23,14 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "unknown metric", http.StatusBadRequest)
 		return
 	}
-	theme := r.URL.Query().Get("theme")
+	// Echoed into the page: only the two known values may pass.
+	theme := "light"
+	if r.URL.Query().Get("theme") == "dark" {
+		theme = "dark"
+	}
 	companiesParam := r.URL.Query().Get("companies")
 	period := analytics.Period(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("period"))))
 
-	if theme == "" {
-		theme = "light"
-	}
 	switch period {
 	case analytics.PeriodQuarter, analytics.PeriodTTM, analytics.PeriodAnnual:
 	default:
@@ -62,46 +62,44 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 		quality[c] = qualityFor(history[c], metric, period)
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	bgColor := "#ffffff"
-	textColor := "#000000"
-	if theme == "dark" {
-		bgColor = "#1a1a1a"
-		textColor = "#ffffff"
-	}
-
+	// The page is framed by the compare page and the company card, which pass
+	// their theme; it shares their stylesheet (tokens, fonts).
 	fmt.Fprintf(w, `<!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="%s">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="%s">
     <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            background-color: %s;
-            color: %s;
-            font-family: Arial, sans-serif;
-        }
-        .chart-container {
-            background-color: %s;
-            border-radius: 8px;
-            padding: 20px;
-        }
+        body { padding: 8px 12px 16px; background: transparent; }
+        .chart-container { width: 100%%; }
+        .chart-container .container { width: 100%% !important; }
+        .chart-container .item { width: 100%% !important; margin: 0 !important; }
     </style>
 </head>
 <body>
-    <div class="chart-container">`, bgColor, textColor, bgColor)
+    <div class="chart-container">`, theme, assetURL("app.css"))
 
 	page := components.NewPage()
 	page.PageTitle = fmt.Sprintf("%s — Финансовый анализатор", formatMetricName(metric))
 
-	lineChart := buildSeriesChart(seriesByCompany, companies, metric, period, quality)
+	lineChart := buildSeriesChart(seriesByCompany, companies, metric, period, quality, chartPaletteFor(theme))
 	page.AddCharts(lineChart)
 	_ = page.Render(w)
+	// go-echarts sizes the chart once; follow the frame's width afterwards.
+	fmt.Fprint(w, `<script>
+window.addEventListener('resize', function () {
+	document.querySelectorAll('[_echarts_instance_]').forEach(function (el) {
+		var chart = echarts.getInstanceByDom(el);
+		if (chart) chart.resize();
+	});
+});
+</script>`)
 
 	fmt.Fprintf(w, `</div>`)
-	renderSeriesTable(w, seriesByCompany, companies, metric, theme, quality)
+	renderSeriesTable(w, seriesByCompany, companies, metric, quality)
 	fmt.Fprintf(w, `<script>
 function exportTableCSV() {
 	const table = document.querySelector('.data-table');
@@ -189,7 +187,38 @@ func mergedLabels(seriesByCompany map[string]analytics.Series, companies []strin
 	return labels
 }
 
-func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []string, metric string, period analytics.Period, quality map[string]companyQuality) *charts.Line {
+// chartPalette is the chart's ink for one theme. The series hues are the
+// dataviz reference categorical order, stepped separately for each surface
+// (validated: adjacent CVD ΔE ≥ 8, normal-vision ΔE ≥ 15).
+type chartPalette struct {
+	series                   []string
+	text, textMuted          string
+	gridLine                 string
+	tooltipBg, tooltipBorder string
+}
+
+func chartPaletteFor(theme string) chartPalette {
+	if theme == "dark" {
+		return chartPalette{
+			series:    []string{"#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"},
+			text:      "#e8ecf2",
+			textMuted: "#8d97a5",
+			gridLine:  "#232b37",
+			tooltipBg: "#161c25", tooltipBorder: "#2f3946",
+		}
+	}
+	return chartPalette{
+		series:    []string{"#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"},
+		text:      "#111827",
+		textMuted: "#5b6472",
+		gridLine:  "#e4e7ec",
+		tooltipBg: "#ffffff", tooltipBorder: "#d0d5dd",
+	}
+}
+
+const chartFont = "Golos Text, system-ui, sans-serif"
+
+func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []string, metric string, period analytics.Period, quality map[string]companyQuality, pal chartPalette) *charts.Line {
 	line := charts.NewLine()
 
 	metricName := formatMetricName(metric)
@@ -214,31 +243,39 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 		charts.WithTitleOpts(opts.Title{
 			Title:    fmt.Sprintf("%s — %s", metricName, subtitle),
 			Subtitle: metricDescription(metric),
-			Left:     "center",
+			Left:     "left",
+			TitleStyle: &opts.TextStyle{
+				Color: pal.text, FontFamily: chartFont, FontSize: 16, FontWeight: "600",
+			},
+			SubtitleStyle: &opts.TextStyle{Color: pal.textMuted, FontFamily: chartFont, FontSize: 12},
 		}),
 		charts.WithInitializationOpts(opts.Initialization{
-			Theme:  types.ThemeInfographic,
-			Width:  "1200px",
-			Height: "600px",
+			Width:           "100%",
+			Height:          "560px",
+			BackgroundColor: "transparent",
 		}),
 		charts.WithLegendOpts(opts.Legend{
-			Show:   opts.Bool(true),
-			Bottom: "0",
-			Orient: "horizontal",
+			Show:      opts.Bool(true),
+			Bottom:    "0",
+			Orient:    "horizontal",
+			TextStyle: &opts.TextStyle{Color: pal.text, FontFamily: chartFont},
 		}),
 		charts.WithTooltipOpts(opts.Tooltip{
-			Show:    opts.Bool(true),
-			Trigger: "axis",
+			Show:            opts.Bool(true),
+			Trigger:         "axis",
+			BackgroundColor: pal.tooltipBg,
+			BorderColor:     pal.tooltipBorder,
 			AxisPointer: &opts.AxisPointer{
 				Type: "shadow",
 			},
 			Formatter: opts.FuncOpts(tooltipFormatter),
 		}),
 		charts.WithGridOpts(opts.Grid{
-			Show:         opts.Bool(true),
-			Left:         "10%",
-			Right:        "8%",
-			Bottom:       "15%",
+			Show:         opts.Bool(false),
+			Left:         "2%",
+			Right:        "2%",
+			Top:          "70",
+			Bottom:       "90",
 			ContainLabel: opts.Bool(true),
 		}),
 		charts.WithXAxisOpts(opts.XAxis{
@@ -249,26 +286,24 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 			AxisLabel: &opts.AxisLabel{
 				Rotate: 30,
 				Margin: 10,
+				Color:  pal.textMuted,
 			},
 			SplitLine: &opts.SplitLine{
-				Show: opts.Bool(true),
-				LineStyle: &opts.LineStyle{
-					Type: "dashed",
-				},
+				Show: opts.Bool(false),
 			},
 		}),
 		charts.WithYAxisOpts(opts.YAxis{
-			Name:         metricName,
-			NameLocation: "center",
-			NameGap:      50,
-			Type:         "value",
+			// No axis name: the title names the metric and the labels carry the unit.
+			Type: "value",
 			AxisLabel: &opts.AxisLabel{
 				Formatter: opts.FuncOpts(fmt.Sprintf("function(value) { return value + '%s'; }", unit)),
+				Color:     pal.textMuted,
 			},
 			SplitLine: &opts.SplitLine{
 				Show: opts.Bool(true),
 				LineStyle: &opts.LineStyle{
-					Type: "dashed",
+					Color: pal.gridLine,
+					Type:  "solid",
 				},
 			},
 		}),
@@ -282,11 +317,6 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 
 	labels := mergedLabels(seriesByCompany, companies)
 	line.SetXAxis(labels)
-
-	colors := []string{
-		"#5470c6", "#fac858", "#ee6666", "#73c0de",
-		"#3ba272", "#fc8452", "#9a60b4", "#ea7ccc",
-	}
 
 	for idx, company := range companies {
 		s := seriesByCompany[company]
@@ -311,12 +341,14 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 			}
 			values[i] = opts.LineData{Value: v, Symbol: "circle", SymbolSize: 8}
 		}
-		color := colors[idx%len(colors)]
+		// Fixed order; past the eighth series (the all-companies chart) the
+		// hues repeat, and the legend and table carry identity.
+		color := pal.series[idx%len(pal.series)]
 		// Escape the series name: go-echarts emits it verbatim inside a <script>
 		// block, so a name containing </script> would otherwise break out (XSS).
 		line.AddSeries(html.EscapeString(company), values,
 			charts.WithLineChartOpts(opts.LineChart{
-				Smooth:       opts.Bool(true),
+				Smooth:       opts.Bool(false),
 				ShowSymbol:   opts.Bool(true),
 				Symbol:       "circle",
 				SymbolSize:   8,
@@ -325,117 +357,44 @@ func buildSeriesChart(seriesByCompany map[string]analytics.Series, companies []s
 			charts.WithLabelOpts(opts.Label{
 				Show: opts.Bool(false),
 			}),
-			charts.WithAreaStyleOpts(opts.AreaStyle{
-				Color: color + "20",
-			}),
+			charts.WithLineStyleOpts(opts.LineStyle{Color: color, Width: 2}),
+			charts.WithItemStyleOpts(opts.ItemStyle{Color: color}),
 		)
 	}
 
 	return line
 }
 
-func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analytics.Series, companies []string, metric, theme string, quality map[string]companyQuality) {
+func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analytics.Series, companies []string, metric string, quality map[string]companyQuality) {
 	labels := mergedLabels(seriesByCompany, companies)
 
-	bgPrimary := "#ffffff"
-	bgSecondary := "#f0f0f0"
-	bgButton := "#f0f0f0"
-	bgButtonHover := "#e0e0e0"
-	textPrimary := "#000000"
-	borderColor := "#ccc"
-	shadowColor := "rgba(0,0,0,0.1)"
-
-	if theme == "dark" {
-		bgPrimary = "#1a1a1a"
-		bgSecondary = "#2d2d2d"
-		bgButton = "#3d3d3d"
-		bgButtonHover = "#4d4d4d"
-		textPrimary = "#ffffff"
-		borderColor = "#555"
-		shadowColor = "rgba(255,255,255,0.1)"
-	}
-
-	fmt.Fprintf(w, `
+	fmt.Fprint(w, `
 	<style>
-		.data-table {
-			width: 100%%;
-			border-collapse: collapse;
-			margin-top: 30px;
-			background-color: %s;
-			color: %s;
-			font-family: Arial, sans-serif;
-			font-size: 14px;
-			border-radius: 8px;
-			overflow: hidden;
-			box-shadow: 0 2px 10px %s;
-		}
-		.data-table th {
-			background-color: %s;
-			padding: 12px;
-			text-align: center;
-			border: 1px solid %s;
-			font-weight: 600;
-			color: %s;
-		}
-		.data-table td {
-			padding: 10px;
-			text-align: right;
-			border: 1px solid %s;
-			color: %s;
-		}
-		.data-table td:first-child {
-			text-align: left;
-			font-weight: 500;
-			background-color: %s;
-		}
-		.data-table tr:hover td {
-			background-color: %s;
-		}
-		.data-table .no-data {
-			color: #999;
-			font-style: italic;
-			text-align: center;
-		}
-		.data-table .pos { color: #3ba272; }
-		.data-table .neg { color: #ee6666; }
-		.data-table td.source { text-align: left; font-size: 12px; white-space: nowrap; cursor: help; }
-		.data-table td.source.warn::before { content: "⚠ "; color: #e6a23c; }
-		.data-table td.flag { background-color: rgba(230,162,60,0.18); cursor: help; }
-		.data-table td.flag::after { content: " ⚠"; color: #e6a23c; }
-		.table-legend { margin-top: 8px; font-size: 12px; opacity: 0.75; font-family: Arial, sans-serif; }
-		.table-container {
-			margin-top: 20px;
-			overflow-x: auto;
-			border-radius: 8px;
-		}
-		.table-toolbar {
-			margin-top: 24px;
-			display: flex;
-			justify-content: flex-end;
-		}
-		.export-btn {
-			padding: 8px 16px;
-			background-color: %s;
-			color: %s;
-			border: 1px solid %s;
-			border-radius: 6px;
-			cursor: pointer;
-			font-size: 13px;
-			font-family: Arial, sans-serif;
-		}
-		.export-btn:hover { background-color: %s; }
+		.table-toolbar { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+		.table-toolbar h2 { font-size: 15px; font-weight: 600; }
+		.table-container { margin-top: 10px; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+		.data-table td:first-child { font-weight: 600; position: sticky; left: 0; background: var(--surface); }
+		.data-table thead th:first-child { left: 0; z-index: 2; }
+		.data-table td { font-variant-numeric: tabular-nums; }
+		.data-table .no-data { color: var(--text-3); text-align: center; }
+		.data-table .pos { color: var(--up); }
+		.data-table .neg { color: var(--down); }
+		.data-table td.source { text-align: left; font-size: 12px; cursor: help; color: var(--text-2); }
+		.data-table td.source.warn::before { content: "⚠ "; color: var(--warn); }
+		.data-table td.flag { background: var(--warn-soft); cursor: help; }
+		.data-table td.flag::after { content: " ▲"; color: var(--warn); }
+		.table-legend { margin-top: 8px; font-size: 12px; color: var(--text-3); }
 	</style>
 	<div class="table-toolbar">
-		<button class="export-btn" onclick="exportTableCSV()">⬇ Экспорт в CSV</button>
+		<h2>Данные</h2>
+		<button type="button" class="btn btn-sm export-btn" onclick="exportTableCSV()">Экспорт в CSV</button>
 	</div>
 	<div class="table-container">
-		<table class="data-table">
+		<table class="table data-table">
 			<thead>
 				<tr>
 					<th>Компания / период</th>
-					<th>Источник</th>`,
-		bgPrimary, textPrimary, shadowColor, bgButton, borderColor, textPrimary, borderColor, textPrimary, bgSecondary, bgButtonHover,
-		bgButton, textPrimary, borderColor, bgButtonHover)
+					<th class="left">Источник</th>`)
 
 	for _, label := range labels {
 		fmt.Fprintf(w, `<th>%s</th>`, label)
@@ -499,7 +458,7 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 
 	fmt.Fprintf(w, `</tbody></table></div>`)
 	fmt.Fprintf(w, `<div class="table-legend">⚠ Источник: данные не по МСФО группы и могут быть несопоставимы между компаниями. `+
-		`⚠ Ячейка / ▲ точка: значение выглядит подозрительно (причина — во всплывающей подсказке).</div>`)
+		`▲ Ячейка или треугольная точка: значение выглядит подозрительно (причина — во всплывающей подсказке).</div>`)
 }
 
 // humanFormat renders a money value stored in billions of RUB (the unit of

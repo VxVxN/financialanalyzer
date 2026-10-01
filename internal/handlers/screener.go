@@ -3,18 +3,14 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"html/template"
 	"net/http"
 	"sort"
 
-	financialanalyzer "github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
-var screenerTemplate = template.Must(
-	template.ParseFS(financialanalyzer.TemplatesFS, "templates/screener.html"),
-)
+var screenerTemplate = parsePage("screener.html")
 
 // buildScreener assembles one row per company, sorted by name.
 func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.ScreenerRow, error) {
@@ -58,8 +54,9 @@ func (controller *Controller) ScreenerAPI(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, rows)
 }
 
-// ScreenerHandler renders the sortable, filterable screener page. The rows are
-// embedded in the page; sorting and filtering happen client-side.
+// ScreenerHandler renders the screener, the home page: every company in one
+// sortable, filterable table with a summary drawer and the comparison tray.
+// The rows are embedded in the page; sorting and filtering happen client-side.
 func (controller *Controller) ScreenerHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := controller.buildScreener(r.Context())
 	if err != nil {
@@ -84,10 +81,11 @@ func (controller *Controller) ScreenerHandler(w http.ResponseWriter, r *http.Req
 	sort.Strings(categories)
 
 	data := struct {
+		Meta         pageMeta
 		Rows         []analytics.ScreenerRow
 		SourceLabels map[string]string
 		Categories   []string
-	}{rows, sourceLabels, categories}
+	}{pageMeta{Title: "Скринер", Active: "screener"}, rows, sourceLabels, categories}
 
 	// Render into a buffer so a template error becomes a clean 500 rather
 	// than a truncated 200.
@@ -98,4 +96,9 @@ func (controller *Controller) ScreenerHandler(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = buf.WriteTo(w)
+}
+
+// ScreenerRedirect sends the screener's former address to the home page.
+func (controller *Controller) ScreenerRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/", http.StatusMovedPermanently)
 }

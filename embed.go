@@ -17,6 +17,12 @@ var MigrationsFS embed.FS
 //go:embed templates/*.html
 var TemplatesFS embed.FS
 
+// StaticFS holds the web UI's shared stylesheet, script and fonts, served
+// under /static/ (see handlers.StaticHandler).
+//
+//go:embed static
+var StaticFS embed.FS
+
 // TickerRegistry is the bundled "TICKER INN CATEGORY" list (fetch_tickers.txt)
 // used by cmd/fetch to resolve a ticker's legal-entity INN and default category
 // without the caller having to retype them. Embedding it keeps the fetch binary

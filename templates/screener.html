@@ -1,365 +1,692 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Скринер — Финансовый анализатор</title>
-    <script>
-        // Apply the saved theme before first paint (shared with the index page).
-        (function () {
-            var t = null;
-            try { t = localStorage.getItem('theme'); } catch (e) {}
-            if (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) t = 'dark';
-            if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-        })();
-    </script>
-    <style>
-        :root {
-            --bg-page: #fafbfc;
-            --bg-surface: #ffffff;
-            --bg-muted: #f4f5f7;
-            --bg-hover: #eef0f3;
-            --border: #e6e8eb;
-            --border-strong: #d4d7dc;
-            --text-1: #0d121c;
-            --text-2: #3d4453;
-            --text-3: #6b7280;
-            --accent: #4f46e5;
-            --accent-bg: #eef0ff;
-            --success: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --radius-sm: 6px;
-            --radius-md: 10px;
-        }
-        [data-theme="dark"] {
-            --bg-page: #0b0e15;
-            --bg-surface: #11151d;
-            --bg-muted: #1a2030;
-            --bg-hover: #232a3a;
-            --border: #242a38;
-            --border-strong: #313a4f;
-            --text-1: #f0f2f5;
-            --text-2: #c5cad4;
-            --text-3: #8a93a3;
-            --accent: #7c7af6;
-            --accent-bg: #1d1f3e;
-        }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0; background: var(--bg-page); color: var(--text-1);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
-            font-size: 14px;
-        }
-        a { color: var(--accent); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .container { max-width: 1600px; margin: 0 auto; padding: 24px 16px; }
-        .topline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-        h1 { margin: 8px 0 4px; font-size: 24px; }
-        .sub { color: var(--text-3); margin: 0 0 16px; }
-        button, select, input {
-            font: inherit; color: var(--text-1); background: var(--bg-surface);
-            border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px;
-        }
-        button { cursor: pointer; }
-        button:hover { background: var(--bg-hover); }
+{{template "head" .Meta}}
+<style>
+    .views { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .views .count { opacity: .7; margin-left: 2px; }
+    .view-user { display: inline-flex; align-items: center; }
+    .view-user .chip-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    .view-user .view-del {
+        min-height: 32px; width: 28px; border: 1px solid var(--border-strong); border-left: 0;
+        border-radius: 0 999px 999px 0; background: var(--surface); color: var(--text-3);
+    }
+    .view-user .view-del:hover { color: var(--down); }
+    .save-view { display: inline-flex; gap: 6px; align-items: center; }
+    .save-view .input { min-height: 32px; padding: 4px 10px; width: 200px; }
 
-        .filters {
-            display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end;
-            background: var(--bg-surface); border: 1px solid var(--border);
-            border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 12px;
-        }
-        .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
-        .filters .range { display: flex; gap: 4px; }
-        .filters .range input { width: 72px; }
-        .filters .check { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
-        .count { color: var(--text-3); font-size: 13px; margin: 0 0 8px; }
+    .filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; }
+    .filterbar .search {
+        display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px;
+        background: var(--hover); border-radius: var(--radius-sm); flex: 0 1 240px; color: var(--text-3);
+    }
+    .filterbar .search svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+    .filterbar .search input { border: 0; background: transparent; outline: none; flex: 1; min-width: 0; min-height: 34px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+        display: inline-flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 2px 0 12px;
+        border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; font-size: 13px;
+    }
+    .chip button { width: 28px; height: 28px; border: 0; border-radius: 4px; background: transparent; color: inherit; }
+    .chip button:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+    .filterbar .spacer { flex: 1; }
+    .filterbar .result { color: var(--text-3); font-size: 13px; }
+    .filterbar .result b { color: var(--text-1); }
 
-        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface); }
-        table { border-collapse: collapse; width: 100%; white-space: nowrap; }
-        th, td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: right; }
-        th:first-child, td:first-child, th.left, td.left { text-align: left; }
-        th {
-            position: sticky; top: 0; background: var(--bg-muted); color: var(--text-2);
-            font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+    .panel { padding: 16px; margin-bottom: 12px; }
+    .filters-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px 18px; align-items: end; }
+    .range { display: flex; gap: 6px; }
+    .range .input { width: 100%; min-width: 0; }
+    .panel-foot { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+    .columns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 18px; }
+
+    .screener-layout { display: flex; gap: 16px; align-items: flex-start; }
+    .table-card { flex: 1; min-width: 0; overflow: hidden; }
+    .table-card .table-wrap { max-height: calc(100vh - 150px); overflow: auto; }
+    .screener-table th.sortable { padding: 0; }
+    .th-sort {
+        width: 100%; min-height: 40px; padding: 0 12px; border: 0; background: transparent;
+        color: inherit; font: inherit; text-align: inherit; display: flex; align-items: center; gap: 4px;
+        justify-content: flex-end;
+    }
+    .left .th-sort { justify-content: flex-start; }
+    .th-sort:hover { color: var(--text-1); }
+    th[aria-sort] .th-sort { color: var(--text-1); font-weight: 600; }
+    .screener-table tbody tr { cursor: pointer; }
+    .screener-table tbody tr.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+    .screener-table td.sel, .screener-table th.sel { width: 44px; padding-right: 0; }
+    .screener-table td.sel input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+    .co { display: flex; flex-direction: column; gap: 1px; }
+    .co a { color: var(--text-1); font-weight: 600; }
+    .co .meta { font-size: 12px; color: var(--text-3); }
+    .co .meta .warn-mark { color: var(--warn); }
+    .rel { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+    .rel .ruler { width: 72px; }
+    .rel span { min-width: 46px; text-align: right; font-weight: 500; }
+    .score {
+        display: inline-block; min-width: 34px; padding: 2px 8px; border-radius: var(--radius-sm);
+        background: var(--hover); color: var(--text-2); font-weight: 600; text-align: center;
+    }
+    .score.hi { background: var(--cheap-soft); color: var(--cheap); }
+    .basis { color: var(--text-3); font-size: 12px; }
+    .basis.stale { color: var(--warn); }
+    td[title] { cursor: help; }
+
+    .drawer {
+        flex: 0 0 360px; position: sticky; top: 76px; padding: 20px;
+        display: flex; flex-direction: column; gap: 18px;
+        max-height: calc(100vh - 92px); overflow-y: auto;
+    }
+    .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .drawer-title { font-family: var(--font-serif); font-size: 26px; font-weight: 600; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kpi { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+    .kpi .l { font-size: 12px; color: var(--text-3); }
+    .kpi .v { font-size: 20px; font-weight: 600; }
+    .kpi .s { font-size: 12px; color: var(--text-3); }
+    .why { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2); }
+    .why li::before { content: '✓ '; color: var(--cheap); font-weight: 700; }
+    .drawer-actions { display: flex; gap: 8px; }
+    .drawer-actions > * { flex: 1; }
+
+    .legend { margin-top: 16px; }
+    .legend p { color: var(--text-3); font-size: 13px; line-height: 1.6; max-width: 980px; }
+
+    @media (max-width: 1100px) {
+        .drawer {
+            position: fixed; top: 0; right: 0; bottom: 0; z-index: 50; width: min(400px, 100vw);
+            max-height: none; border-radius: 0; box-shadow: var(--shadow-lg);
         }
-        th:hover { color: var(--text-1); }
-        th .arrow { color: var(--accent); margin-left: 4px; }
-        tbody tr:hover { background: var(--bg-hover); }
-        td.na { color: var(--text-3); }
-        .neg { color: var(--danger); }
-        .pos { color: var(--success); }
-        .flag { color: var(--warning); font-weight: 600; }
-        .muted { color: var(--text-3); font-size: 12px; }
-        .pill {
-            display: inline-block; padding: 1px 8px; border-radius: 10px;
-            background: var(--bg-muted); color: var(--text-2); font-size: 12px;
-        }
-        .pill.warn { background: var(--accent-bg); color: var(--warning); }
-        .empty { padding: 32px; text-align: center; color: var(--text-3); }
-        .legend { color: var(--text-3); font-size: 12px; margin-top: 10px; line-height: 1.6; }
-        tfoot td { background: var(--bg-muted); color: var(--text-2); font-weight: 600; border-bottom: none; }
-        td[title] { cursor: help; }
-    </style>
+    }
+    @media (max-width: 700px) {
+        .filterbar .search { flex-basis: 100%; }
+        .table-card .table-wrap { max-height: none; }
+    }
+</style>
 </head>
 <body>
-<div class="container">
-    <div class="topline">
-        <a href="/">← Сравнение</a>
-        <button id="themeToggle" type="button">Тема</button>
-    </div>
-    <h1>Скринер</h1>
-    <p class="sub">Все компании в одной таблице. Нажмите на заголовок столбца для сортировки; оценка считается по последней биржевой цене закрытия, если котировка сохранена.</p>
-
-    <div class="filters">
-        <label>Поиск
-            <input id="q" type="search" placeholder="Тикер…">
-        </label>
-        <label>Категория
-            <select id="category">
-                <option value="">Все</option>
-                {{range .Categories}}<option value="{{.}}">{{.}}</option>{{end}}
-            </select>
-        </label>
-        <label>P/E
-            <span class="range"><input id="pe_min" type="number" step="any" placeholder="от"><input id="pe_max" type="number" step="any" placeholder="до"></span>
-        </label>
-        <label>P/B
-            <span class="range"><input id="pb_min" type="number" step="any" placeholder="от"><input id="pb_max" type="number" step="any" placeholder="до"></span>
-        </label>
-        <label>Див. доходность, %
-            <span class="range"><input id="div_yield_min" type="number" step="any" placeholder="от"><input id="div_yield_max" type="number" step="any" placeholder="до"></span>
-        </label>
-        <label>ROE, %
-            <span class="range"><input id="roe_min" type="number" step="any" placeholder="от"><input id="roe_max" type="number" step="any" placeholder="до"></span>
-        </label>
-        <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные</label>
-        <label class="check"><input id="noflags" type="checkbox"> Без замечаний к качеству данных</label>
-        <button id="reset" type="button">Сбросить</button>
+{{template "topbar" .Meta}}
+<main id="main" class="page">
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Скринер</h1>
+            <p class="page-sub" id="freshness">Все компании в одной таблице: оценка по последней цене закрытия, если котировка свежая, иначе — по отчётности.</p>
+        </div>
     </div>
 
-    <p class="count" id="count"></p>
-    <div class="table-wrap">
-        <table>
-            <thead><tr id="head"></tr></thead>
-            <tbody id="body"></tbody>
-            <tfoot id="foot"></tfoot>
-        </table>
-    </div>
-    <p class="legend">
-        <b>Основа оценки</b>: «рынок» — капитализация по последней цене закрытия (дата указана; закрытия старше 30 дней не учитываются),
-        делённая на прибыль LTM (период после «прибыль») / последний капитал / последние дивиденды — мультипликаторы по отчётности
-        старше 18 месяцев не показываются; «отчёт» — значения, сохранённые за последний период. При убытке P/E не считается.
-        <b>EV/EBIT</b> — (капитализация + чистый долг) / операционная прибыль LTM (для РСБУ — прибыль от продаж);
-        <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
-        <b>Сопоставимость</b>: неконсолидированная РСБУ / данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
-        <b>Замечания</b>: аномалии качества данных в истории компании — подробности на дашборде.
-        <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории с актуальной оценкой
-        (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
-        <b>перцентиль истории</b> — доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего:
-        низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
-        <b>Медиана</b> внизу таблицы — простая медиана по показанным компаниям (с самой компанией, без отбора по типу
-        отчётности и давности), поэтому может отличаться от медианы сектора в подсказках.
-    </p>
-</div>
+    <div class="views" role="group" aria-label="Выборки" id="views"></div>
 
+    <div class="card filterbar">
+        <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="search" placeholder="Тикер в таблице" aria-label="Фильтр по тикеру">
+        </label>
+        <div class="chips" id="chips" aria-live="polite"></div>
+        <button type="button" class="btn btn-sm" id="filtersToggle" aria-expanded="false" aria-controls="filtersPanel">+ Условие</button>
+        <span class="spacer"></span>
+        <span class="result" id="count" aria-live="polite"></span>
+        <button type="button" class="btn btn-sm btn-ghost" id="columnsToggle" aria-expanded="false" aria-controls="columnsPanel">Столбцы</button>
+    </div>
+
+    <div class="card panel" id="filtersPanel" hidden>
+        <div class="filters-grid">
+            <label class="field">Сектор
+                <select class="select" id="category">
+                    <option value="">Все</option>
+                    {{range .Categories}}<option value="{{.}}">{{.}}</option>{{end}}
+                </select>
+            </label>
+            <div class="field" role="group" aria-label="P/E">P/E
+                <span class="range"><input class="input" id="pe_min" type="number" step="any" placeholder="от" aria-label="P/E от"><input class="input" id="pe_max" type="number" step="any" placeholder="до" aria-label="P/E до"></span>
+            </div>
+            <div class="field" role="group" aria-label="P/B">P/B
+                <span class="range"><input class="input" id="pb_min" type="number" step="any" placeholder="от" aria-label="P/B от"><input class="input" id="pb_max" type="number" step="any" placeholder="до" aria-label="P/B до"></span>
+            </div>
+            <div class="field" role="group" aria-label="Див. доходность, %">Див. доходность, %
+                <span class="range"><input class="input" id="div_yield_min" type="number" step="any" placeholder="от" aria-label="Див. доходность от"><input class="input" id="div_yield_max" type="number" step="any" placeholder="до" aria-label="Див. доходность до"></span>
+            </div>
+            <div class="field" role="group" aria-label="ROE, %">ROE, %
+                <span class="range"><input class="input" id="roe_min" type="number" step="any" placeholder="от" aria-label="ROE от"><input class="input" id="roe_max" type="number" step="any" placeholder="до" aria-label="ROE до"></span>
+            </div>
+        </div>
+        <div class="panel-foot">
+            <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные (не РСБУ/ЦБ)</label>
+            <label class="check"><input id="noflags" type="checkbox"> Без замечаний к качеству данных</label>
+            <span class="spacer" style="flex:1"></span>
+            <button type="button" class="btn btn-sm btn-ghost" id="reset">Сбросить всё</button>
+        </div>
+    </div>
+
+    <div class="card panel" id="columnsPanel" hidden>
+        <div class="columns-grid" id="columnsList"></div>
+    </div>
+
+    <div class="screener-layout">
+        <section class="card table-card" aria-label="Компании">
+            <div class="table-wrap">
+                <table class="table screener-table">
+                    <thead><tr id="head"></tr></thead>
+                    <tbody id="body"></tbody>
+                    <tfoot id="foot"></tfoot>
+                </table>
+            </div>
+        </section>
+        <aside class="card drawer" id="drawer" aria-labelledby="drawerTitle" hidden></aside>
+    </div>
+
+    <details class="more legend">
+        <summary>Как считаются показатели</summary>
+        <p>
+            <b>Основа оценки</b>: «рынок» — капитализация по последней цене закрытия (закрытия старше 30 дней не учитываются),
+            делённая на прибыль LTM / последний капитал / последние дивиденды; мультипликаторы по отчётности старше 18 месяцев
+            не показываются. «Отчёт» — значения, сохранённые за последний период. При убытке P/E не считается.
+            <b>EV/EBIT</b> — (капитализация + чистый долг) / операционная прибыль LTM (для РСБУ — прибыль от продаж);
+            <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
+            <b>Сопоставимость</b>: неконсолидированная РСБУ и данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
+            <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории с актуальной оценкой
+            (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
+            <b>история P/E</b> — перцентиль: доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего;
+            низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
+            <b>Медиана</b> внизу таблицы — простая медиана по показанным компаниям, поэтому может отличаться от медианы сектора.
+            <b>Балл</b> — эвристика из роста, рентабельности, маржи, долга и P/E, а не рекомендация.
+        </p>
+    </details>
+</main>
+{{template "footer" .Meta}}
 <script>
+(function () {
+    'use strict';
     const ROWS = {{.Rows}} || [];
     const SOURCE_LABELS = {{.SourceLabels}};
+    const FA = window.FA, fmt = FA.fmt, esc = FA.esc;
+    const $ = (id) => document.getElementById(id);
 
-    // Column spec: key, header, kind (text|money|ratio|pct|int), and how to render.
+    // ------------------------------------------------------------ derived fields
+    function vsSector(v, median) {
+        return v === null || v === undefined || !median ? null : (v / median - 1) * 100;
+    }
+    for (const r of ROWS) r.pe_vs_sector = vsSector(r.pe, r.pe_sector);
+    const sourceText = (r) => (r.sources && r.sources.length ? r.sources : ['']).map((s) => SOURCE_LABELS[s] || s).join(', ');
+    const known = (v) => v !== null && v !== undefined;
+
+    // ------------------------------------------------------------ presets
+    const PRESETS = [
+        { id: 'all', label: 'Все компании', test: () => true },
+        { id: 'cheap_hist', label: 'Дешевле истории', why: 'P/E в нижней четверти своей истории', test: (r) => known(r.pe_hist_pct) && r.pe_hist_pct <= 25 },
+        { id: 'cheap_sector', label: 'Дешевле сектора', why: 'P/E на 20% и более ниже медианы сектора', test: (r) => known(r.pe_vs_sector) && r.pe_vs_sector <= -20 },
+        { id: 'dividend', label: 'Дивидендные', why: 'дивидендная доходность от 8%', test: (r) => known(r.div_yield) && r.div_yield >= 8 },
+        { id: 'clean', label: 'Надёжные данные', why: 'сопоставимые данные без замечаний', test: (r) => r.comparable && r.anomalies === 0 },
+    ];
+    const presetById = (id) => PRESETS.find((p) => p.id === id) || PRESETS[0];
+
+    // ------------------------------------------------------------ columns
     const COLUMNS = [
-        { key: 'company', label: 'Компания', kind: 'text' },
-        { key: 'category', label: 'Категория', kind: 'text', cls: 'left' },
-        { key: 'capitalization', label: 'Капитализация, млрд', kind: 'money' },
-        { key: 'pe', label: 'P/E', kind: 'ratio' },
-        { key: 'pe_vs_sector', label: 'P/E к сектору', kind: 'pct', signed: true, cheapBelow: true },
-        { key: 'pe_hist_pct', label: 'P/E: перцентиль истории', kind: 'pctile' },
-        { key: 'pb', label: 'P/B', kind: 'ratio' },
-        { key: 'div_yield', label: 'Див. доходность', kind: 'pct' },
+        { key: 'company', label: 'Компания', kind: 'text', base: true, cls: 'left' },
+        { key: 'category', label: 'Сектор', kind: 'cat', cls: 'left' },
+        { key: 'capitalization', label: 'Кап., млрд', kind: 'bln', base: true },
+        { key: 'pe', label: 'P/E', kind: 'ratio', base: true, band: 'pe' },
+        { key: 'pe_vs_sector', label: 'P/E к сектору', kind: 'vs', base: true },
+        { key: 'pe_hist_pct', label: 'История P/E', kind: 'pctile', base: true },
+        { key: 'pb', label: 'P/B', kind: 'ratio', base: true, band: 'pb' },
+        { key: 'div_yield', label: 'Див. дох.', kind: 'pct', base: true, band: 'div_yield' },
+        { key: 'roe', label: 'ROE', kind: 'pct', base: true },
         { key: 'ev_ebit', label: 'EV/EBIT', kind: 'ratio' },
         { key: 'p_fcf', label: 'P/FCF', kind: 'ratio' },
-        { key: 'roe', label: 'ROE', kind: 'pct' },
         { key: 'net_margin', label: 'Чистая маржа', kind: 'pct' },
         { key: 'operating_margin', label: 'Опер. маржа', kind: 'pct' },
         { key: 'debt_ebitda', label: 'Долг/EBITDA', kind: 'ratio' },
         { key: 'revenue_yoy', label: 'Выручка г/г', kind: 'pct', signed: true },
         { key: 'net_profit_yoy', label: 'Прибыль г/г', kind: 'pct', signed: true },
-        { key: 'score', label: 'Балл', kind: 'int' },
-        { key: 'anomalies', label: 'Замечания', kind: 'int' },
-        { key: 'valuation', label: 'Основа оценки', kind: 'text', cls: 'left' },
-        { key: 'source', label: 'Источник', kind: 'text', cls: 'left' },
+        { key: 'score', label: 'Балл', kind: 'score', base: true },
+        { key: 'anomalies', label: 'Замечания', kind: 'flags', base: true },
+        { key: 'valuation', label: 'Основа оценки', kind: 'basis', base: true, cls: 'left' },
+        { key: 'source', label: 'Источник', kind: 'source', cls: 'left' },
     ];
+    const OPTIONAL = COLUMNS.filter((c) => !c.base);
 
+    // ------------------------------------------------------------ state
+    function loadJSON(key, fallback) {
+        try { const v = JSON.parse(FA.storage.get(key)); return v === null ? fallback : v; } catch (e) { return fallback; }
+    }
+    let extraCols = new Set(loadJSON('screenerColumns', []));
+    let userViews = loadJSON('screenerViews', []);
+    if (!Array.isArray(userViews)) userViews = [];
+    let preset = 'all';
+    let activeUserView = null;
     let sortKey = 'capitalization';
-    let sortDir = -1; // -1 = descending
+    let sortDir = -1;
+    let selected = null;
 
-    const $ = (id) => document.getElementById(id);
-    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const RANGE_KEYS = [['pe', 'P/E', ''], ['pb', 'P/B', ''], ['div_yield', 'Див. дох.', '%'], ['roe', 'ROE', '%']];
 
-    function sourceText(row) {
-        const labels = (row.sources && row.sources.length ? row.sources : ['']).map((s) => SOURCE_LABELS[s] || s);
-        return labels.join(', ');
+    function num(id) {
+        const raw = $(id).value.trim();
+        const v = Number(raw);
+        return raw === '' || Number.isNaN(v) ? null : v;
     }
-    function valuationText(row) {
-        const earnings = row.earnings_period ? ' · прибыль ' + row.earnings_period : '';
-        return (row.current ? 'рынок · ' + row.price_date : 'отчёт · ' + (row.last_period || '—')) + earnings;
+    function inRange(v, lo, hi) {
+        if (lo === null && hi === null) return true;
+        if (!known(v)) return false; // unknown fails an active bound
+        return (lo === null || v >= lo) && (hi === null || v <= hi);
     }
-    // Gap to the sector median in % (negative = cheaper than the peers).
-    function vsSector(v, median) {
-        return v === null || v === undefined || !median ? null : (v / median - 1) * 100;
+    function filterState() {
+        const s = {
+            q: $('q').value.trim(), category: $('category').value,
+            comparable: $('comparable').checked, noflags: $('noflags').checked, ranges: {},
+        };
+        for (const [k] of RANGE_KEYS) s.ranges[k] = [num(k + '_min'), num(k + '_max')];
+        return s;
     }
-    for (const r of ROWS) r.pe_vs_sector = vsSector(r.pe, r.pe_sector);
+    function applyFilterState(s) {
+        $('q').value = s.q || '';
+        $('category').value = s.category || '';
+        $('comparable').checked = !!s.comparable;
+        $('noflags').checked = !!s.noflags;
+        for (const [k] of RANGE_KEYS) {
+            const r = (s.ranges && s.ranges[k]) || [null, null];
+            $(k + '_min').value = known(r[0]) ? r[0] : '';
+            $(k + '_max').value = known(r[1]) ? r[1] : '';
+        }
+    }
+    function passes(r, s, p) {
+        const q = s.q.toLowerCase();
+        return p.test(r) &&
+            (!q || r.company.toLowerCase().includes(q)) &&
+            (!s.category || r.category === s.category) &&
+            (!s.comparable || r.comparable) &&
+            (!s.noflags || r.anomalies === 0) &&
+            RANGE_KEYS.every(([k]) => inRange(r[k], s.ranges[k][0], s.ranges[k][1]));
+    }
+
+    // ------------------------------------------------------------ views row
+    function renderViews() {
+        const s = filterState();
+        const base = Object.assign({}, s, { q: '', category: '', comparable: false, noflags: false, ranges: {} });
+        for (const [k] of RANGE_KEYS) base.ranges[k] = [null, null];
+        const html = PRESETS.map((p) => {
+            const n = ROWS.filter((r) => passes(r, base, p)).length;
+            const on = activeUserView === null && preset === p.id;
+            return '<button type="button" class="chip-btn" data-preset="' + p.id + '" aria-pressed="' + on + '">' +
+                esc(p.label) + ' <span class="count num">' + n + '</span></button>';
+        });
+        userViews.forEach((v, i) => {
+            const on = activeUserView === i;
+            html.push('<span class="view-user"><button type="button" class="chip-btn" data-view="' + i + '" aria-pressed="' + on + '">' +
+                esc(v.name) + '</button><button type="button" class="view-del" data-view-del="' + i + '" aria-label="Удалить выборку ' + esc(v.name) + '">×</button></span>');
+        });
+        html.push('<span class="save-view" id="saveViewBox">' +
+            '<button type="button" class="chip-btn" id="saveViewBtn" style="border-style:dashed">+ Сохранить выборку</button></span>');
+        $('views').innerHTML = html.join('');
+    }
+    $('views').addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.preset) {
+            preset = b.dataset.preset;
+            activeUserView = null;
+            render();
+        } else if (b.dataset.view !== undefined) {
+            const i = Number(b.dataset.view), v = userViews[i];
+            if (!v) return;
+            activeUserView = i;
+            preset = v.preset || 'all';
+            applyFilterState(v.filters || {});
+            if (v.sortKey && COLUMNS.some((c) => c.key === v.sortKey)) { sortKey = v.sortKey; sortDir = v.sortDir === 1 ? 1 : -1; }
+            render();
+        } else if (b.dataset.viewDel !== undefined) {
+            userViews.splice(Number(b.dataset.viewDel), 1);
+            activeUserView = null;
+            FA.storage.set('screenerViews', JSON.stringify(userViews));
+            render();
+        } else if (b.id === 'saveViewBtn') {
+            $('saveViewBox').innerHTML = '<input class="input" id="saveViewName" maxlength="40" placeholder="Название выборки" aria-label="Название выборки">' +
+                '<button type="button" class="btn btn-sm btn-primary" id="saveViewOk">Сохранить</button>' +
+                '<button type="button" class="btn btn-sm btn-ghost" id="saveViewCancel">Отмена</button>';
+            $('saveViewName').focus();
+        } else if (b.id === 'saveViewOk') {
+            saveView();
+        } else if (b.id === 'saveViewCancel') {
+            renderViews();
+        }
+    });
+    $('views').addEventListener('keydown', (e) => {
+        if (e.target.id !== 'saveViewName') return;
+        if (e.key === 'Enter') saveView();
+        if (e.key === 'Escape') renderViews();
+    });
+    function saveView() {
+        const name = $('saveViewName').value.trim();
+        if (!name) { $('saveViewName').focus(); return; }
+        userViews.push({ name: name, preset: preset, filters: filterState(), sortKey: sortKey, sortDir: sortDir });
+        activeUserView = userViews.length - 1;
+        FA.storage.set('screenerViews', JSON.stringify(userViews));
+        render();
+    }
+
+    // ------------------------------------------------------------ filter chips
+    function renderChips(s) {
+        const chips = [];
+        if (s.category) chips.push(['category', 'Сектор: ' + s.category]);
+        for (const [k, label, unit] of RANGE_KEYS) {
+            const [lo, hi] = s.ranges[k];
+            if (lo === null && hi === null) continue;
+            let text = label + ' ';
+            if (lo !== null && hi !== null) text += lo + '–' + hi + unit;
+            else if (lo !== null) text += '≥ ' + lo + unit;
+            else text += '≤ ' + hi + unit;
+            chips.push([k, text]);
+        }
+        if (s.comparable) chips.push(['comparable', 'Сопоставимые данные']);
+        if (s.noflags) chips.push(['noflags', 'Без замечаний']);
+        $('chips').innerHTML = chips.map(([k, t]) =>
+            '<span class="chip">' + esc(t) + '<button type="button" data-clear="' + k + '" aria-label="Убрать условие ' + esc(t) + '">×</button></span>').join('');
+    }
+    $('chips').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-clear]');
+        if (!b) return;
+        const k = b.dataset.clear;
+        if (k === 'category') $('category').value = '';
+        else if (k === 'comparable' || k === 'noflags') $(k).checked = false;
+        else { $(k + '_min').value = ''; $(k + '_max').value = ''; }
+        activeUserView = null;
+        render();
+    });
+
+    // ------------------------------------------------------------ cells
     const pctText = (v) => Math.round(v) + '%';
-    // Tooltip of a valuation cell: the sector median and the history percentile.
     const BAND = {
         pe: ['pe_sector', 'pe_hist_pct', 'pe_sector_peers'],
         pb: ['pb_sector', 'pb_hist_pct', 'pb_sector_peers'],
         div_yield: ['div_yield_sector', 'div_yield_hist_pct', 'div_yield_sector_peers'],
     };
-    function bandTitle(col, row) {
-        const keys = BAND[col.key];
+    function fmtValue(kind, v, signed) {
+        switch (kind) {
+            case 'bln': return fmt.bln(v);
+            case 'ratio': return fmt.ratio(v);
+            case 'pct': return fmt.pct(v, signed);
+            default: return known(v) ? String(v) : '—';
+        }
+    }
+    function bandTitle(metric, row) {
+        const keys = BAND[metric];
         if (!keys) return '';
         const parts = [];
-        const med = row[keys[0]], pct = row[keys[1]];
-        if (med !== null && med !== undefined) parts.push('медиана сектора ' + fmt(col, med) + ' (аналогов: ' + row[keys[2]] + ')');
-        if (pct !== null && pct !== undefined) parts.push('перцентиль истории ' + pctText(pct));
+        const kind = metric === 'div_yield' ? 'pct' : 'ratio';
+        if (known(row[keys[0]])) parts.push('медиана сектора ' + fmtValue(kind, row[keys[0]]) + ' (аналогов: ' + row[keys[2]] + ')');
+        if (known(row[keys[1]])) parts.push('перцентиль истории ' + pctText(row[keys[1]]));
         return parts.join(' · ');
     }
-    function median(vals) {
-        if (!vals.length) return null;
-        const s = vals.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
-        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    function basisText(r) {
+        const earnings = r.earnings_period ? ' · прибыль ' + r.earnings_period : '';
+        return (r.current ? 'рынок · ' + fmt.date(r.price_date) : 'отчёт · ' + (r.last_period || '—')) + earnings;
+    }
+    function cell(c, r) {
+        const v = r[c.key];
+        switch (c.kind) {
+            case 'text': {
+                const meta = [r.category || '—', sourceText(r)].map(esc).join(' · ');
+                const warn = r.comparable ? '' : ' <span class="warn-mark" title="Данные уровня юрлица (РСБУ/ЦБ): сравнение с другими компаниями условно">⚠</span>';
+                return '<td class="left"><div class="co"><a href="/company/' + encodeURIComponent(r.company) + '">' + esc(r.company) +
+                    '</a><span class="meta">' + meta + warn + '</span></div></td>';
+            }
+            case 'vs': {
+                if (!known(v)) return '<td class="na">—</td>';
+                const w = Math.min(36, Math.abs(v) * 0.6);
+                const cls = v < 0 ? 'cheap' : 'dear';
+                const left = v < 0 ? 36 - w : 36;
+                return '<td title="' + esc(bandTitle('pe', r)) + '"><div class="rel"><div class="ruler" aria-hidden="true">' +
+                    '<div class="ruler-mid" style="left:36px"></div><div class="ruler-bar" style="left:' + left + 'px;width:' + w +
+                    'px;background:var(--' + cls + ')"></div></div><span class="num ' + (Math.abs(v) >= 20 ? cls : '') + '">' + fmt.pct(v, true) + '</span></div></td>';
+            }
+            case 'pctile': {
+                if (!known(v)) return '<td class="na">—</td>';
+                const cls = v <= 25 ? 'cheap' : (v >= 75 ? 'dear' : '');
+                return '<td title="Доля периодов за 10 лет, где P/E был ниже текущего"><div class="rel"><div class="ruler" aria-hidden="true">' +
+                    '<div class="ruler-mark" style="left:' + (v * 0.72).toFixed(1) + 'px"></div></div><span class="num ' + cls + '">' + pctText(v) + '</span></div></td>';
+            }
+            case 'score':
+                return '<td><span class="score num' + (v >= 70 ? ' hi' : '') + '">' + v + '</span></td>';
+            case 'flags':
+                return v ? '<td class="warn" title="Замечания к качеству данных — подробности в карточке компании">▲ ' + v + '</td>' : '<td class="na">—</td>';
+            case 'basis':
+                return '<td class="left"><span class="basis' + (r.stale ? ' stale" title="Отчётность слишком старая для оценки по текущей цене' : '') + '">' + esc(basisText(r)) + '</span></td>';
+            case 'cat':
+                return '<td class="left">' + esc(r.category || '—') + '</td>';
+            case 'source':
+                return '<td class="left"><span class="pill' + (r.comparable ? '' : ' pill-warn') + '">' + esc(sourceText(r)) + '</span></td>';
+        }
+        if (!known(v)) return '<td class="na">—</td>';
+        let cls = '';
+        if (c.signed) cls = v < 0 ? 'down' : (v > 0 ? 'up' : '');
+        else if ((c.key === 'pe' || c.key === 'roe') && v < 0) cls = 'down';
+        const title = c.band ? bandTitle(c.band, r) : '';
+        return '<td class="num ' + cls + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(fmtValue(c.kind, v, c.signed)) + '</td>';
     }
     function sortValue(row, key) {
         if (key === 'source') return sourceText(row);
         if (key === 'valuation') return row.current ? 'a' + row.price_date : 'b' + (row.last_period || '');
         return row[key];
     }
-
-    function fmt(col, v) {
-        if (v === null || v === undefined) return null;
-        switch (col.kind) {
-            case 'money': return v.toLocaleString('en-US', { maximumFractionDigits: v >= 100 ? 0 : 1 });
-            case 'ratio': return v.toFixed(2) + (col.key === 'debt_ebitda' ? 'x' : '');
-            case 'pct': return (col.signed && v > 0 ? '+' : '') + v.toFixed(1) + '%';
-            case 'pctile': return pctText(v);
-            case 'int': return String(v);
-            default: return String(v);
-        }
+    function median(vals) {
+        if (!vals.length) return null;
+        const s = vals.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     }
+    const NO_MEDIAN = new Set(['score', 'anomalies', 'pe_vs_sector', 'pe_hist_pct']);
 
-    function renderHead() {
-        $('head').innerHTML = COLUMNS.map((c) => {
-            const arrow = c.key === sortKey ? '<span class="arrow">' + (sortDir < 0 ? '▼' : '▲') + '</span>' : '';
-            return '<th class="' + (c.cls || '') + '" data-key="' + c.key + '">' + esc(c.label) + arrow + '</th>';
-        }).join('');
+    // ------------------------------------------------------------ render
+    function visibleColumns() {
+        return COLUMNS.filter((c) => c.base || extraCols.has(c.key));
     }
-
-    function num(id) {
-        const v = Number($(id).value.trim());
-        // An empty or unparseable box is no bound (NaN would reject every row).
-        return $(id).value.trim() === '' || Number.isNaN(v) ? null : v;
-    }
-    function inRange(v, lo, hi) {
-        if (lo === null && hi === null) return true;
-        if (v === null || v === undefined) return false; // unknown fails an active bound
-        return (lo === null || v >= lo) && (hi === null || v <= hi);
-    }
-
-    function filtered() {
-        const q = $('q').value.trim().toLowerCase();
-        const cat = $('category').value;
-        const onlyComparable = $('comparable').checked;
-        const noFlags = $('noflags').checked;
-        return ROWS.filter((r) =>
-            (!q || r.company.toLowerCase().includes(q)) &&
-            (!cat || r.category === cat) &&
-            (!onlyComparable || r.comparable) &&
-            (!noFlags || r.anomalies === 0) &&
-            ['pe', 'pb', 'div_yield', 'roe'].every((k) => inRange(r[k], num(k + '_min'), num(k + '_max')))
-        );
-    }
-
     function render() {
-        const rows = filtered().slice().sort((a, b) => {
+        const s = filterState();
+        const p = presetById(preset);
+        const cols = visibleColumns();
+        const rows = ROWS.filter((r) => passes(r, s, p)).sort((a, b) => {
             const va = sortValue(a, sortKey), vb = sortValue(b, sortKey);
-            const na = va === null || va === undefined, nb = vb === null || vb === undefined;
+            const na = !known(va), nb = !known(vb);
             if (na || nb) return na === nb ? 0 : (na ? 1 : -1); // unknown always last
             if (typeof va === 'string') return sortDir * va.localeCompare(vb);
             return sortDir * (va - vb);
         });
-        renderHead();
-        $('count').textContent = 'Показано ' + rows.length + ' из ' + ROWS.length;
-        renderFoot(rows);
+
+        renderViews();
+        renderChips(s);
+        $('count').innerHTML = 'Показано <b class="num">' + rows.length + '</b> из ' + ROWS.length;
+
+        $('head').innerHTML = '<th class="sel"><span class="visually-hidden">Сравнение</span></th>' + cols.map((c) => {
+            const sorted = c.key === sortKey;
+            const aria = sorted ? ' aria-sort="' + (sortDir < 0 ? 'descending' : 'ascending') + '"' : '';
+            const arrow = sorted ? (sortDir < 0 ? ' ↓' : ' ↑') : '';
+            return '<th class="sortable ' + (c.cls || '') + '"' + aria + '><button type="button" class="th-sort" data-key="' + c.key + '">' +
+                esc(c.label) + arrow + '</button></th>';
+        }).join('');
+
         if (!rows.length) {
-            $('body').innerHTML = '<tr><td class="empty" colspan="' + COLUMNS.length + '">Нет компаний, подходящих под фильтры.</td></tr>';
-            return;
+            $('body').innerHTML = '<tr><td class="empty" colspan="' + (cols.length + 1) + '">' +
+                (ROWS.length ? 'Нет компаний, подходящих под условия.' : 'Данных пока нет — загрузите их через <code>cmd/fetch</code> или <code>cmd/import</code>.') + '</td></tr>';
+        } else {
+            $('body').innerHTML = rows.map((r) => {
+                const inCmp = FA.compare.has(r.company);
+                return '<tr tabindex="0" data-company="' + esc(r.company) + '"' + (r.company === selected ? ' class="is-selected"' : '') + '>' +
+                    '<td class="sel"><input type="checkbox" data-compare="' + esc(r.company) + '"' + (inCmp ? ' checked' : '') +
+                    ' aria-label="Сравнить ' + esc(r.company) + '"></td>' +
+                    cols.map((c) => cell(c, r)).join('') + '</tr>';
+            }).join('');
         }
-        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-        $('body').innerHTML = rows.map((r) => '<tr>' + COLUMNS.map((c) => {
-            if (c.key === 'company') {
-                return '<td class="left"><a href="/company/' + encodeURIComponent(r.company) + '?theme=' + theme + '">' + esc(r.company) + '</a></td>';
-            }
-            if (c.key === 'category') return '<td class="left">' + esc(r.category || '—') + '</td>';
-            if (c.key === 'valuation') {
-                const title = r.stale ? ' title="Отчётность слишком старая для оценки по текущей цене"' : '';
-                return '<td class="left muted' + (r.stale ? ' flag' : '') + '"' + title + '>' + esc(valuationText(r)) + '</td>';
-            }
-            if (c.key === 'source') {
-                return '<td class="left"><span class="pill' + (r.comparable ? '' : ' warn') + '">' + esc(sourceText(r)) + '</span></td>';
-            }
-            if (c.key === 'anomalies') {
-                return r.anomalies ? '<td class="flag" title="Замечания к качеству данных">' + r.anomalies + '</td>' : '<td class="na">0</td>';
-            }
-            const text = fmt(c, r[c.key]);
-            if (text === null) return '<td class="na">—</td>';
-            let cls = '';
-            const v = r[c.key];
-            if (c.cheapBelow) cls = v <= -20 ? 'pos' : (v >= 20 ? 'neg' : '');
-            else if (c.kind === 'pctile') cls = v <= 25 ? 'pos' : (v >= 75 ? 'neg' : '');
-            else if (c.signed || c.key === 'pe' || c.key === 'roe') cls = v < 0 ? 'neg' : (c.signed && v > 0 ? 'pos' : '');
-            const title = bandTitle(c, r);
-            return '<td class="' + cls + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + esc(text) + '</td>';
-        }).join('') + '</tr>').join('');
+
+        if (rows.length < 2) {
+            $('foot').innerHTML = '';
+        } else {
+            $('foot').innerHTML = '<tr><td></td>' + cols.map((c, i) => {
+                if (i === 0) return '<td class="left">Медиана (' + rows.length + ')</td>';
+                if (['text', 'basis', 'source', 'score', 'flags'].includes(c.kind) || NO_MEDIAN.has(c.key)) return '<td></td>';
+                const m = median(rows.map((r) => r[c.key]).filter(known));
+                return '<td class="num">' + esc(fmtValue(c.kind, m, c.signed)) + '</td>';
+            }).join('') + '</tr>';
+        }
+        renderDrawer();
     }
 
-    // Median row over the companies shown: with a category selected, the
-    // sector median (this company included).
-    const NO_MEDIAN = new Set(['score', 'anomalies', 'pe_vs_sector', 'pe_hist_pct']);
-    function renderFoot(rows) {
-        if (rows.length < 2) { $('foot').innerHTML = ''; return; }
-        $('foot').innerHTML = '<tr>' + COLUMNS.map((c, i) => {
-            if (i === 0) return '<td class="left">Медиана (' + rows.length + ')</td>';
-            if (c.kind === 'text' || NO_MEDIAN.has(c.key)) return '<td></td>';
-            const vals = rows.map((r) => r[c.key]).filter((v) => v !== null && v !== undefined);
-            const text = fmt(c, median(vals));
-            return text === null ? '<td class="na">—</td>' : '<td>' + esc(text) + '</td>';
-        }).join('') + '</tr>';
-    }
     $('head').addEventListener('click', (e) => {
-        const th = e.target.closest('th');
-        if (!th) return;
-        const key = th.dataset.key;
+        const b = e.target.closest('.th-sort');
+        if (!b) return;
+        const key = b.dataset.key;
         if (key === sortKey) sortDir = -sortDir;
-        else { sortKey = key; sortDir = (key === 'company' || key === 'category') ? 1 : -1; }
+        else { sortKey = key; sortDir = (key === 'company' || key === 'source' || key === 'category') ? 1 : -1; }
         render();
     });
-    document.querySelectorAll('.filters input, .filters select').forEach((el) => el.addEventListener('input', render));
+    $('body').addEventListener('change', (e) => {
+        const box = e.target.closest('[data-compare]');
+        if (!box) return;
+        if (box.checked && !FA.compare.add(box.dataset.compare)) {
+            box.checked = false;
+            alertTray();
+        }
+        if (!box.checked) FA.compare.remove(box.dataset.compare);
+    });
+    function alertTray() {
+        $('count').textContent = 'В сравнении не больше ' + FA.compare.max + ' компаний';
+    }
+    // rowFor finds a company's row (names are matched, never put in a selector).
+    function rowFor(company) {
+        return Array.from($('body').querySelectorAll('tr[data-company]')).find((tr) => tr.dataset.company === company);
+    }
+    // markSelected highlights the drawer's row in place.
+    function markSelected() {
+        $('body').querySelectorAll('tr[data-company]').forEach((tr) => tr.classList.toggle('is-selected', tr.dataset.company === selected));
+    }
+    function openRow(tr) {
+        selected = tr.dataset.company;
+        markSelected();
+        renderDrawer();
+        // Keyboard users land in the drawer (on narrow screens it covers the table).
+        $('drawerClose').focus();
+    }
+    function closeDrawer() {
+        const company = selected;
+        selected = null;
+        markSelected();
+        renderDrawer();
+        const tr = rowFor(company);
+        if (tr) tr.focus();
+    }
+    $('body').addEventListener('click', (e) => {
+        if (e.target.closest('a, input, button')) return;
+        const tr = e.target.closest('tr[data-company]');
+        if (tr) openRow(tr);
+    });
+    $('body').addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-company]')) {
+            e.preventDefault();
+            openRow(e.target);
+        }
+    });
+    // A selection change updates the checkboxes in place, so the focused
+    // checkbox keeps focus.
+    FA.compare.onChange(() => {
+        $('body').querySelectorAll('[data-compare]').forEach((box) => { box.checked = FA.compare.has(box.dataset.compare); });
+        renderDrawer();
+    });
+
+    // ------------------------------------------------------------ drawer
+    function kpi(label, value, sub, cls) {
+        return '<div class="kpi"><div class="l">' + esc(label) + '</div><div class="v num ' + (cls || '') + '">' + esc(value) +
+            '</div><div class="s">' + esc(sub || ' ') + '</div></div>';
+    }
+    function whyLines(r) {
+        const lines = [];
+        const p = presetById(preset);
+        if (p.why) lines.push(p.why);
+        const s = filterState();
+        if (s.category) lines.push('сектор ' + s.category);
+        for (const [k, label, unit] of RANGE_KEYS) {
+            const [lo, hi] = s.ranges[k];
+            if (lo === null && hi === null) continue;
+            lines.push(label + ' ' + fmtValue(k === 'pe' || k === 'pb' ? 'ratio' : 'pct', r[k]) +
+                (lo !== null && hi !== null ? ' — в пределах ' + lo + '–' + hi + unit : lo !== null ? ' — не ниже ' + lo + unit : ' — не выше ' + hi + unit));
+        }
+        if (s.comparable) lines.push('сопоставимые данные');
+        if (s.noflags) lines.push('без замечаний к качеству данных');
+        return lines;
+    }
+    function renderDrawer() {
+        const d = $('drawer');
+        const r = ROWS.find((x) => x.company === selected);
+        if (!r) { d.hidden = true; return; }
+        const histSub = (k) => known(r[k]) ? 'перцентиль истории ' + pctText(r[k]) : '';
+        const vs = r.pe_vs_sector;
+        const vsCls = known(vs) && Math.abs(vs) >= 20 ? (vs < 0 ? 'cheap' : 'dear') : '';
+        const why = whyLines(r);
+        const inCmp = FA.compare.has(r.company);
+        d.innerHTML =
+            '<div class="drawer-head"><div><div class="small muted">' + esc(r.category || '—') + ' · ' + esc(sourceText(r)) + '</div>' +
+            '<h2 class="drawer-title" id="drawerTitle">' + esc(r.company) + '</h2>' +
+            '<div class="small muted">' + (r.current ? 'Оценка по закрытию ' + esc(fmt.date(r.price_date)) : 'По отчётности за ' + esc(r.last_period || '—')) + '</div></div>' +
+            '<button type="button" class="icon-btn" id="drawerClose" aria-label="Закрыть панель">×</button></div>' +
+            '<div class="kpi-grid">' +
+            kpi('P/E', fmt.ratio(r.pe), histSub('pe_hist_pct'), known(r.pe_hist_pct) && r.pe_hist_pct <= 25 ? 'cheap' : '') +
+            kpi('К сектору', known(vs) ? fmt.pct(vs, true) : '—', known(r.pe_sector) ? 'медиана ' + fmt.ratio(r.pe_sector) + ' · аналогов ' + r.pe_sector_peers : 'мало аналогов', vsCls) +
+            kpi('P/B', fmt.ratio(r.pb), histSub('pb_hist_pct')) +
+            kpi('Див. доходность', fmt.pct(r.div_yield), known(r.div_yield_sector) ? 'сектор ' + fmt.pct(r.div_yield_sector) : histSub('div_yield_hist_pct')) +
+            kpi('ROE', fmt.pct(r.roe), known(r.net_margin) ? 'чистая маржа ' + fmt.pct(r.net_margin) : '') +
+            kpi('Капитализация', fmt.money(r.capitalization), known(r.ev_ebit) ? 'EV/EBIT ' + fmt.ratio(r.ev_ebit) : '') +
+            '</div>' +
+            (why.length ? '<div><div style="font-weight:600;margin-bottom:8px">Почему в выборке</div><ul class="why">' +
+                why.map((w) => '<li>' + esc(w) + '</li>').join('') + '</ul></div>' : '') +
+            (r.comparable ? '' : '<div class="callout">' + esc(sourceText(r)) + ' — данные уровня юрлица: P/E и ROE несопоставимы с отчётностью групп.</div>') +
+            (r.anomalies ? '<div class="callout">▲ Замечаний к качеству данных: ' + r.anomalies + ' — подробности в карточке.</div>' : '') +
+            (r.stale ? '<div class="callout">Отчётность слишком старая для оценки по текущей цене.</div>' : '') +
+            '<div class="drawer-actions"><a class="btn btn-primary" href="/company/' + encodeURIComponent(r.company) + '">Открыть карточку</a>' +
+            '<button type="button" class="btn" id="drawerCompare" aria-pressed="' + inCmp + '">' + (inCmp ? '✓ В сравнении' : 'В сравнение') + '</button></div>';
+        d.hidden = false;
+        $('drawerClose').addEventListener('click', closeDrawer);
+        $('drawerCompare').addEventListener('click', () => {
+            if (!FA.compare.has(r.company) && !FA.compare.add(r.company)) { alertTray(); return; }
+            if (inCmp) FA.compare.remove(r.company);
+            // The change re-rendered the drawer: keep focus on the toggle.
+            if ($('drawerCompare')) $('drawerCompare').focus();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && selected && !document.querySelector('dialog[open]')) closeDrawer();
+    });
+
+    // ------------------------------------------------------------ panels
+    function togglePanel(btn, panel) {
+        const open = panel.hidden;
+        panel.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    }
+    $('filtersToggle').addEventListener('click', () => togglePanel($('filtersToggle'), $('filtersPanel')));
+    $('columnsToggle').addEventListener('click', () => togglePanel($('columnsToggle'), $('columnsPanel')));
+    $('columnsList').innerHTML = OPTIONAL.map((c) =>
+        '<label class="check"><input type="checkbox" data-col="' + c.key + '"' + (extraCols.has(c.key) ? ' checked' : '') + '> ' + esc(c.label) + '</label>').join('');
+    $('columnsList').addEventListener('change', (e) => {
+        const key = e.target.dataset.col;
+        if (!key) return;
+        if (e.target.checked) extraCols.add(key); else extraCols.delete(key);
+        FA.storage.set('screenerColumns', JSON.stringify(Array.from(extraCols)));
+        render();
+    });
+    document.querySelectorAll('#filtersPanel input, #filtersPanel select, #q').forEach((el) =>
+        el.addEventListener('input', () => { activeUserView = null; render(); }));
     $('reset').addEventListener('click', () => {
-        document.querySelectorAll('.filters input').forEach((el) => { if (el.type === 'checkbox') el.checked = false; else el.value = ''; });
-        $('category').value = '';
+        applyFilterState({});
+        preset = 'all';
+        activeUserView = null;
         render();
     });
-    $('themeToggle').addEventListener('click', () => {
-        const dark = document.documentElement.getAttribute('data-theme') !== 'dark';
-        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
-        else document.documentElement.removeAttribute('data-theme');
-        try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
-        render(); // company links carry the theme
-    });
+
+    // ------------------------------------------------------------ freshness line
+    const dates = ROWS.filter((r) => r.current && r.price_date).map((r) => r.price_date).sort();
+    if (dates.length) {
+        $('freshness').textContent = 'Котировки на ' + fmt.date(dates[dates.length - 1]) + ' · ' + ROWS.length +
+            ' компаний. Нажмите на строку — откроется сводка, на тикер — карточка компании.';
+    }
 
     render();
+})();
 </script>
 </body>
 </html>

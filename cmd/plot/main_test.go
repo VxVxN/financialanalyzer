@@ -93,11 +93,19 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 
 func TestRouterReadEndpointsStayOpen(t *testing.T) {
 	h, _ := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	for _, target := range []string{"/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/manual-financials?company=SBER"} {
+	for _, target := range []string{"/", "/compare", "/static/app.css", "/static/app.js", "/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/manual-financials?company=SBER"} {
 		rec := serve(h, routeCase{method: http.MethodGet, target: target}, false)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status = %d, want 200", target, rec.Code)
 		}
+	}
+}
+
+func TestRouterScreenerMovedHome(t *testing.T) {
+	h, _ := newTestRouter(&config.Config{})
+	rec := serve(h, routeCase{method: http.MethodGet, target: "/screener"}, false)
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/" {
+		t.Errorf("GET /screener: status %d, location %q; want 301 to /", rec.Code, rec.Header().Get("Location"))
 	}
 }
 

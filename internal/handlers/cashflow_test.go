@@ -39,7 +39,7 @@ func TestCashFlowMetricsInUI(t *testing.T) {
 
 	body := do(t, srv, http.MethodGet, "/company/CF", "").Body.String()
 	for _, want := range []string{"EV/EBIT", "12.50", "P/FCF", "11.11", "Чистый долг", "250.00 млрд", "FCF (LTM)",
-		"EV/EBIT (сейчас)", "14.50", "EBIT LTM на 2025-Q4", "selectMetric('ev_ebit'"} {
+		"EV/EBIT (сейчас)", "14.50", "EBIT LTM на 2025-Q4", `data-metric="ev_ebit"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard lacks %q", want)
 		}
@@ -53,10 +53,10 @@ func TestCashFlowMetricsInUI(t *testing.T) {
 		t.Errorf("screener row = %v, want current EV/EBIT 14.5 and operating margin 20", rows[0])
 	}
 
-	index := do(t, srv, http.MethodGet, "/", "").Body.String()
+	compare := do(t, srv, http.MethodGet, "/compare", "").Body.String()
 	for _, id := range []string{`"ev_ebit"`, `"p_fcf"`, `"operating_cash_flow"`, `"cash"`} {
-		if !strings.Contains(index, id) {
-			t.Errorf("index metric list lacks %s", id)
+		if !strings.Contains(compare, id) {
+			t.Errorf("compare metric list lacks %s", id)
 		}
 	}
 }
