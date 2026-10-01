@@ -139,6 +139,44 @@ const (
 	RunAbandoned = "abandoned" // left "running" by a process that died
 )
 
+// Russian labels of run kinds, triggers and statuses, shared by the updates
+// page and the failure notifications.
+var (
+	runKindLabels = map[string]string{
+		RunKindQuotes:     "Котировки",
+		RunKindFinancials: "Отчётность и котировки",
+	}
+	runTriggerLabels = map[string]string{
+		TriggerCLI:      "вручную",
+		TriggerSchedule: "по расписанию",
+		TriggerCatchUp:  "пропущенный запуск",
+	}
+	runStatusLabels = map[string]string{
+		RunRunning:   "выполняется",
+		RunOK:        "успешно",
+		RunPartial:   "частично",
+		RunFailed:    "ошибка",
+		RunCanceled:  "прерван",
+		RunAbandoned: "оборван",
+	}
+)
+
+// RunKindLabel names a run kind in Russian (an unknown kind as is).
+func RunKindLabel(kind string) string { return labelOr(runKindLabels, kind) }
+
+// RunTriggerLabel names a run trigger in Russian (an unknown one as is).
+func RunTriggerLabel(trigger string) string { return labelOr(runTriggerLabels, trigger) }
+
+// RunStatusLabel names a run status in Russian (an unknown one as is).
+func RunStatusLabel(status string) string { return labelOr(runStatusLabels, status) }
+
+func labelOr(labels map[string]string, key string) string {
+	if l, ok := labels[key]; ok {
+		return l
+	}
+	return key
+}
+
 // FetchRun is one data refresh (a cmd/fetch run or a scheduled one in
 // cmd/plot), as logged in fetch_runs.
 type FetchRun struct {

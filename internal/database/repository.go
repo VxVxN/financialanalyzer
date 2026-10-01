@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strings"
@@ -499,6 +500,78 @@ func (r *Repository) GetMarketQuote(ctx context.Context, company string) (q mode
 		return models.MarketQuote{}, false, fmt.Errorf("get market quote %s: %w", company, err)
 	}
 	return q, true, nil
+}
+
+// fetchLockKey is the Postgres advisory lock that serializes data refreshes
+// across processes (cmd/fetch and the cmd/plot scheduler). Any fixed value
+// works as long as nothing else in the database uses it.
+const fetchLockKey int64 = 0x66615f6665746368 // "fa_fetch"
+
+// fetchUnlockTimeout bounds releasing the lock after a run.
+const fetchUnlockTimeout = 10 * time.Second
+
+// LockFetch takes the data-refresh lock, waiting for the holder to finish when
+// another fetch has it (onWait, if set, is called once before the wait). The
+// lock is a session-level advisory lock on a connection taken out of the pool
+// for the run, so it is released by release or, if the process dies, by
+// Postgres when the session ends. A canceled ctx aborts the wait. A success
+// always means the lock is held: a cancel racing the acquisition is an error.
+//
+// Session-level advisory locks need a real session: they do not work behind a
+// transaction-pooling proxy (PgBouncer in transaction mode).
+func (r *Repository) LockFetch(ctx context.Context, onWait func()) (release func(), err error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch lock: %w", err)
+	}
+	// The connection never goes back to the pool: its session settings are
+	// changed below, and one whose lock state is unknown (a failed or canceled
+	// statement, a failed unlock) must not be reused still holding the lock
+	// (advisory locks are re-entrant per session). ErrBadConn from Raw makes
+	// database/sql close it.
+	discard := func() {
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		_ = conn.Close()
+	}
+	fail := func(err error) (func(), error) {
+		discard()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return nil, fmt.Errorf("fetch lock: %w", err)
+	}
+
+	// A server-side lock_timeout or statement_timeout (common on managed
+	// Postgres) would end the wait with an error; the wait is bounded by ctx.
+	if _, err := conn.ExecContext(ctx, `SET lock_timeout = 0; SET statement_timeout = 0`); err != nil {
+		return fail(err)
+	}
+	var locked bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, fetchLockKey).Scan(&locked); err != nil {
+		return fail(err)
+	}
+	if !locked {
+		if onWait != nil {
+			onWait()
+		}
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, fetchLockKey); err != nil {
+			return fail(err)
+		}
+	}
+	// lib/pq may close the session on a cancel that lands just as the lock
+	// statement succeeds, losing the lock with no error.
+	if ctx.Err() != nil {
+		return fail(ctx.Err())
+	}
+
+	return func() {
+		uctx, cancel := context.WithTimeout(context.Background(), fetchUnlockTimeout)
+		defer cancel()
+		// Closing the session would free the lock too; the explicit unlock
+		// frees it at once even if the close is slow.
+		_, _ = conn.ExecContext(uctx, `SELECT pg_advisory_unlock($1)`, fetchLockKey)
+		discard()
+	}, nil
 }
 
 // StartFetchRun logs a run as started and returns its id.

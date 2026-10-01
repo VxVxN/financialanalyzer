@@ -36,6 +36,12 @@ type Config struct {
 	SchedulerEnabled   bool
 	ScheduleQuotes     string
 	ScheduleFinancials string
+
+	// TelegramBotToken/TelegramChatID make failed and partial data refreshes
+	// (cmd/fetch and the scheduler) send a message to that chat. Both empty
+	// disables notifications.
+	TelegramBotToken string
+	TelegramChatID   string
 }
 
 func LoadConfig() *Config {
@@ -55,6 +61,9 @@ func LoadConfig() *Config {
 		SchedulerEnabled:   getEnvBool("SCHEDULER_ENABLED"),
 		ScheduleQuotes:     getEnv("SCHEDULE_QUOTES", "07:00"),
 		ScheduleFinancials: getEnv("SCHEDULE_FINANCIALS", "sun 05:00"),
+
+		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
 	}
 }
 
@@ -79,6 +88,9 @@ func (c *Config) Validate() error {
 	if (c.AuthUser == "") != (c.AuthPassword == "") {
 		return fmt.Errorf("AUTH_USER and AUTH_PASSWORD (cmd/plot Basic Auth) must be set together")
 	}
+	if (c.TelegramBotToken == "") != (c.TelegramChatID == "") {
+		return fmt.Errorf("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (failure notifications) must be set together")
+	}
 	return nil
 }
 
@@ -91,6 +103,11 @@ func (c *Config) UsesDefaultPassword() bool {
 // AuthEnabled reports whether Basic Auth credentials are configured.
 func (c *Config) AuthEnabled() bool {
 	return c.AuthUser != "" && c.AuthPassword != ""
+}
+
+// NotifyEnabled reports whether failure notifications are configured.
+func (c *Config) NotifyEnabled() bool {
+	return c.TelegramBotToken != "" && c.TelegramChatID != ""
 }
 
 func getEnv(key, defaultValue string) string {

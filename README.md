@@ -31,6 +31,8 @@ tables.
 - **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
   quotes daily and financials weekly, catching up slots missed while it was
   down; `/updates` shows the timetable, quote freshness and every run's outcome.
+  Refreshes never overlap (a Postgres advisory lock makes a second run wait),
+  and a failed or partial run can be reported to Telegram.
 - **Self-contained binaries** — migrations and templates are embedded, so every
   binary runs from any working directory with nothing on disk beside it.
 - **Light/dark themes** on every page.
@@ -113,7 +115,11 @@ daily at 07:00 and financials (incrementally, then quotes) on Sundays at 05:00,
 Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off` disables a job).
 Runs are sequential; a slot missed while the server was down is caught up 30 s
 after startup. New companies are still added with `cmd/fetch`. Every run, from
-either binary, is logged in `fetch_runs` and shown on `/updates`.
+either binary, is logged in `fetch_runs` and shown on `/updates`. Runs from both
+binaries are serialized by a Postgres advisory lock: a `cmd/fetch` started
+during a scheduled refresh (or vice versa) waits for it to finish. With
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, a failed or partial run sends a
+message (status, failed tickers, error) to that chat.
 
 Dividends have no free exchange API, so they come from CSV: a row starting with
 `Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
@@ -151,6 +157,8 @@ All configuration is via environment variables (`internal/config`):
 | `SCHEDULER_ENABLED` | _(off)_ | `1` makes `cmd/plot` refresh data on a schedule |
 | `SCHEDULE_QUOTES` | `07:00`   | Daily quotes slot, Moscow time (`off` disables) |
 | `SCHEDULE_FINANCIALS` | `sun 05:00` | Weekly financials slot, Moscow time (`off` disables) |
+| `TELEGRAM_BOT_TOKEN` | _(empty)_ | Bot token for failed-refresh notifications |
+| `TELEGRAM_CHAT_ID` | _(empty)_ | Chat to notify (set with `TELEGRAM_BOT_TOKEN`) |
 
 The server logs a warning if the default database password is in use, or if
 `AUTH_USER`/`AUTH_PASSWORD` are unset (write endpoints are then open). See

@@ -110,3 +110,29 @@ func TestLoadConfigScheduler(t *testing.T) {
 		t.Errorf("ScheduleQuotes = %q", got)
 	}
 }
+
+func TestValidateTelegramPairing(t *testing.T) {
+	base := func() *Config {
+		return &Config{Port: 8088, DBHost: "h", DBPort: "5432", DBUser: "u", DBName: "d"}
+	}
+
+	c := base()
+	if err := c.Validate(); err != nil || c.NotifyEnabled() {
+		t.Fatalf("no telegram: err=%v enabled=%v, want nil/false", err, c.NotifyEnabled())
+	}
+
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+	t.Setenv("TELEGRAM_CHAT_ID", "-100500")
+	c = LoadConfig()
+	if err := c.Validate(); err != nil || !c.NotifyEnabled() {
+		t.Fatalf("full telegram: err=%v enabled=%v, want nil/true", err, c.NotifyEnabled())
+	}
+
+	for _, half := range []struct{ token, chat string }{{"123:abc", ""}, {"", "-100500"}} {
+		c = base()
+		c.TelegramBotToken, c.TelegramChatID = half.token, half.chat
+		if err := c.Validate(); err == nil {
+			t.Errorf("token=%q chat=%q: expected error for half-configured notifications", half.token, half.chat)
+		}
+	}
+}

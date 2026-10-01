@@ -21,34 +21,7 @@ var updatesTemplate = template.Must(
 	template.ParseFS(financialanalyzer.TemplatesFS, "templates/updates.html"),
 )
 
-var (
-	runKindLabels = map[string]string{
-		models.RunKindQuotes:     "Котировки",
-		models.RunKindFinancials: "Отчётность и котировки",
-	}
-	runTriggerLabels = map[string]string{
-		models.TriggerCLI:      "вручную",
-		models.TriggerSchedule: "по расписанию",
-		models.TriggerCatchUp:  "пропущенный запуск",
-	}
-	runStatusLabels = map[string]string{
-		models.RunRunning:   "выполняется",
-		models.RunOK:        "успешно",
-		models.RunPartial:   "частично",
-		models.RunFailed:    "ошибка",
-		models.RunCanceled:  "прерван",
-		models.RunAbandoned: "оборван",
-	}
-	weekdaysRu = [...]string{"воскресеньям", "понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам"}
-)
-
-// labelOr returns labels[key], or key itself for an unknown value.
-func labelOr(labels map[string]string, key string) string {
-	if l, ok := labels[key]; ok {
-		return l
-	}
-	return key
-}
+var weekdaysRu = [...]string{"воскресеньям", "понедельникам", "вторникам", "средам", "четвергам", "пятницам", "субботам"}
 
 // scheduleLabel renders a slot in Russian: "ежедневно в 07:00" or
 // "по воскресеньям в 05:00".
@@ -116,10 +89,10 @@ func quotesSummary(quotes map[string]models.MarketQuote, now time.Time) quotesVi
 
 func newRunView(r models.FetchRun) runView {
 	v := runView{
-		Kind:         labelOr(runKindLabels, r.Kind),
-		Trigger:      labelOr(runTriggerLabels, r.Trigger),
+		Kind:         models.RunKindLabel(r.Kind),
+		Trigger:      models.RunTriggerLabel(r.Trigger),
 		Scope:        r.Scope,
-		Status:       labelOr(runStatusLabels, r.Status),
+		Status:       models.RunStatusLabel(r.Status),
 		StatusClass:  r.Status,
 		Started:      mskTime(r.StartedAt),
 		Failed:       strings.Join(r.Failed, ", "),
@@ -205,7 +178,7 @@ func (controller *Controller) UpdatesHandler(w http.ResponseWriter, r *http.Requ
 	}
 	for _, j := range controller.scheduleStatus() {
 		data.Jobs = append(data.Jobs, jobView{
-			Label:    labelOr(runKindLabels, j.Name),
+			Label:    models.RunKindLabel(j.Name),
 			Schedule: scheduleLabel(j),
 			Next:     mskTime(j.Next),
 			Running:  j.Running,

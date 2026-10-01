@@ -72,6 +72,9 @@ type fakeStore struct {
 	lookupErr       error
 	abandoned       int
 	abandonTriggers []string
+	// doneWhileWaiting lists run kinds that a cmd/fetch run, holding the fetch
+	// lock, completes while the scheduler's catch-up of that kind waits.
+	doneWhileWaiting map[string]bool
 }
 
 func (f *fakeStore) LastCompletedRun(_ context.Context, kinds []string) (time.Time, bool, error) {
@@ -108,7 +111,20 @@ func runScheduler(t *testing.T, start time.Time, store *fakeStore, stopAfter int
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	run := func(_ context.Context, req fetcher.Request, trigger string) error {
+	run := func(ctx context.Context, req fetcher.Request, trigger string, stillNeeded func(context.Context) bool) error {
+		if stillNeeded != nil {
+			if store.doneWhileWaiting[req.Kind()] {
+				store.completed[req.Kind()] = clock
+				clock = clock.Add(10 * time.Minute)
+			}
+			if !stillNeeded(ctx) {
+				calls = append(calls, call{req.Kind(), "skipped " + trigger, clock})
+				if len(calls) >= stopAfter {
+					cancel()
+				}
+				return fetcher.ErrNotNeeded
+			}
+		}
 		calls = append(calls, call{req.Kind(), trigger, clock})
 		clock = clock.Add(3 * time.Minute)
 		if len(calls) >= stopAfter {
@@ -197,6 +213,25 @@ func TestSchedulerCatchUpFinancialsCoversQuotes(t *testing.T) {
 	settled := start.Add(defaultStartupDelay)
 	assertCalls(t, got, []call{
 		{fetcher.KindFinancials, fetcher.TriggerCatchUp, settled},
+		{fetcher.KindQuotes, fetcher.TriggerSchedule, msk(2026, 10, 1, 7, 0)},
+	})
+}
+
+// A manual cmd/fetch of the financials holds the fetch lock when the server
+// starts: the financials catch-up waits for it and, re-checked under the lock,
+// is skipped, and so is the quotes catch-up it covered.
+func TestSchedulerCatchUpSkippedAfterWait(t *testing.T) {
+	start := msk(2026, 9, 30, 12, 0)
+	store := &fakeStore{
+		completed: map[string]time.Time{
+			fetcher.KindQuotes:     msk(2026, 9, 25, 7, 0),
+			fetcher.KindFinancials: msk(2026, 9, 20, 5, 0),
+		},
+		doneWhileWaiting: map[string]bool{fetcher.KindFinancials: true},
+	}
+	got := runScheduler(t, start, store, 2, false)
+	assertCalls(t, got, []call{
+		{fetcher.KindFinancials, "skipped " + fetcher.TriggerCatchUp, start.Add(defaultStartupDelay + 10*time.Minute)},
 		{fetcher.KindQuotes, fetcher.TriggerSchedule, msk(2026, 10, 1, 7, 0)},
 	})
 }

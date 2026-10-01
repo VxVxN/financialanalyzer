@@ -7,11 +7,14 @@ import (
 	financialanalyzer "github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/database"
+	"github.com/VxVxN/financialanalyzer/internal/notify"
 )
 
 type Application struct {
 	db   *sql.DB
 	Repo *database.Repository
+	// Notifier reports failed data refreshes; nil when not configured.
+	Notifier notify.Notifier
 }
 
 func Init(cfg *config.Config) (*Application, error) {
@@ -25,10 +28,14 @@ func Init(cfg *config.Config) (*Application, error) {
 	}
 	repo := database.NewRepository(db)
 
-	return &Application{
+	app := &Application{
 		db:   db,
 		Repo: repo,
-	}, nil
+	}
+	if cfg.NotifyEnabled() {
+		app.Notifier = notify.NewTelegram(cfg.TelegramBotToken, cfg.TelegramChatID)
+	}
+	return app, nil
 }
 
 func (app *Application) MigrateDB() error {

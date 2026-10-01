@@ -142,8 +142,9 @@ func newScheduler(cfg *config.Config, app *application.Application, logger *slog
 	if err != nil {
 		return nil, err
 	}
-	run := func(ctx context.Context, req fetcher.Request, trigger string) error {
-		_, err := fetcher.RunRecorded(ctx, app.Repo, req, trigger, logger)
+	run := func(ctx context.Context, req fetcher.Request, trigger string, stillNeeded func(context.Context) bool) error {
+		opts := fetcher.RunOptions{Notifier: app.Notifier, StillNeeded: stillNeeded}
+		_, err := fetcher.RunRecorded(ctx, app.Repo, req, trigger, opts, logger)
 		return err
 	}
 	return scheduler.New(jobs, app.Repo, run, logger), nil

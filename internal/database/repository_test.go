@@ -454,3 +454,73 @@ func TestManualFinancials(t *testing.T) {
 		t.Errorf("manual entries left after DeleteCompany: %+v", list)
 	}
 }
+
+// TestLockFetch checks the cross-process fetch lock with two pools standing in
+// for cmd/fetch and cmd/plot.
+func TestLockFetch(t *testing.T) {
+	a := openTestDB(t)
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	releaseA, err := a.LockFetch(ctx, func() { t.Error("first lock waited") })
+	if err != nil {
+		t.Fatalf("lock A: %v", err)
+	}
+
+	// A canceled wait gives up and leaves no lock behind.
+	tctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	_, err = b.LockFetch(tctx, nil)
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lock B while held = %v, want the deadline", err)
+	}
+
+	waiting := make(chan struct{})
+	got := make(chan func(), 1)
+	go func() {
+		release, err := b.LockFetch(ctx, func() { close(waiting) })
+		if err != nil {
+			t.Errorf("lock B: %v", err)
+		}
+		got <- release
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("B did not wait for the lock A holds")
+	}
+	select {
+	case <-got:
+		t.Fatal("B took the lock while A held it")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	releaseA()
+	var releaseB func()
+	select {
+	case releaseB = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("B did not get the lock after A released it")
+	}
+	if releaseB == nil {
+		t.FailNow()
+	}
+	releaseB()
+
+	// Released for good, the canceled wait included: no advisory lock is
+	// left in the database, and A takes it again without waiting.
+	raw, err := sql.Open("postgres", os.Getenv("TEST_DATABASE_DSN"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer raw.Close()
+	var held int
+	if err := raw.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted`).Scan(&held); err != nil || held != 0 {
+		t.Errorf("advisory locks held after release = %d (err %v), want 0", held, err)
+	}
+	release, err := a.LockFetch(ctx, func() { t.Error("lock waited after both releases") })
+	if err != nil {
+		t.Fatalf("relock: %v", err)
+	}
+	release()
+}

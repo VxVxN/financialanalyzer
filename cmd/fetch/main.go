@@ -21,7 +21,10 @@
 // number (REGN). See "Banks (CBR forms 102/101)" below and the cbr package docs.
 //
 // Every run is logged in the fetch_runs table (shown on the web UI's
-// "Обновление данных" page).
+// "Обновление данных" page). Runs never overlap with each other or with the
+// cmd/plot scheduler: a Postgres advisory lock makes a second run wait. With
+// TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID set, a failed or partial run is
+// reported to that Telegram chat.
 //
 // Ticker resolution. The legal entity's INN is required (neither MOEX nor ГИР БО
 // bridges ticker<->INN), but it no longer has to be retyped: the bundled
@@ -109,7 +112,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
-	_, err = fetcher.RunRecorded(ctx, app.Repo, requestFromEnv(), fetcher.TriggerCLI, logger)
+	_, err = fetcher.RunRecorded(ctx, app.Repo, requestFromEnv(), fetcher.TriggerCLI, fetcher.RunOptions{Notifier: app.Notifier}, logger)
 	return err
 }
 

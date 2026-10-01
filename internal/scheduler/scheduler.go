@@ -129,8 +129,10 @@ type Store interface {
 	AbandonStaleRuns(ctx context.Context, olderThan time.Duration, triggers []string) (int64, error)
 }
 
-// RunFunc performs one fetch (fetcher.RunRecorded in production).
-type RunFunc func(ctx context.Context, req fetcher.Request, trigger string) error
+// RunFunc performs one fetch (fetcher.RunRecorded in production). stillNeeded,
+// when non-nil, is to be checked once the fetch lock is held (see
+// fetcher.RunOptions): false skips the run with fetcher.ErrNotNeeded.
+type RunFunc func(ctx context.Context, req fetcher.Request, trigger string, stillNeeded func(context.Context) bool) error
 
 // Scheduler runs jobs at their slots. Construct it with New.
 type Scheduler struct {
@@ -219,7 +221,10 @@ func (s *Scheduler) Run(ctx context.Context) {
 		// Checked just before each run, so a financials catch-up that also
 		// refreshed quotes satisfies the quotes job.
 		if s.missed(ctx, s.jobs[i]) {
-			s.execute(ctx, i, fetcher.TriggerCatchUp)
+			// Checked again once the fetch lock is held: a cmd/fetch run
+			// this one waited for may have done the work meanwhile.
+			j := s.jobs[i]
+			s.execute(ctx, i, fetcher.TriggerCatchUp, func(ctx context.Context) bool { return s.missed(ctx, j) })
 		}
 	}
 	// Slots that passed during the startup delay or a catch-up run were either
@@ -238,7 +243,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		if err := s.sleep(ctx, slot); err != nil {
 			return
 		}
-		s.execute(ctx, i, fetcher.TriggerSchedule)
+		s.execute(ctx, i, fetcher.TriggerSchedule, nil)
 		// A run that overran later slots skips them rather than firing
 		// back-to-back.
 		s.mu.Lock()
@@ -291,7 +296,7 @@ func (s *Scheduler) earliest() int {
 	return best
 }
 
-func (s *Scheduler) execute(ctx context.Context, i int, trigger string) {
+func (s *Scheduler) execute(ctx context.Context, i int, trigger string, stillNeeded func(context.Context) bool) {
 	j := s.jobs[i]
 	s.mu.Lock()
 	s.running = i
@@ -304,7 +309,11 @@ func (s *Scheduler) execute(ctx context.Context, i int, trigger string) {
 
 	s.logger.Info("Scheduler: run started", "job", j.Name(), "trigger", trigger)
 	start := s.now()
-	if err := s.run(ctx, j.Request, trigger); err != nil {
+	if err := s.run(ctx, j.Request, trigger, stillNeeded); err != nil {
+		if errors.Is(err, fetcher.ErrNotNeeded) {
+			s.logger.Info("Scheduler: run skipped, another run already did it", "job", j.Name())
+			return
+		}
 		if errors.Is(err, fetcher.ErrNoCompanies) {
 			s.logger.Info("Scheduler: nothing to refresh, the DB has no companies yet (add them with cmd/fetch)", "job", j.Name())
 			return
