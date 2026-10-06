@@ -211,3 +211,40 @@ func TestCashFlowGaps(t *testing.T) {
 		t.Error("annual EV mixes group net debt with a standalone cap")
 	}
 }
+
+// Debt written by a CSV onto an RSBU row that already holds the parent's cash
+// is one row with two kinds. Net debt, EV, EV/EBIT and P/FCF stay empty; FCF
+// itself does not use the balance sheet and stays.
+func TestMixedColumnSourcesWithholdValuation(t *testing.T) {
+	f := models.Float
+	h := []models.QuarterData{{
+		Year: 2025, Quarter: "Q4", Company: "M", Source: models.SourceRSBU,
+		Capitalization: f(500), Revenue: f(200),
+		Debt: f(100), DebtSource: models.SourceCSV,
+		Cash: f(10), CashSource: models.SourceRSBU,
+		OperatingProfit: f(50), OperatingCashFlow: f(40), Capex: f(10),
+	}}
+	for _, m := range []string{"net_debt", "ev", "ev_ebit", "p_fcf"} {
+		for _, period := range []Period{PeriodQuarter, PeriodAnnual} {
+			if _, ok := LatestValid(SeriesFor(h, m, period)); ok {
+				t.Errorf("%s/%s computed from mixed debt and cash", m, period)
+			}
+		}
+	}
+	if p := latestValue(t, SeriesFor(h, "fcf", PeriodAnnual)); p.Value != 30 {
+		t.Errorf("FCF = %v, want 30", p.Value)
+	}
+
+	// Same pipeline on both columns: net debt is ordinary.
+	h[0].DebtSource = models.SourceRSBU
+	if p := latestValue(t, SeriesFor(h, "net_debt", PeriodQuarter)); p.Value != 90 {
+		t.Errorf("same-source net debt = %v, want 90", p.Value)
+	}
+
+	quote := models.MarketQuote{Company: "M", Capitalization: 500, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+	h[0].DebtSource = models.SourceCSV
+	cur := BuildCurrent(h, quote)
+	if !math.IsNaN(cur.EVEBIT) || !math.IsNaN(cur.PFCF) {
+		t.Errorf("current EV/EBIT = %v P/FCF = %v, want both withheld", cur.EVEBIT, cur.PFCF)
+	}
+}

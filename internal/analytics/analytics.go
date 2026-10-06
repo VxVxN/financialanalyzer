@@ -363,8 +363,11 @@ func DerivedSeries(history []models.QuarterData, metric string, base Period) Ser
 
 	switch metric {
 	case "net_debt":
-		// Both are year-end (or quarter-end) balances.
-		return combine(pick("debt"), pick("cash"), -1)
+		// Both are year-end (or quarter-end) balances. A row whose debt and
+		// cash were written by different kinds of source (group IFRS versus
+		// standalone RSBU/CBR) has no net debt: the two figures are not one
+		// balance sheet.
+		return netDebtSeries(history, base)
 	case "ev":
 		return combine(pick("capitalization"), DerivedSeries(history, "net_debt", base), 1)
 	case "operating_margin":
@@ -377,7 +380,9 @@ func DerivedSeries(history []models.QuarterData, metric string, base Period) Ser
 	case "fcf":
 		return combine(SeriesFor(history, "operating_cash_flow", base), SeriesFor(history, "capex", base), -1)
 	case "p_fcf":
-		return ratio(pick("capitalization"), positiveOnly(pickFlow("fcf")), 1)
+		// Withheld on a period whose debt and cash come from different kinds,
+		// same as EV: the row is not one reporting entity.
+		return blankWhere(ratio(pick("capitalization"), positiveOnly(pickFlow("fcf")), 1), mixedBalanceLabels(history, base))
 	case "net_margin":
 		return ratio(pick("net_profit"), pick("revenue"), 100)
 	case "ebitda_margin":
@@ -457,6 +462,161 @@ func ratio(num, den Series, scale float64) Series {
 			val = p.Value / d * scale
 		}
 		out = append(out, Point{Label: p.Label, Year: p.Year, Index: p.Index, Value: val, Standalone: p.Standalone})
+	}
+	return out
+}
+
+// effectiveSource is the pipeline that wrote one balance-sheet column, or
+// the row source when that column was stored before per-column sources.
+func effectiveSource(column, row string) string {
+	if column != "" {
+		return column
+	}
+	return row
+}
+
+// kindsDisagree reports whether two non-empty sources are different reporting
+// kinds. An empty source is unknown and does not by itself withhold a figure.
+func kindsDisagree(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return IsComparable(a) != IsComparable(b)
+}
+
+// balanceKindMixed reports whether this row's debt and cash cannot be
+// subtracted: both are present, and they come from different kinds.
+func balanceKindMixed(q models.QuarterData) bool {
+	if q.Debt == nil || q.Cash == nil {
+		return false
+	}
+	return kindsDisagree(effectiveSource(q.DebtSource, q.Source), effectiveSource(q.CashSource, q.Source))
+}
+
+// pairMixed reports whether the debt observation and the cash observation
+// (possibly different quarters of one year) are not one balance sheet.
+func pairMixed(debtQ, cashQ models.QuarterData) bool {
+	if standalone(debtQ) != standalone(cashQ) {
+		return true
+	}
+	return kindsDisagree(
+		effectiveSource(debtQ.DebtSource, debtQ.Source),
+		effectiveSource(cashQ.CashSource, cashQ.Source),
+	)
+}
+
+func quarterNetDebt(q models.QuarterData) (float64, bool) {
+	if q.Debt == nil || q.Cash == nil || balanceKindMixed(q) {
+		return 0, false
+	}
+	return *q.Debt - *q.Cash, true
+}
+
+// netDebtSeries is debt − cash per period. Unlike combine, it also refuses a
+// single row whose two columns were written by different kinds of source.
+func netDebtSeries(history []models.QuarterData, base Period) Series {
+	hist := SortHistory(history)
+	if base == PeriodAnnual {
+		return annualNetDebt(hist)
+	}
+	out := make(Series, 0, len(hist))
+	for _, q := range hist {
+		val := math.NaN()
+		if v, ok := quarterNetDebt(q); ok {
+			val = v
+		}
+		out = append(out, Point{
+			Label:      qLabel(q.Year, q.Quarter),
+			Year:       q.Year,
+			Index:      q.Year*10 + quarterIdx(q.Quarter),
+			Value:      val,
+			Standalone: standalone(q),
+		})
+	}
+	return out
+}
+
+func annualNetDebt(hist []models.QuarterData) Series {
+	byYear := map[int][]models.QuarterData{}
+	var years []int
+	for _, q := range hist {
+		if _, seen := byYear[q.Year]; !seen {
+			years = append(years, q.Year)
+		}
+		byYear[q.Year] = append(byYear[q.Year], q)
+	}
+	sort.Ints(years)
+	out := make(Series, 0, len(years))
+	for _, y := range years {
+		quarters := byYear[y]
+		val := math.NaN()
+		sa := standalone(quarters[len(quarters)-1])
+		if debtQ, cashQ, ok := latestDebtAndCash(quarters); ok && !pairMixed(debtQ, cashQ) {
+			val = *debtQ.Debt - *cashQ.Cash
+			sa = standalone(debtQ)
+		}
+		out = append(out, Point{
+			Label:      formatYear(y),
+			Year:       y,
+			Index:      y,
+			Value:      val,
+			Standalone: sa,
+		})
+	}
+	return out
+}
+
+// latestDebtAndCash returns the latest quarter of the year that reports debt
+// and the latest that reports cash. ok is false when either is missing.
+func latestDebtAndCash(quarters []models.QuarterData) (debtQ, cashQ models.QuarterData, ok bool) {
+	var haveDebt, haveCash bool
+	for i := len(quarters) - 1; i >= 0; i-- {
+		if !haveDebt && quarters[i].Debt != nil {
+			debtQ, haveDebt = quarters[i], true
+		}
+		if !haveCash && quarters[i].Cash != nil {
+			cashQ, haveCash = quarters[i], true
+		}
+	}
+	return debtQ, cashQ, haveDebt && haveCash
+}
+
+// mixedBalanceLabels names the periods whose debt and cash are not one
+// balance sheet. Quarterly labels are "YYYY-Qq"; annual labels are "YYYY".
+func mixedBalanceLabels(history []models.QuarterData, base Period) map[string]bool {
+	hist := SortHistory(history)
+	out := map[string]bool{}
+	if base == PeriodAnnual {
+		byYear := map[int][]models.QuarterData{}
+		for _, q := range hist {
+			byYear[q.Year] = append(byYear[q.Year], q)
+		}
+		for y, quarters := range byYear {
+			if debtQ, cashQ, ok := latestDebtAndCash(quarters); ok && pairMixed(debtQ, cashQ) {
+				out[formatYear(y)] = true
+			}
+		}
+		return out
+	}
+	for _, q := range hist {
+		if balanceKindMixed(q) {
+			out[qLabel(q.Year, q.Quarter)] = true
+		}
+	}
+	return out
+}
+
+// blankWhere sets a point to NaN when its label is in mixed.
+func blankWhere(s Series, mixed map[string]bool) Series {
+	if len(mixed) == 0 || len(s) == 0 {
+		return s
+	}
+	out := make(Series, len(s))
+	for i, p := range s {
+		if mixed[p.Label] {
+			p.Value = math.NaN()
+		}
+		out[i] = p
 	}
 	return out
 }
@@ -932,7 +1092,7 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 		}
 	}
 	if p, ok := LatestValid(DerivedSeries(history, "fcf", PeriodTTM)); ok {
-		if recent(p, &cur.FCFLabel) && p.Value > 0 {
+		if recent(p, &cur.FCFLabel) && p.Value > 0 && !mixedBalanceLabels(history, PeriodTTM)[p.Label] {
 			cur.PFCF = q.Capitalization / p.Value
 		}
 	}

@@ -373,6 +373,20 @@ func TestSaveQuarterDataCashFlowColumns(t *testing.T) {
 	}
 	assertMetric(t, "operating_cash_flow", got.OperatingCashFlow, f(20))
 	assertMetric(t, "cash", got.Cash, f(9))
+	if got.CashSource != models.SourceCSV || got.DebtSource != "" {
+		t.Errorf("cash source = %q, debt source = %q; want csv and empty", got.CashSource, got.DebtSource)
+	}
+
+	// CSV debt merged into an RSBU row keeps the parent's cash source, so the
+	// two columns no longer claim to be one balance sheet.
+	save(models.QuarterData{Company: "MIX", Source: models.SourceRSBU, Revenue: f(100), Debt: f(40), Cash: f(5)})
+	save(models.QuarterData{Company: "MIX", Source: models.SourceCSV, Debt: f(80)})
+	got = history(t, repo, "MIX")
+	if got.Source != models.SourceRSBU || got.DebtSource != models.SourceCSV || got.CashSource != models.SourceRSBU {
+		t.Errorf("MIX source = %q debt_source = %q cash_source = %q", got.Source, got.DebtSource, got.CashSource)
+	}
+	assertMetric(t, "debt", got.Debt, f(80))
+	assertMetric(t, "cash", got.Cash, f(5))
 
 	// Quarterly CSV flows, then annual RSBU ones: the CSV quarter's capex and
 	// operating profit go (the RSBU write did not carry them).

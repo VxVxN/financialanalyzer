@@ -124,6 +124,8 @@ func ApplyManual(history []QuarterData, manual []ManualFinancials) []QuarterData
 			Debt:              m.Debt,
 			Cash:              m.Cash,
 			Equity:            m.Equity,
+			DebtSource:        columnSource(m.Debt),
+			CashSource:        columnSource(m.Cash),
 		}
 		if m.Dividends != nil {
 			row.Dividends = m.Dividends
@@ -146,6 +148,15 @@ func ApplyManual(history []QuarterData, manual []ManualFinancials) []QuarterData
 		return out[a].Quarter < out[b].Quarter // "Q1" < "Q2" < "Q3" < "Q4"
 	})
 	return out
+}
+
+// columnSource stamps a manual figure with SourceManual. An unentered figure
+// has no source: the wholesale replace drops the fetched value.
+func columnSource(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return SourceManual
 }
 
 // PERatio returns capitalization / net profit, or nil when it is undefined

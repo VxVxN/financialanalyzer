@@ -44,8 +44,8 @@ const (
 func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterData) error {
 	query := `
     INSERT INTO company_financials (year, quarter, company, category, capitalization, revenue, net_profit, ebitda, debt, pe, roe, source, equity, dividends,
-        cash, operating_profit, operating_cash_flow, capex)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        cash, operating_profit, operating_cash_flow, capex, debt_source, cash_source)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
     ON CONFLICT (year, quarter, company)
     DO UPDATE SET
         -- source says what the flow metrics (revenue/net_profit/ebitda,
@@ -67,6 +67,11 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
         ebitda = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.ebitda
             ELSE COALESCE(EXCLUDED.ebitda, company_financials.ebitda) END,
         debt = COALESCE(EXCLUDED.debt, company_financials.debt),
+        -- A write stamps the column it actually fills. A dividends-only row
+        -- (debt left NULL) must not relabel debt that is already stored.
+        debt_source = CASE WHEN EXCLUDED.debt IS NOT NULL
+            THEN COALESCE(EXCLUDED.debt_source, company_financials.debt_source)
+            ELSE company_financials.debt_source END,
         pe = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.pe
             ELSE COALESCE(EXCLUDED.pe, company_financials.pe) END,
         roe = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.roe
@@ -74,6 +79,9 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
         equity = COALESCE(EXCLUDED.equity, company_financials.equity),
         dividends = COALESCE(EXCLUDED.dividends, company_financials.dividends),
         cash = COALESCE(EXCLUDED.cash, company_financials.cash),
+        cash_source = CASE WHEN EXCLUDED.cash IS NOT NULL
+            THEN COALESCE(EXCLUDED.cash_source, company_financials.cash_source)
+            ELSE company_financials.cash_source END,
         operating_profit = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.operating_profit
             ELSE COALESCE(EXCLUDED.operating_profit, company_financials.operating_profit) END,
         operating_cash_flow = CASE WHEN ` + periodKindFlip + ` THEN EXCLUDED.operating_cash_flow
@@ -100,9 +108,21 @@ func (r *Repository) SaveQuarterData(ctx context.Context, data models.QuarterDat
 		data.OperatingProfit,
 		data.OperatingCashFlow,
 		data.Capex,
+		metricSource(data.Debt, data.Source),
+		metricSource(data.Cash, data.Source),
 	)
 
 	return err
+}
+
+// metricSource returns the pipeline that wrote a column, or NULL when the
+// column was not part of this write or the write named no source. NULL on
+// update keeps the source already stored for that column.
+func metricSource(value *float64, source string) interface{} {
+	if value == nil || source == "" {
+		return nil
+	}
+	return source
 }
 
 func nullIfEmpty(val string) interface{} {
@@ -160,7 +180,8 @@ func (r *Repository) fetchedHistory(ctx context.Context, company string) ([]mode
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
 			COALESCE(source, ''), equity, dividends,
-			cash, operating_profit, operating_cash_flow, capex
+			cash, operating_profit, operating_cash_flow, capex,
+			COALESCE(debt_source, ''), COALESCE(cash_source, '')
 		FROM company_financials
 		WHERE company = $1
 		ORDER BY year,
@@ -187,6 +208,7 @@ func (r *Repository) fetchedHistory(ctx context.Context, company string) ([]mode
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 			&q.Equity, &q.Dividends,
 			&q.Cash, &q.OperatingProfit, &q.OperatingCashFlow, &q.Capex,
+			&q.DebtSource, &q.CashSource,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}
@@ -229,7 +251,8 @@ func (r *Repository) fetchedHistories(ctx context.Context, companies []string) (
 		SELECT year, quarter, company, COALESCE(category, ''),
 			capitalization, revenue, net_profit, ebitda, debt, pe, roe,
 			COALESCE(source, ''), equity, dividends,
-			cash, operating_profit, operating_cash_flow, capex
+			cash, operating_profit, operating_cash_flow, capex,
+			COALESCE(debt_source, ''), COALESCE(cash_source, '')
 		FROM company_financials
 		WHERE company IN (%s)
 		ORDER BY company, year,
@@ -256,6 +279,7 @@ func (r *Repository) fetchedHistories(ctx context.Context, companies []string) (
 			&q.EBITDA, &q.Debt, &q.PE, &q.ROE, &q.Source,
 			&q.Equity, &q.Dividends,
 			&q.Cash, &q.OperatingProfit, &q.OperatingCashFlow, &q.Capex,
+			&q.DebtSource, &q.CashSource,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan history row: %w", err)
 		}

@@ -18,10 +18,10 @@ const (
 	SourceManual = "manual"
 )
 
-// QuarterData is one company-period row. Source is row-level and "last writer
-// wins": the upsert merges metrics column by column, so after two pipelines
-// write the same period the label names the latest one while untouched columns
-// may still hold the earlier source's values.
+// QuarterData is one company-period row. Source is row-level and follows the
+// flows ("last writer wins" only when the write carries flows). Debt and cash
+// merge on their own and remember who wrote them (DebtSource, CashSource), so
+// a CSV debt figure on an RSBU row does not pretend to share the parent's cash.
 //
 // Metric fields are pointers: nil means "not reported" (stored as NULL, and the
 // upsert keeps whatever the column held), while a non-nil zero is a real zero
@@ -54,6 +54,13 @@ type QuarterData struct {
 	// Cash is cash and equivalents at period end (RSBU line 1250), a stock
 	// like Debt; net debt = Debt - Cash.
 	Cash *float64
+	// DebtSource and CashSource name the pipeline that wrote that column
+	// (a Source* constant). Empty means the column was not written, or was
+	// stored before sources were tracked: analytics then uses Source. When
+	// the two disagree in kind (group IFRS versus standalone RSBU/CBR), net
+	// debt, EV, EV/EBIT and P/FCF for that period are withheld.
+	DebtSource string
+	CashSource string
 	// OperatingProfit (RSBU line 2200, profit from sales; the operating
 	// profit row of a CSV), OperatingCashFlow (line 4100) and Capex (line
 	// 4221, stored as a positive outflow) are flows like Revenue.

@@ -499,6 +499,9 @@ func TestScreener(t *testing.T) {
 	if !strings.Contains(body, "SBER") || !strings.Contains(body, `<option value="banks">`) {
 		t.Error("page is missing rows or the category filter")
 	}
+	if !strings.Contains(body, `id="comparable" type="checkbox"`) || strings.Contains(body, `id="comparable" type="checkbox" checked`) {
+		t.Error("comparable filter must be available and off by default")
+	}
 }
 
 func TestDashboardCurrentValuation(t *testing.T) {

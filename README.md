@@ -112,10 +112,11 @@ On `/updates`:
   tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks separately;
   «весь реестр», «только котировки», «перезаписать периоды» (`force`).
 - **Импорт CSV** — `КОМПАНИЯ_КАТЕГОРИЯ.csv`, semicolon-delimited.
+- **Годовые МСФО** — semicolon CSV, one company-year per row (`компания;год;выручка;чистая прибыль;капитал;долг;денежные средства;дивиденды`), stored as manual entries so a fetch cannot overwrite them. The screener can hide RSBU and CBR rows with «Только сопоставимые данные».
 - **Реестр тикеров** — propose `fetch_tickers.txt` from MOEX ISS + ГИР БО
   (optional subset of tickers); download, diff, commit.
 
-`POST /api/fetch`, `POST /api/registry` and `POST /api/import` are the same
+`POST /api/fetch`, `POST /api/registry`, `POST /api/import` and `POST /api/import-manual` are the same
 actions (auth when `AUTH_*` are set). The fetch is recorded in `fetch_runs`.
 The scheduler (on by default) refreshes quotes daily at 07:00 and financials on
 Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off`

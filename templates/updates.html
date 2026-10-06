@@ -87,6 +87,23 @@
         </div>
     </section>
 
+    <section class="block" aria-labelledby="h-manual">
+        <h2 id="h-manual">Годовые МСФО</h2>
+        <div class="card note">
+            <p>Пакетный ввод тех же годовых цифр, что форма на карточке компании: одна строка — компания и год, миллиарды рублей. Пустая ячейка — «не вводили», ноль — настоящий ноль. Запись заменяет ручной ввод за этот год целиком и не затирается загрузкой из ГИР БО.</p>
+            <p>Колонки: <code>компания;год;выручка;чистая прибыль;капитал;долг;денежные средства;дивиденды</code>. По желанию ещё <code>ebitda</code>, <code>операционная прибыль</code>, <code>операционный денежный поток</code>, <code>капзатраты</code>. Компания уже должна быть в базе.</p>
+            <form id="manual-form" class="ops-form" style="margin-top:16px">
+                <label>Файл
+                    <input type="file" id="manual-file" accept=".csv,text/csv" required>
+                </label>
+                <div class="ops-actions">
+                    <button type="submit" class="btn btn-primary" id="manual-submit">Загрузить МСФО</button>
+                    <span class="ops-status" id="manual-status"></span>
+                </div>
+            </form>
+        </div>
+    </section>
+
     <section class="block" aria-labelledby="h-registry">
         <h2 id="h-registry">Реестр тикеров</h2>
         <div class="card note">
@@ -284,6 +301,31 @@
             $('import-status').textContent = 'Ошибка: ' + err.message;
         }
         $('import-submit').disabled = false;
+    });
+
+    $('manual-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = $('manual-file').files[0];
+        if (!file) { $('manual-status').textContent = 'Выберите файл'; return; }
+        const body = new FormData();
+        body.append('file', file, file.name);
+        $('manual-status').textContent = 'Загрузка…';
+        $('manual-submit').disabled = true;
+        try {
+            const resp = await fetch('/api/import-manual', { method: 'POST', body: body });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                const detail = data.errors && data.errors.length ? data.errors.join('; ') : (data.error || resp.status);
+                throw new Error(detail);
+            }
+            let text = 'Сохранено лет: ' + data.saved + ' из ' + data.total;
+            if (data.errors && data.errors.length) text += '. Не записаны: ' + data.errors.join('; ');
+            $('manual-status').textContent = text;
+            $('manual-file').value = '';
+        } catch (err) {
+            $('manual-status').textContent = 'Ошибка: ' + err.message;
+        }
+        $('manual-submit').disabled = false;
     });
 })();
 </script>

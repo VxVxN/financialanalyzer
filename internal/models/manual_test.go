@@ -14,6 +14,7 @@ func TestApplyManualReplacesTheYearsStatements(t *testing.T) {
 		{Year: 2024, Quarter: "Q4", Company: "X5", Category: "retail", Source: SourceRSBU, Revenue: Float(60), NetProfit: Float(95)},
 		{Year: 2025, Quarter: "Q4", Company: "X5", Category: "retail", Source: SourceRSBU,
 			Capitalization: Float(800), Revenue: Float(85), NetProfit: Float(124), Debt: Float(119), Cash: Float(0.1),
+			DebtSource: SourceRSBU, CashSource: SourceRSBU,
 			Equity: Float(300), PE: Float(6.5), ROE: Float(41), Dividends: Float(70), OperatingCashFlow: Float(9)},
 	}
 	manual := []ManualFinancials{{Company: "X5", Year: 2025, Revenue: Float(4000), NetProfit: Float(100), Equity: Float(250), EBITDA: Float(300)}}
@@ -37,6 +38,8 @@ func TestApplyManualReplacesTheYearsStatements(t *testing.T) {
 		"roe":            {val(row.ROE), 40.0},             // 100 / 250
 		"debt":           {val(row.Debt), nil},             // the parent's RSBU debt goes
 		"cash":           {val(row.Cash), nil},
+		"debt_source":    {row.DebtSource, ""},
+		"cash_source":    {row.CashSource, ""},
 		"ocf":            {val(row.OperatingCashFlow), nil},
 	}
 	for name, c := range checks {
@@ -69,7 +72,8 @@ func TestApplyManualDividendsOnlyAndNewYears(t *testing.T) {
 	}
 	added := got[2]
 	if added.Year != 2026 || added.Quarter != "Q4" || added.Company != "SBER" || added.Category != "banks" ||
-		added.Source != SourceManual || val(added.NetProfit) != 1700.0 || val(added.Debt) != 0.0 || added.PE != nil {
+		added.Source != SourceManual || val(added.NetProfit) != 1700.0 || val(added.Debt) != 0.0 || added.PE != nil ||
+		added.DebtSource != SourceManual || added.CashSource != "" {
 		t.Errorf("new year row = %+v", added)
 	}
 

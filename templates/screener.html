@@ -150,7 +150,7 @@
             </div>
         </div>
         <div class="panel-foot">
-            <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные (не РСБУ/ЦБ)</label>
+            <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные (МСФО группы, без РСБУ/ЦБ)</label>
             <label class="check"><input id="noflags" type="checkbox"> Без замечаний к качеству данных</label>
             <span class="spacer" style="flex:1"></span>
             <button type="button" class="btn btn-sm btn-ghost" id="reset">Сбросить всё</button>
@@ -182,7 +182,7 @@
             не показываются. «Отчёт» — значения, сохранённые за последний период. При убытке P/E не считается.
             <b>EV/EBIT</b> — (капитализация + чистый долг) / операционная прибыль LTM (для РСБУ — прибыль от продаж);
             <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
-            <b>Сопоставимость</b>: неконсолидированная РСБУ и данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями.
+            <b>Сопоставимость</b>: неконсолидированная РСБУ и данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями. Флажок «Только сопоставимые данные» оставляет в таблице МСФО группы.
             <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории с актуальной оценкой
             (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
             <b>история P/E</b> — перцентиль: доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего;
@@ -301,7 +301,7 @@
     // ------------------------------------------------------------ views row
     function renderViews() {
         const s = filterState();
-        const base = Object.assign({}, s, { q: '', category: '', comparable: false, noflags: false, ranges: {} });
+        const base = Object.assign({}, s, { q: '', category: '', noflags: false, ranges: {} });
         for (const [k] of RANGE_KEYS) base.ranges[k] = [null, null];
         const html = PRESETS.map((p) => {
             const n = ROWS.filter((r) => passes(r, base, p)).length;
