@@ -1,0 +1,7 @@
+{
+"securities": {
+	"columns": ["secid", "isin", "emitent_inn", "emitent_title"],
+	"data": [
+		["FIXR", "RU000A108X38", null, null]
+	]
+}}

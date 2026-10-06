@@ -31,7 +31,9 @@ func TestResolveSpec(t *testing.T) {
 		{"space full", "lkoh  7708004767  oil", tickerSpec{"LKOH", "7708004767", "oil"}, true},
 		{"no category", "MTSS 7740000076", tickerSpec{"MTSS", "7740000076", ""}, true},
 		{"multiword category", "AFLT 7712040126 air transport", tickerSpec{"AFLT", "7712040126", "air transport"}, true},
-		{"unknown ticker, no inn", "ZZZZ", tickerSpec{}, false},
+		{"unknown ticker, no inn: left for the lookup", "ZZZZ:metals", tickerSpec{"ZZZZ", "", "metals"}, true},
+		{"bare unknown ticker", "ZZZZ", tickerSpec{"ZZZZ", "", ""}, true},
+		{"empty entry", " ", tickerSpec{}, false},
 		{"registry fills inn+category", "LKOH", tickerSpec{"LKOH", "7708004767", "oil"}, true},
 		{"registry inn, overridden category", "LKOH:energy", tickerSpec{"LKOH", "7708004767", "energy"}, true},
 		{"explicit inn overrides registry", "LKOH:1234567890", tickerSpec{"LKOH", "1234567890", "oil"}, true},
@@ -410,4 +412,52 @@ func deref(p *float64) any {
 		return nil
 	}
 	return *p
+}
+
+func TestFillMissingINN(t *testing.T) {
+	banks := map[string]bankSpec{"SBER": {Ticker: "SBER"}}
+	var looked []string
+	lookup := func(_ context.Context, secid string) (string, error) {
+		looked = append(looked, secid)
+		switch secid {
+		case "NLMK":
+			return "4823006703", nil
+		case "BAD":
+			return "n/a", nil
+		}
+		return "", errors.New("not found")
+	}
+	specs := []tickerSpec{
+		{Ticker: "LKOH", INN: "7708004767", Category: "oil"}, // registry: kept as is
+		{Ticker: "NLMK", Category: "metals"},                 // looked up
+		{Ticker: "SBER"},                                     // a bank: not looked up
+		{Ticker: "ZZZZ"},                                     // lookup fails
+		{Ticker: "BAD"},                                      // malformed INN
+	}
+	logger := slog.New(slog.DiscardHandler)
+	registry := map[string]tickerSpec{"LKOH": specs[0]}
+	got, failed := fillMissingINN(context.Background(), specs, registry, banks, lookup, logger)
+
+	want := []tickerSpec{
+		{Ticker: "LKOH", INN: "7708004767", Category: "oil"},
+		{Ticker: "NLMK", INN: "4823006703", Category: "metals"},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("resolved = %+v, want %+v", got, want)
+	}
+	if strings.Join(failed, ",") != "SBER,ZZZZ,BAD" {
+		t.Errorf("failed = %v, want SBER,ZZZZ,BAD", failed)
+	}
+	if strings.Join(looked, ",") != "NLMK,ZZZZ,BAD" {
+		t.Errorf("looked up %v, want NLMK,ZZZZ,BAD (no registry or bank lookups)", looked)
+	}
+
+	// A canceled run looks nothing up and reports the unresolved tickers.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	looked = nil
+	got, failed = fillMissingINN(ctx, specs[1:2], registry, banks, lookup, logger)
+	if len(got) != 0 || len(failed) != 1 || len(looked) != 0 {
+		t.Errorf("canceled: resolved %v, failed %v, looked %v", got, failed, looked)
+	}
 }

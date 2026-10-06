@@ -14,3 +14,4 @@ coverage.html
 # Local environment overrides
 .env
 .env.local
+.aider*

@@ -183,12 +183,22 @@ func Run(ctx context.Context, repo *database.Repository, req Request, logger *sl
 			if specs, err = loadTickerSpecs(req, registry); err != nil {
 				return sum, err
 			}
+			// Quotes need only the ticker: a quotes-only run keeps the
+			// specs without an INN and makes no lookups.
+			if !req.QuotesOnly {
+				var unresolved []string
+				specs, unresolved = fillMissingINN(ctx, specs, registry, bankRegistry, issINNLookup(logger), logger)
+				sum.Failed = append(sum.Failed, unresolved...)
+			}
 		}
 		if explicitBank {
 			bankSpecs = loadBankSpecs(bankRegistry, req.Banks)
 		}
 	}
 	if len(specs) == 0 && len(bankSpecs) == 0 && !fetchEverything {
+		if len(sum.Failed) > 0 {
+			return sum, fmt.Errorf("no tickers could be resolved: %s", strings.Join(sum.Failed, ","))
+		}
 		return sum, fmt.Errorf("no tickers: set FETCH_TICKERS / FETCH_TICKERS_FILE / FETCH_BANKS, or add registry entries")
 	}
 	if fetchEverything && !fetchAllRegistry && !req.QuotesOnly {

@@ -31,7 +31,8 @@
 // registry (fetch_tickers.txt, embedded via financialanalyzer.TickerRegistry)
 // maps every known ticker to its INN and default category. A request may give
 // just the ticker, a ticker+category, or the full ticker+INN+category; missing
-// fields are filled from the registry.
+// fields are filled from the registry, and the INN of a ticker the registry
+// lacks is looked up in MOEX ISS (cmd/registry proposes the registry itself).
 //
 //	FETCH_TICKERS       comma-separated entries, each "TICKER", "TICKER:CATEGORY"
 //	                    or "TICKER:INN:CATEGORY", e.g. "LKOH,GAZP:oil"

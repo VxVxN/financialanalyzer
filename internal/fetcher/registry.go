@@ -2,13 +2,16 @@ package fetcher
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/VxVxN/financialanalyzer"
 	"github.com/VxVxN/financialanalyzer/internal/database"
+	"github.com/VxVxN/financialanalyzer/internal/scraper/moex"
 )
 
 // ---- Ticker resolution ------------------------------------------------------
@@ -32,6 +35,27 @@ func loadRegistry() (map[string]tickerSpec, error) {
 		return nil, err
 	}
 	return registry, nil
+}
+
+// RegistryEntry is one bundled registry row.
+type RegistryEntry struct {
+	INN      string
+	Category string
+}
+
+// RegistryEntries returns the bundled registry (fetch_tickers.txt) by ticker,
+// for cmd/registry to keep known rows' names and categories and mark new and
+// changed ones.
+func RegistryEntries() (map[string]RegistryEntry, error) {
+	registry, err := loadRegistry()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]RegistryEntry, len(registry))
+	for t, spec := range registry {
+		out[t] = RegistryEntry{INN: spec.INN, Category: spec.Category}
+	}
+	return out, nil
 }
 
 // parseRegistryLine reads one "TICKER INN CATEGORY" registry line; the INN is
@@ -161,10 +185,11 @@ func splitFields(s string) []string {
 }
 
 // resolveSpec turns request fields ("TICKER", "TICKER CATEGORY", or
-// "TICKER INN CATEGORY") into a full spec, filling INN/category from the
-// registry when omitted. An all-digit field is treated as the INN, any other
-// trailing field as the category. Returns false when the INN cannot be
-// resolved (unknown ticker and none supplied).
+// "TICKER INN CATEGORY") into a spec, filling INN/category from the registry
+// when omitted. An all-digit field is treated as the INN, any other trailing
+// field as the category. Returns false only for an empty entry; an unknown
+// ticker given without an INN comes back with an empty INN, which
+// fillMissingINN then looks up.
 func resolveSpec(fields []string, registry map[string]tickerSpec) (tickerSpec, bool) {
 	if len(fields) == 0 {
 		return tickerSpec{}, false
@@ -193,11 +218,74 @@ func resolveSpec(fields []string, registry map[string]tickerSpec) (tickerSpec, b
 	if len(catTokens) > 0 {
 		spec.Category = strings.Join(catTokens, " ")
 	}
-
-	if spec.INN == "" {
-		return tickerSpec{}, false
-	}
 	return spec, true
+}
+
+// innLookup returns the issuer INN of a MOEX secid.
+type innLookup func(ctx context.Context, secid string) (string, error)
+
+// issINNLookup resolves INNs through MOEX ISS (security description -> ISIN
+// -> issuer). Only explicitly requested tickers go through it: a scheduled
+// run over stored companies relies on the registry alone, so an ISS outage
+// cannot fail it. The client is made on the first lookup.
+func issINNLookup(logger *slog.Logger) innLookup {
+	var c *moex.Client
+	return func(ctx context.Context, secid string) (string, error) {
+		if c == nil {
+			c = moex.NewClient()
+			c.Logger = logger
+		}
+		e, err := c.EmitterOf(ctx, secid)
+		return e.INN, err
+	}
+}
+
+// fillMissingINN completes the specs that have no INN (tickers missing from
+// the registry and given without one) by looking the issuer up. A bank
+// ticker is not looked up — banks file with the CBR, not ГИР БО — and, like a
+// failed lookup, is returned in failed so the run reports it instead of
+// dropping it silently. An INN the registry already has under another ticker
+// (a preferred share of a registered issuer) is warned about: the rows would
+// be stored as a second company with the same figures.
+func fillMissingINN(ctx context.Context, specs []tickerSpec, registry map[string]tickerSpec, banks map[string]bankSpec, lookup innLookup, logger *slog.Logger) (resolved []tickerSpec, failed []string) {
+	resolved = make([]tickerSpec, 0, len(specs))
+	for _, spec := range specs {
+		if spec.INN != "" {
+			resolved = append(resolved, spec)
+			continue
+		}
+		if _, ok := banks[spec.Ticker]; ok {
+			logger.Warn("Ticker is a bank: request it with FETCH_BANKS", "ticker", spec.Ticker)
+			failed = append(failed, spec.Ticker)
+			continue
+		}
+		if ctx.Err() != nil {
+			failed = append(failed, spec.Ticker)
+			continue
+		}
+		inn, err := lookup(ctx, spec.Ticker)
+		if err == nil && !isAllDigits(inn) {
+			err = fmt.Errorf("malformed INN %q", inn)
+		}
+		if err != nil {
+			logger.Warn("Ticker not in the registry and its INN cannot be resolved via MOEX ISS; give it as TICKER:INN",
+				"ticker", spec.Ticker, "error", err)
+			failed = append(failed, spec.Ticker)
+			continue
+		}
+		logger.Info("INN resolved via MOEX ISS (add the ticker to fetch_tickers.txt to pin it)",
+			"ticker", spec.Ticker, "inn", inn)
+		for _, r := range registry {
+			if r.INN == inn {
+				logger.Warn("The issuer is already registered under another ticker: this one will be a separate company with the same figures",
+					"ticker", spec.Ticker, "registered", r.Ticker)
+				break
+			}
+		}
+		spec.INN = inn
+		resolved = append(resolved, spec)
+	}
+	return resolved, failed
 }
 
 func isAllDigits(s string) bool {

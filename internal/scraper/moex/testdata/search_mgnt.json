@@ -1,0 +1,7 @@
+{
+"securities": {
+	"columns": ["secid", "isin", "emitent_inn", "emitent_title"],
+	"data": [
+		["MGNT", "RU000A0JKQU8", "2309085638", "Публичное акционерное общество \"Магнит\""]
+	]
+}}

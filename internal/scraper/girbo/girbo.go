@@ -26,6 +26,7 @@ package girbo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -201,6 +202,11 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 
 // ---- Parsing ----------------------------------------------------------------
 
+// ErrNoOrganization means ГИР БО found no organization at all for the INN (a
+// bank, a foreign issuer, or a wrong INN), as opposed to a failed request or
+// results without an exact INN match (a format quirk worth a look).
+var ErrNoOrganization = errors.New("no organization in ГИР БО")
+
 // BfoEntry identifies one annual report of an organization.
 type BfoEntry struct {
 	Year int
@@ -226,7 +232,7 @@ func parseSearch(body []byte, inn string) (int, error) {
 		}
 	}
 	if len(resp.Content) == 0 {
-		return 0, fmt.Errorf("no organization for inn %s (banks file with the Central Bank, not ГИР БО)", inn)
+		return 0, fmt.Errorf("%w for inn %s (banks file with the Central Bank, not ГИР БО)", ErrNoOrganization, inn)
 	}
 	return 0, fmt.Errorf("no exact inn match for %s among %d results", inn, len(resp.Content))
 }
