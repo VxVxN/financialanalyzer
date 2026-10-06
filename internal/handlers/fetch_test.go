@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,9 +16,6 @@ type fakeJobs struct {
 	mu       sync.Mutex
 	fetches  []fetcher.Request
 	fetchErr error
-	regs     []string
-	regErr   error
-	status   ops.RegistryStatus
 }
 
 func (f *fakeJobs) StartFetch(req fetcher.Request) error {
@@ -32,24 +28,12 @@ func (f *fakeJobs) StartFetch(req fetcher.Request) error {
 	return nil
 }
 func (f *fakeJobs) FetchRunning() bool { return false }
-func (f *fakeJobs) StartRegistry(tickers string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.regErr != nil {
-		return f.regErr
-	}
-	f.regs = append(f.regs, tickers)
-	return nil
-}
-func (f *fakeJobs) RegistrySnapshot() ops.RegistryStatus { return f.status }
 
 func newJobsServer(j Jobs) *chi.Mux {
 	c := NewController(&fakeRepo{}, slog.New(slog.DiscardHandler))
 	c.SetJobs(j)
 	r := chi.NewRouter()
 	r.Post("/api/fetch", c.StartFetch)
-	r.Post("/api/registry", c.StartRegistry)
-	r.Get("/api/registry", c.RegistryAPI)
 	return r
 }
 
@@ -80,28 +64,5 @@ func TestStartFetch(t *testing.T) {
 	rec = do(t, r, http.MethodPost, "/api/fetch", `{}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no jobs: %d", rec.Code)
-	}
-}
-
-func TestStartRegistryAndStatus(t *testing.T) {
-	now := testNow
-	j := &fakeJobs{status: ops.RegistryStatus{Include: 2, Text: "NLMK 1 metals", GeneratedAt: &now}}
-	rec := do(t, newJobsServer(j), http.MethodPost, "/api/registry", `{"tickers":"nlmk, phor"}`)
-	if rec.Code != http.StatusAccepted || len(j.regs) != 1 || j.regs[0] != "nlmk,phor" {
-		t.Errorf("start: %d %s regs=%v", rec.Code, rec.Body, j.regs)
-	}
-	rec = do(t, newJobsServer(j), http.MethodGet, "/api/registry", "")
-	var st ops.RegistryStatus
-	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
-		t.Fatal(err)
-	}
-	if st.Include != 2 || st.Text != "NLMK 1 metals" {
-		t.Errorf("status = %+v", st)
-	}
-
-	j.regErr = ops.ErrBusy
-	rec = do(t, newJobsServer(j), http.MethodPost, "/api/registry", `{}`)
-	if rec.Code != http.StatusConflict {
-		t.Errorf("busy: %d", rec.Code)
 	}
 }

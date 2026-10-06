@@ -37,27 +37,6 @@ func loadRegistry() (map[string]tickerSpec, error) {
 	return registry, nil
 }
 
-// RegistryEntry is one bundled registry row.
-type RegistryEntry struct {
-	INN      string
-	Category string
-}
-
-// RegistryEntries returns the bundled registry (fetch_tickers.txt) by ticker,
-// for POST /api/registry to keep known rows' names and categories and mark new and
-// changed ones.
-func RegistryEntries() (map[string]RegistryEntry, error) {
-	registry, err := loadRegistry()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]RegistryEntry, len(registry))
-	for t, spec := range registry {
-		out[t] = RegistryEntry{INN: spec.INN, Category: spec.Category}
-	}
-	return out, nil
-}
-
 // parseRegistryLine reads one "TICKER INN CATEGORY" registry line; the INN is
 // mandatory there (registry entries that lack it are skipped as malformed).
 func parseRegistryLine(line string) (tickerSpec, bool) {

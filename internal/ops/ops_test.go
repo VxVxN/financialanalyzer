@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -36,38 +35,6 @@ func TestStartFetchRejectsOverlap(t *testing.T) {
 	}
 	close(release)
 	waitUntil(t, func() bool { return !o.FetchRunning() })
-}
-
-func TestStartRegistryKeepsLastTextOnFailure(t *testing.T) {
-	var mu sync.Mutex
-	calls := 0
-	o := &Ops{
-		ctx:    context.Background(),
-		logger: slog.New(slog.DiscardHandler),
-		buildRegistry: func(_ context.Context, tickers string) (RegistryStatus, error) {
-			mu.Lock()
-			calls++
-			n := calls
-			mu.Unlock()
-			if n == 1 {
-				now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-				return RegistryStatus{Tickers: tickers, Text: "NLMK 1 metals", Include: 1, GeneratedAt: &now}, nil
-			}
-			return RegistryStatus{}, errors.New("girbo down")
-		},
-	}
-	if err := o.StartRegistry("NLMK"); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, func() bool { return !o.RegistrySnapshot().Running && o.RegistrySnapshot().Text != "" })
-	if err := o.StartRegistry("PHOR"); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, func() bool { st := o.RegistrySnapshot(); return !st.Running && st.Failed })
-	st := o.RegistrySnapshot()
-	if st.Text != "NLMK 1 metals" || st.Include != 1 || st.Tickers != "PHOR" {
-		t.Errorf("status = %+v", st)
-	}
 }
 
 func waitUntil(t *testing.T, ok func() bool) {

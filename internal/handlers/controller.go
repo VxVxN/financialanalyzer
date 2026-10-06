@@ -9,7 +9,6 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/models"
-	"github.com/VxVxN/financialanalyzer/internal/ops"
 )
 
 // Repository is the data-access surface the HTTP handlers depend on. Defining it
@@ -40,12 +39,10 @@ type ScheduleSource interface {
 	Status() []models.ScheduledJob
 }
 
-// Jobs starts background fetch and registry builds (*ops.Ops).
+// Jobs starts a background fetch (*ops.Ops).
 type Jobs interface {
 	StartFetch(req fetcher.Request) error
 	FetchRunning() bool
-	StartRegistry(tickers string) error
-	RegistrySnapshot() ops.RegistryStatus
 }
 
 type Controller struct {
@@ -72,7 +69,7 @@ func (controller *Controller) SetSchedule(s ScheduleSource) {
 	controller.schedule = s
 }
 
-// SetJobs wires the in-process fetch and registry runner.
+// SetJobs wires the in-process fetch runner.
 func (controller *Controller) SetJobs(j Jobs) {
 	controller.jobs = j
 }

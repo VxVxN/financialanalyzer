@@ -29,7 +29,6 @@
     .ops-form .checks label { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); }
     .ops-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .ops-status { font-size: 13px; color: var(--text-3); }
-    .ops-pre { margin: 12px 0 0; max-height: 360px; overflow: auto; padding: 12px 14px; font-size: 12px; line-height: 1.45; white-space: pre; }
 
 </style>
 </head>
@@ -39,7 +38,7 @@
     <div class="page-header">
         <div>
             <h1 class="page-title">Обновление данных</h1>
-            <p class="page-sub">Загрузка отчётности и котировок, предложение реестра тикеров, расписание и история запусков. Время московское. <a href="/">К скринеру</a></p>
+            <p class="page-sub">Загрузка отчётности и котировок, расписание и история запусков. Время московское. <a href="/">К скринеру</a></p>
         </div>
     </div>
 
@@ -85,24 +84,6 @@
                     <span class="ops-status" id="manual-status"></span>
                 </div>
             </form>
-        </div>
-    </section>
-
-    <section class="block" aria-labelledby="h-registry">
-        <h2 id="h-registry">Реестр тикеров</h2>
-        <div class="card note">
-            <p>Предложение <code>fetch_tickers.txt</code> из MOEX ISS и ГИР БО. Полный прогон — 10–15 минут; можно проверить несколько тикеров. Файл не перезаписывается: скачайте, сравните и закоммитьте.</p>
-            <form id="registry-form" class="ops-form" style="margin-top:16px">
-                <label>Только эти тикеры (пусто — вся доска TQBR)
-                    <input type="text" id="registry-tickers" placeholder="NLMK, PHOR">
-                </label>
-                <div class="ops-actions">
-                    <button type="submit" class="btn btn-primary" id="registry-submit">Собрать предложение</button>
-                    <a class="btn" id="registry-download" hidden download="fetch_tickers.proposed.txt">Скачать</a>
-                    <span class="ops-status" id="registry-status"></span>
-                </div>
-            </form>
-            <pre class="ops-pre" id="registry-text" hidden></pre>
         </div>
     </section>
 
@@ -219,53 +200,6 @@
             $('fetch-submit').disabled = false;
         }
     });
-
-    let poll;
-    function showRegistry(st) {
-        const status = $('registry-status');
-        const pre = $('registry-text');
-        const dl = $('registry-download');
-        $('registry-submit').disabled = !!st.running;
-        if (st.running) {
-            status.textContent = 'Собирается… полный прогон занимает 10–15 минут.';
-        } else if (st.failed) {
-            status.textContent = 'Сборка не удалась — подробности в журнале сервера.';
-        } else if (st.generated_at) {
-            status.textContent = 'Включить: ' + st.include + ', исключить: ' + st.exclude + ', сбой: ' + st.failed_count;
-        } else {
-            status.textContent = '';
-        }
-        if (st.text) {
-            pre.hidden = false;
-            pre.textContent = st.text;
-            dl.hidden = false;
-            dl.href = URL.createObjectURL(new Blob([st.text], { type: 'text/plain;charset=utf-8' }));
-        }
-        if (st.running) {
-            if (!poll) poll = setInterval(loadRegistry, 3000);
-        } else if (poll) {
-            clearInterval(poll);
-            poll = null;
-        }
-    }
-    async function loadRegistry() {
-        try {
-            const resp = await fetch('/api/registry');
-            if (!resp.ok) return;
-            showRegistry(await resp.json());
-        } catch (e) {}
-    }
-    $('registry-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        $('registry-status').textContent = 'Запуск…';
-        try {
-            await post('/api/registry', { tickers: $('registry-tickers').value });
-            loadRegistry();
-        } catch (err) {
-            $('registry-status').textContent = 'Ошибка: ' + err.message;
-        }
-    });
-    loadRegistry();
 
     $('manual-form').addEventListener('submit', async (e) => {
         e.preventDefault();

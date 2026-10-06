@@ -60,10 +60,13 @@ func TestUpdatesPage(t *testing.T) {
 	if strings.Contains(body, "Импорт CSV") {
 		t.Error("quarterly CSV import section is still on the page")
 	}
+	if strings.Contains(body, "Реестр тикеров") || strings.Contains(body, "Собрать предложение") {
+		t.Error("ticker registry proposal section is still on the page")
+	}
 	for _, want := range []string{
 		"ежедневно в 07:00", "Следующий запуск: 01.10.2026 07:00", // UTC shown as Moscow time
 		"по воскресеньям в 05:00", "выполняется сейчас",
-		"Загрузка данных", "Реестр тикеров", "Собрать предложение", "Годовые МСФО",
+		"Загрузка данных", "Годовые МСФО",
 		"Последняя цена закрытия: 29.09.2026", "Актуальны 1 из 2",
 		"30.09.2026 07:00", "Отчётность и котировки", "пропущенный запуск", "частично", "3 мин 5 с",
 		"обновлено компаний: 1, без изменений: 30, строк: 4; котировок: 40",

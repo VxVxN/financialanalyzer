@@ -201,7 +201,6 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 	r.Get("/api/company-note", controller.GetCompanyNote)
 	r.Get("/updates", controller.UpdatesHandler)
 	r.Get("/api/fetch-runs", controller.FetchRunsAPI)
-	r.Get("/api/registry", controller.RegistryAPI)
 	r.Get("/api/manual-financials", controller.GetManualFinancials)
 
 	// State-changing endpoints: Basic Auth when configured, and JSON-only
@@ -217,7 +216,6 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		r.Put("/api/manual-financials", controller.SaveManualFinancials)
 		r.Delete("/api/manual-financials", controller.DeleteManualFinancials)
 		r.Post("/api/fetch", controller.StartFetch)
-		r.Post("/api/registry", controller.StartRegistry)
 	})
 	r.Group(func(r chi.Router) {
 		if cfg.AuthEnabled() {
