@@ -168,13 +168,11 @@ func (controller *Controller) UpdatesHandler(w http.ResponseWriter, r *http.Requ
 		Quotes           quotesView
 		Runs             []runView
 		QuoteMaxAgeDays  int
-		FetchRunning     bool
 	}{
 		Meta:             pageMeta{Title: "Обновление данных", Active: "updates"},
 		SchedulerEnabled: controller.schedule != nil,
 		Quotes:           quotesSummary(quotes, controller.now()),
 		QuoteMaxAgeDays:  int(analytics.QuoteMaxAge / (24 * time.Hour)),
-		FetchRunning:     controller.jobs != nil && controller.jobs.FetchRunning(),
 	}
 	for _, j := range controller.scheduleStatus() {
 		data.Jobs = append(data.Jobs, jobView{

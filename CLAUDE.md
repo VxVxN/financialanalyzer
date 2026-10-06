@@ -16,8 +16,8 @@ Go application that ingests Russian-language quarterly financial data and serves
 # Run web server (reads env vars, see config.go for defaults)
 go run ./cmd/plot
 
-# Fetch and the annual IFRS batch live on the server: open /updates
-# (POST /api/fetch, POST /api/import-manual). JSON mirrors the old
+# The annual IFRS batch is on /updates (POST /api/import-manual). A data
+# refresh is POST /api/fetch. JSON mirrors the old
 # FETCH_* knobs: tickers, banks, all, force, quotes_only, concurrency,
 # bank_from_year. Empty tickers refresh companies already in the DB; all=true is
 # the full bundled registries; a ticker without an INN is looked up in MOEX ISS.

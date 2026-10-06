@@ -63,10 +63,13 @@ func TestUpdatesPage(t *testing.T) {
 	if strings.Contains(body, "Реестр тикеров") || strings.Contains(body, "Собрать предложение") {
 		t.Error("ticker registry proposal section is still on the page")
 	}
+	if strings.Contains(body, "Загрузка данных") || strings.Contains(body, "fetch-form") {
+		t.Error("fetch form section is still on the page")
+	}
 	for _, want := range []string{
 		"ежедневно в 07:00", "Следующий запуск: 01.10.2026 07:00", // UTC shown as Moscow time
 		"по воскресеньям в 05:00", "выполняется сейчас",
-		"Загрузка данных", "Годовые МСФО",
+		"Годовые МСФО",
 		"Последняя цена закрытия: 29.09.2026", "Актуальны 1 из 2",
 		"30.09.2026 07:00", "Отчётность и котировки", "пропущенный запуск", "частично", "3 мин 5 с",
 		"обновлено компаний: 1, без изменений: 30, строк: 4; котировок: 40",
@@ -83,7 +86,7 @@ func TestUpdatesPage(t *testing.T) {
 	rec = do(t, newUpdatesServer(&fakeRepo{}, nil), http.MethodGet, "/updates", "")
 	body = rec.Body.String()
 	if rec.Code != http.StatusOK || !strings.Contains(body, "SCHEDULER_ENABLED=1") ||
-		!strings.Contains(body, "формой ниже") ||
+		!strings.Contains(body, "Автоматическое обновление выключено") ||
 		!strings.Contains(body, "Котировок нет") || !strings.Contains(body, "Запусков пока не было") {
 		t.Errorf("empty page: status %d\n%s", rec.Code, body)
 	}

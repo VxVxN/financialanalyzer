@@ -38,8 +38,8 @@ tables.
   automatic refresh overwrites them (stored separately, overlaid on read).
 - **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
   quotes daily and financials weekly, catching up slots missed while it was
-  down; `/updates` starts a fetch on demand, and shows the
-  timetable, quote freshness and every run's outcome.
+  down; `/updates` shows the timetable, quote freshness and every run's
+  outcome. A refresh on demand is `POST /api/fetch`.
   Refreshes never overlap (a Postgres advisory lock makes a second run wait),
   and a failed or partial run can be reported to Telegram.
 - **Self-contained binaries** — migrations, templates and the UI's stylesheet,
@@ -107,13 +107,13 @@ running server** (`/updates`):
 
 On `/updates`:
 
-- **Загрузка данных** — empty tickers refresh companies already in the DB;
-  tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks separately;
-  «весь реестр», «только котировки», «перезаписать периоды» (`force`).
 - **Годовые МСФО** — semicolon CSV, one company-year per row (`компания;год;выручка;чистая прибыль;капитал;долг;денежные средства;дивиденды`), stored as manual entries so a fetch cannot overwrite them. The screener can hide RSBU and CBR rows with «Только сопоставимые данные».
 
-`POST /api/fetch` and `POST /api/import-manual` are the same
-actions (auth when `AUTH_*` are set). The fetch is recorded in `fetch_runs`.
+`POST /api/fetch` starts a refresh: empty tickers update companies already in
+the DB; tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks
+separately; `all`, `quotes_only` and `force`. `POST /api/import-manual` uploads
+the annual IFRS batch. Both need auth when `AUTH_*` are set. The fetch is
+recorded in `fetch_runs`.
 The scheduler (on by default) refreshes quotes daily at 07:00 and financials on
 Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off`
 disables a job). On startup, if a job has no completed run today (Moscow), it
@@ -173,7 +173,7 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/screener`                       | Redirects to `/`                     |
 | GET    | `/static/*`                       | Embedded stylesheet, script, fonts   |
 | GET    | `/api/screener`                   | Screener rows as JSON (null = no data) |
-| GET    | `/updates`                        | Fetch form, timetable, quote freshness, run history |
+| GET    | `/updates`                        | IFRS batch, timetable, quote freshness, run history |
 | GET    | `/api/fetch-runs`                 | Scheduler jobs and the latest 50 runs as JSON |
 | POST   | `/api/fetch`                      | Start a data refresh 🔒              |
 | POST   | `/api/import-manual`              | Import a batch of annual IFRS rows 🔒 |

@@ -87,7 +87,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}()
 	} else {
 		close(schedDone)
-		logger.Info("Scheduler disabled; data refreshes from /updates (set SCHEDULER_ENABLED=1 for a timetable)")
+		logger.Info("Scheduler disabled (set SCHEDULER_ENABLED=1 for a timetable)")
 	}
 
 	r := newRouter(cfg, controller)
