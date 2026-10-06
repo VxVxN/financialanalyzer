@@ -31,8 +31,8 @@ tables.
 - **Derived analytics** — net/EBITDA/operating margins, Debt/EBITDA, net debt,
   EV, EV/EBIT, free cash flow, P/FCF, P/B, dividend yield, revenue & net-profit
   YoY and 3y/5y CAGR, all computed on quarterly, TTM, or annual bases.
-- **Two ingestion paths** — CSV import and a free primary-source fetcher
-  (ГИР БО + MOEX ISS for companies, CBR forms 102/101 for banks).
+- **Primary-source fetch** — ГИР БО + MOEX ISS for companies, CBR forms 102/101
+  for banks.
 - **Manual IFRS / dividends entry** — type a year's group figures from the annual
   report on the dashboard; they replace the fetched RSBU for that year and no
   automatic refresh overwrites them (stored separately, overlaid on read).
@@ -103,20 +103,19 @@ Migrations are applied automatically on startup.
 
 ## Data ingestion
 
-Fetching financials, quotes, banks, a ticker-registry proposal and CSV import
-happen **on the running server** (`/updates`):
+Fetching financials, quotes, banks, a ticker-registry proposal and the annual
+IFRS batch happen **on the running server** (`/updates`):
 
 On `/updates`:
 
 - **Загрузка данных** — empty tickers refresh companies already in the DB;
   tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks separately;
   «весь реестр», «только котировки», «перезаписать периоды» (`force`).
-- **Импорт CSV** — `КОМПАНИЯ_КАТЕГОРИЯ.csv`, semicolon-delimited.
 - **Годовые МСФО** — semicolon CSV, one company-year per row (`компания;год;выручка;чистая прибыль;капитал;долг;денежные средства;дивиденды`), stored as manual entries so a fetch cannot overwrite them. The screener can hide RSBU and CBR rows with «Только сопоставимые данные».
 - **Реестр тикеров** — propose `fetch_tickers.txt` from MOEX ISS + ГИР БО
   (optional subset of tickers); download, diff, commit.
 
-`POST /api/fetch`, `POST /api/registry`, `POST /api/import` and `POST /api/import-manual` are the same
+`POST /api/fetch`, `POST /api/registry` and `POST /api/import-manual` are the same
 actions (auth when `AUTH_*` are set). The fetch is recorded in `fetch_runs`.
 The scheduler (on by default) refreshes quotes daily at 07:00 and financials on
 Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off`
@@ -126,9 +125,8 @@ Runs are sequential; overlapping runs wait on a Postgres advisory lock. With
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, a failed or partial run sends a
 message to that chat.
 
-Dividends have no free exchange API, so they come from CSV: a row starting with
-`Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
-means "no payout").
+Dividends have no free exchange API, so they are entered with the annual IFRS
+figures — on the company card or in the batch on `/updates`.
 
 Historical market caps undo later share splits (MOEX's split list plus the
 bundled `share_splits.txt` for splits MOEX omits); the fetcher warns when a cap
@@ -183,7 +181,7 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/api/registry`                   | Last ticker-registry proposal (status + text) |
 | POST   | `/api/fetch`                      | Start a data refresh 🔒              |
 | POST   | `/api/registry`                   | Start a registry proposal 🔒         |
-| POST   | `/api/import`                     | Import a COMPANY_CATEGORY.csv 🔒     |
+| POST   | `/api/import-manual`              | Import a batch of annual IFRS rows 🔒 |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |

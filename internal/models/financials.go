@@ -10,7 +10,7 @@ import (
 const (
 	SourceRSBU     = "rsbu"     // ГИР БО annual RSBU of the issuer (unconsolidated)
 	SourceCBR102   = "cbr_102"  // CBR form 102/123 of the bank legal entity (RSBU)
-	SourceCSV      = "csv"      // manual CSV import (usually group IFRS figures)
+	SourceCSV      = "csv"      // legacy quarterly CSV import (usually group IFRS; the import was removed)
 	SourceSmartLab = "smartlab" // smart-lab.ru aggregator (legacy rows; scraper removed)
 	// SourceManual marks a row overlaid from manual_financials (figures typed
 	// in on the dashboard, usually the group's IFRS annual report). It is

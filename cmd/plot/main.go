@@ -223,7 +223,6 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		if cfg.AuthEnabled() {
 			r.Use(handlers.RequireBasicAuth(cfg.AuthUser, cfg.AuthPassword))
 		}
-		r.Post("/api/import", controller.ImportCSV)
 		r.Post("/api/import-manual", controller.ImportManual)
 	})
 	return r

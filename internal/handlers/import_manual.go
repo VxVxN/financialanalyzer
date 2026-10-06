@@ -10,6 +10,8 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/parser"
 )
 
+const maxImportBytes = 8 << 20
+
 // ImportManual reads a semicolon CSV of annual IFRS figures (one company-year
 // per row) and stores them as manual entries, so a fetch cannot overwrite them.
 // A row replaces that company-year's previous manual entry entirely.

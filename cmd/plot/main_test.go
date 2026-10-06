@@ -158,27 +158,6 @@ func TestRouterAuthDisabled(t *testing.T) {
 	}
 }
 
-func TestRouterImportRequiresAuth(t *testing.T) {
-	h, repo := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	if rec := serveImport(h, false); rec.Code != http.StatusUnauthorized {
-		t.Errorf("without auth: %d", rec.Code)
-	}
-	if repo.writes != 0 {
-		t.Fatalf("unauthenticated import wrote %d times", repo.writes)
-	}
-	if rec := serveImport(h, true); rec.Code != http.StatusOK {
-		t.Errorf("with auth: %d %s", rec.Code, rec.Body)
-	}
-	if repo.writes == 0 {
-		t.Error("authenticated import did not write")
-	}
-
-	h, repo = newTestRouter(&config.Config{})
-	if rec := serveImport(h, false); rec.Code != http.StatusOK {
-		t.Errorf("auth off: %d %s", rec.Code, rec.Body)
-	}
-}
-
 func TestRouterImportManualRequiresAuth(t *testing.T) {
 	h, repo := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
 	if rec := serveManualImport(h, false); rec.Code != http.StatusUnauthorized {
@@ -202,22 +181,6 @@ func serveManualImport(h http.Handler, auth bool) *httptest.ResponseRecorder {
 	_, _ = fw.Write([]byte("company;year;revenue\nX5;2024;100\n"))
 	_ = w.Close()
 	req := httptest.NewRequest(http.MethodPost, "/api/import-manual", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	if auth {
-		req.SetBasicAuth("admin", "s3cret")
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
-}
-
-func serveImport(h http.Handler, auth bool) *httptest.ResponseRecorder {
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	fw, _ := w.CreateFormFile("file", "SBER_banks.csv")
-	_, _ = fw.Write([]byte("Метрика;2023-Q1\nКапитализация;1 000\n"))
-	_ = w.Close()
-	req := httptest.NewRequest(http.MethodPost, "/api/import", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	if auth {
 		req.SetBasicAuth("admin", "s3cret")
