@@ -1,11 +1,11 @@
 // Package scheduler runs the fetch pipelines on a timetable inside cmd/plot, so
-// quotes and financials stay current without anyone running cmd/fetch.
+// quotes and financials stay current without anyone clicking /updates.
 //
 // Jobs fire at wall-clock slots in Moscow time (daily "HH:MM" or weekly
 // "sun HH:MM"). Runs are strictly sequential — one goroutine, one fetch at a
 // time — and a slot that fires while another job is running waits for it. On
 // startup a job whose latest slot passed without a completed full-scope run
-// (per fetch_runs, which also records cmd/fetch runs) is caught up at once, so
+// (per fetch_runs, which also records manual /updates runs) is caught up at once, so
 // a server that was down at 07:00 still refreshes the day's quotes.
 package scheduler
 
@@ -221,7 +221,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 		// Checked just before each run, so a financials catch-up that also
 		// refreshed quotes satisfies the quotes job.
 		if s.missed(ctx, s.jobs[i]) {
-			// Checked again once the fetch lock is held: a cmd/fetch run
+			// Checked again once the fetch lock is held: a manual fetch
 			// this one waited for may have done the work meanwhile.
 			j := s.jobs[i]
 			s.execute(ctx, i, fetcher.TriggerCatchUp, func(ctx context.Context) bool { return s.missed(ctx, j) })
@@ -315,7 +315,7 @@ func (s *Scheduler) execute(ctx context.Context, i int, trigger string, stillNee
 			return
 		}
 		if errors.Is(err, fetcher.ErrNoCompanies) {
-			s.logger.Info("Scheduler: nothing to refresh, the DB has no companies yet (add them with cmd/fetch)", "job", j.Name())
+			s.logger.Info("Scheduler: nothing to refresh, the DB has no companies yet (add them from /updates)", "job", j.Name())
 			return
 		}
 		if ctx.Err() != nil {

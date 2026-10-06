@@ -1,8 +1,8 @@
-# Ticker list for `cmd/fetch` — MOEX issuers whose annual RSBU is published in
+# Ticker list for the fetcher — MOEX issuers whose annual RSBU is published in
 # ГИР БО (bo.nalog.gov.ru).
 #
 # Format:  TICKER  INN  CATEGORY   (one per line, "#" starts a comment)
-# Usage:   FETCH_TICKERS_FILE=fetch_tickers.txt go run ./cmd/fetch
+# Usage:   POST /api/fetch from /updates (or the scheduler)
 #
 # Each row's INN was verified against the live ГИР БО API on 2026-09-29 (the
 # INN resolves to the listed issuer and it has published reports). The earlier

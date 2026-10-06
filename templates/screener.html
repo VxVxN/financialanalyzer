@@ -504,7 +504,7 @@
 
         if (!rows.length) {
             $('body').innerHTML = '<tr><td class="empty" colspan="' + (cols.length + 1) + '">' +
-                (ROWS.length ? 'Нет компаний, подходящих под условия.' : 'Данных пока нет — загрузите их через <code>cmd/fetch</code> или <code>cmd/import</code>.') + '</td></tr>';
+                (ROWS.length ? 'Нет компаний, подходящих под условия.' : 'Данных пока нет — загрузите их на <a href="/updates">странице обновления данных</a> или через <code>cmd/import</code>.') + '</td></tr>';
         } else {
             $('body').innerHTML = rows.map((r) => {
                 const inCmp = FA.compare.has(r.company);

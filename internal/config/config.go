@@ -38,7 +38,7 @@ type Config struct {
 	ScheduleFinancials string
 
 	// TelegramBotToken/TelegramChatID make failed and partial data refreshes
-	// (cmd/fetch and the scheduler) send a message to that chat. Both empty
+	// the scheduler) send a message to that chat. Both empty
 	// disables notifications.
 	TelegramBotToken string
 	TelegramChatID   string

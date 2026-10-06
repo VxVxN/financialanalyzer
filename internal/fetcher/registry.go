@@ -44,7 +44,7 @@ type RegistryEntry struct {
 }
 
 // RegistryEntries returns the bundled registry (fetch_tickers.txt) by ticker,
-// for cmd/registry to keep known rows' names and categories and mark new and
+// for POST /api/registry to keep known rows' names and categories and mark new and
 // changed ones.
 func RegistryEntries() (map[string]RegistryEntry, error) {
 	registry, err := loadRegistry()
@@ -255,7 +255,7 @@ func fillMissingINN(ctx context.Context, specs []tickerSpec, registry map[string
 			continue
 		}
 		if _, ok := banks[spec.Ticker]; ok {
-			logger.Warn("Ticker is a bank: request it with FETCH_BANKS", "ticker", spec.Ticker)
+			logger.Warn("Ticker is a bank: request it as a bank on /updates", "ticker", spec.Ticker)
 			failed = append(failed, spec.Ticker)
 			continue
 		}

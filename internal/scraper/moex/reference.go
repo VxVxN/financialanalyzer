@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Reference data used to build the ticker registry (cmd/registry) and to
+// Reference data used to build the ticker registry (POST /api/registry) and to
 // resolve a ticker's INN on the fly: which shares trade on the board, who
 // issued each one, and which sector index lists it.
 

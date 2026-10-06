@@ -1,6 +1,6 @@
 # Securities whose MOEX secid changed. MOEX keeps the old trading history under
 # the old secid, so without this a renamed company has no historical close for
-# the years before the rename. cmd/fetch prices those years' market caps under
+# the years before the rename. The fetcher prices those years' market caps under
 # the old secid instead, on that secid's own (frozen) ISSUESIZE — the share
 # count at the time of the rename.
 #

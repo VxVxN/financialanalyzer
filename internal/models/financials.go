@@ -91,7 +91,7 @@ func ValueOrNaN(p *float64) float64 {
 }
 
 // MarketQuote is a company's latest exchange close and the market cap it
-// implies (price x current shares outstanding), refreshed by cmd/fetch.
+// implies (price x current shares outstanding), refreshed by the fetcher.
 type MarketQuote struct {
 	Company        string
 	Price          float64   // RUB per share
@@ -107,7 +107,7 @@ const (
 
 // Fetch run triggers (fetch_runs.trigger).
 const (
-	TriggerCLI      = "cli"      // cmd/fetch
+	TriggerCLI      = "cli"      // /updates POST /api/fetch
 	TriggerSchedule = "schedule" // cmd/plot scheduler, at its slot
 	TriggerCatchUp  = "catchup"  // cmd/plot scheduler, a missed slot on startup
 )
@@ -177,7 +177,7 @@ func labelOr(labels map[string]string, key string) string {
 	return key
 }
 
-// FetchRun is one data refresh (a cmd/fetch run or a scheduled one in
+// FetchRun is one data refresh (a manual /updates run or a scheduled one in
 // cmd/plot), as logged in fetch_runs.
 type FetchRun struct {
 	ID           int64      `json:"id"`

@@ -22,7 +22,7 @@
 //
 // FetchPeriod returns one form 102 archive's cumulative figures per bank; the
 // caller differences consecutive periods to recover true single-quarter figures
-// (see cmd/fetch). Net profit after tax is CODE 61101 (61102 is the loss
+// (see the fetcher). Net profit after tax is CODE 61101 (61102 is the loss
 // counterpart). Revenue has no single form 102 line; it is approximated as net
 // interest income (Part 1 sections 1-4 and 6 minus Part 3 sections 1-6, i.e.
 // interest income and expense with their effective-rate commission and

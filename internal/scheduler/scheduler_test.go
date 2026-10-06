@@ -72,7 +72,7 @@ type fakeStore struct {
 	lookupErr       error
 	abandoned       int
 	abandonTriggers []string
-	// doneWhileWaiting lists run kinds that a cmd/fetch run, holding the fetch
+	// doneWhileWaiting lists run kinds that a manual fetch, holding the fetch
 	// lock, completes while the scheduler's catch-up of that kind waits.
 	doneWhileWaiting map[string]bool
 }
@@ -217,7 +217,7 @@ func TestSchedulerCatchUpFinancialsCoversQuotes(t *testing.T) {
 	})
 }
 
-// A manual cmd/fetch of the financials holds the fetch lock when the server
+// A manual fetch of the financials holds the fetch lock when the server
 // starts: the financials catch-up waits for it and, re-checked under the lock,
 // is skipped, and so is the quotes catch-up it covered.
 func TestSchedulerCatchUpSkippedAfterWait(t *testing.T) {

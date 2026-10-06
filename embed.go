@@ -24,29 +24,29 @@ var TemplatesFS embed.FS
 var StaticFS embed.FS
 
 // TickerRegistry is the bundled "TICKER INN CATEGORY" list (fetch_tickers.txt)
-// used by cmd/fetch to resolve a ticker's legal-entity INN and default category
-// without the caller having to retype them. Embedding it keeps the fetch binary
+// used by the fetcher to resolve a ticker's legal-entity INN and default category
+// without the caller having to retype them. Embedding it keeps the server
 // self-contained regardless of the working directory.
 //
 //go:embed fetch_tickers.txt
 var TickerRegistry string
 
 // BankRegistry is the bundled "TICKER REGN CATEGORY" list (bank_tickers.txt)
-// used by cmd/fetch to fetch exchange-listed banks' figures from the Central
+// used by the fetcher to fetch exchange-listed banks' figures from the Central
 // Bank's form 102/101 archives, keyed by CBR registration number rather than INN.
 //
 //go:embed bank_tickers.txt
 var BankRegistry string
 
 // SplitRegistry is the bundled "SECID TRADEDATE BEFORE AFTER" list
-// (share_splits.txt) of splits missing from MOEX's split list; cmd/fetch uses
+// (share_splits.txt) of splits missing from MOEX's split list; the fetcher uses
 // it to rebuild historical share counts for market caps.
 //
 //go:embed share_splits.txt
 var SplitRegistry string
 
 // RenameRegistry is the bundled "SECID OLD_SECID..." list (ticker_renames.txt)
-// of renamed MOEX securities; cmd/fetch prices years before a rename under the
+// of renamed MOEX securities; the fetcher prices years before a rename under the
 // old secid.
 //
 //go:embed ticker_renames.txt

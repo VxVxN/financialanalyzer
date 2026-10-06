@@ -16,6 +16,7 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/handlers"
+	"github.com/VxVxN/financialanalyzer/internal/ops"
 	"github.com/VxVxN/financialanalyzer/internal/scheduler"
 	"github.com/VxVxN/financialanalyzer/internal/version"
 
@@ -63,11 +64,12 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	controller := handlers.NewController(app.Repo, logger)
 
-	// Cancel the scheduler on every return path (a failed ListenAndServe
-	// included), and wait for it to stop before the deferred app.Close drops
-	// the database pool under a running fetch. Deferred in this order, the
-	// cancel runs before the wait.
+	// Cancel the scheduler and in-process fetch/registry jobs on every return
+	// path (a failed ListenAndServe included), and wait for the scheduler to
+	// stop before the deferred app.Close drops the database pool under a
+	// running fetch. Deferred in this order, the cancel runs before the wait.
 	ctx, cancel := context.WithCancel(ctx)
+	controller.SetJobs(ops.New(ctx, app.Repo, app.Notifier, logger))
 	schedDone := make(chan struct{})
 	defer func() { <-schedDone }()
 	defer cancel()
@@ -85,7 +87,7 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}()
 	} else {
 		close(schedDone)
-		logger.Info("Scheduler disabled; data refreshes only via cmd/fetch (set SCHEDULER_ENABLED=1)")
+		logger.Info("Scheduler disabled; data refreshes from /updates (set SCHEDULER_ENABLED=1 for a timetable)")
 	}
 
 	r := newRouter(cfg, controller)
@@ -199,6 +201,7 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 	r.Get("/api/company-note", controller.GetCompanyNote)
 	r.Get("/updates", controller.UpdatesHandler)
 	r.Get("/api/fetch-runs", controller.FetchRunsAPI)
+	r.Get("/api/registry", controller.RegistryAPI)
 	r.Get("/api/manual-financials", controller.GetManualFinancials)
 
 	// State-changing endpoints: Basic Auth when configured, and JSON-only
@@ -213,6 +216,8 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		r.Delete("/api/company-note", controller.DeleteCompanyNote)
 		r.Put("/api/manual-financials", controller.SaveManualFinancials)
 		r.Delete("/api/manual-financials", controller.DeleteManualFinancials)
+		r.Post("/api/fetch", controller.StartFetch)
+		r.Post("/api/registry", controller.StartRegistry)
 	})
 	return r
 }

@@ -192,7 +192,7 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 	case current != nil:
 		renderCurrent(w, *current)
 	case hasQuote && quote.Capitalization > 0:
-		fmt.Fprintf(w, `<div class="sub-title">Текущая оценка</div><p class="stale-note">Последняя сохранённая цена закрытия от %s — слишком старая для оценки (обновите: <code>FETCH_QUOTES_ONLY=1 go run ./cmd/fetch</code>).</p>`,
+		fmt.Fprintf(w, `<div class="sub-title">Текущая оценка</div><p class="stale-note">Последняя сохранённая цена закрытия от %s — слишком старая для оценки (обновите котировки на <a href="/updates">странице обновления данных</a>).</p>`,
 			html.EscapeString(quote.PriceDate.Format("2006-01-02")))
 	}
 	renderRelativeValuation(w, ownRow, peersKnown, controller.now())

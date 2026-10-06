@@ -55,7 +55,7 @@ func loadBankRegistry() (map[string]bankSpec, error) {
 }
 
 // BankTickers returns the tickers of the bundled bank registry
-// (bank_tickers.txt): banks file with the CBR, so cmd/registry keeps them out
+// (bank_tickers.txt): banks file with the CBR, so the registry generator keeps them out
 // of the ГИР БО registry.
 func BankTickers() (map[string]struct{}, error) {
 	registry, err := loadBankRegistry()

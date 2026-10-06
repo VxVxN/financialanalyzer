@@ -27,9 +27,8 @@
 // fields are filled from the registry.
 //
 // Every run also refreshes the latest exchange close (market_quotes) of the
-// requested companies. Run is shared by cmd/fetch (one-shot, configured from
-// FETCH_* env vars) and the cmd/plot scheduler; RunRecorded additionally logs
-// the run in the fetch_runs table.
+// requested companies. Run is shared by POST /api/fetch and the scheduler;
+// RunRecorded additionally logs the run in the fetch_runs table.
 package fetcher
 
 import (
@@ -64,8 +63,8 @@ const (
 
 // ErrNoCompanies is returned by a run over the stored companies when the DB
 // has none yet: there is nothing to refresh until companies are added with an
-// explicit list (cmd/fetch FETCH_TICKERS / FETCH_BANKS, or FETCH_ALL=1).
-var ErrNoCompanies = errors.New("no companies in the DB yet: add some with FETCH_TICKERS / FETCH_BANKS, or FETCH_ALL=1 for the whole registry")
+// explicit list (tickers / banks on POST /api/fetch, or all=true).
+var ErrNoCompanies = errors.New("no companies in the DB yet: add some from /updates (tickers/banks) or all=true for the whole registry")
 
 // Request says what one run fetches. The zero value refreshes every company
 // already stored (financials and quotes).
@@ -199,10 +198,10 @@ func Run(ctx context.Context, repo *database.Repository, req Request, logger *sl
 		if len(sum.Failed) > 0 {
 			return sum, fmt.Errorf("no tickers could be resolved: %s", strings.Join(sum.Failed, ","))
 		}
-		return sum, fmt.Errorf("no tickers: set FETCH_TICKERS / FETCH_TICKERS_FILE / FETCH_BANKS, or add registry entries")
+		return sum, fmt.Errorf("no tickers: give tickers or banks on /updates, or add registry entries")
 	}
 	if fetchEverything && !fetchAllRegistry && !req.QuotesOnly {
-		logger.Info("Refreshing companies stored in the DB (set FETCH_TICKERS / FETCH_BANKS to add new ones, FETCH_ALL=1 for the whole registry)",
+		logger.Info("Refreshing companies stored in the DB (name tickers/banks on /updates to add new ones, all=true for the whole registry)",
 			"companies", len(specs), "banks", len(bankSpecs))
 	}
 

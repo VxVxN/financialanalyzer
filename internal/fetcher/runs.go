@@ -60,7 +60,7 @@ type RunOptions struct {
 	StillNeeded func(context.Context) bool
 }
 
-// RunRecorded is Run serialized with every other fetch (cmd/fetch and the
+// RunRecorded is Run serialized with every other fetch (POST /api/fetch and the
 // scheduler) by a Postgres advisory lock — a second run waits for the first —
 // and logged in fetch_runs: a "running" row first, then its outcome. A failed
 // or partial run, including one that could not take the lock, is reported to

@@ -51,9 +51,9 @@ type Client struct {
 	lastReq   time.Time
 
 	// ExtraSplits adds splits MOEX's list lacks, keyed by upper-case secid
-	// (cmd/fetch fills it from the bundled share_splits.txt).
+	// (the fetcher fills it from the bundled share_splits.txt).
 	ExtraSplits map[string][]Split
-	// Predecessors lists a secid's former secids, newest first (cmd/fetch
+	// Predecessors lists a secid's former secids, newest first (the fetcher
 	// fills it from the bundled ticker_renames.txt). CapitalizationAt falls
 	// back to them for years the current secid has no December close, each
 	// priced on its own share count and splits.

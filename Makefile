@@ -29,12 +29,6 @@ build: ## Build all binaries into ./bin with version stamping
 run: ## Run the web server (cmd/plot)
 	go run -ldflags "$(LDFLAGS)" ./cmd/plot
 
-.PHONY: registry
-registry: ## Propose a ticker registry from MOEX ISS + ГИР БО into bin/fetch_tickers.proposed.txt
-	@mkdir -p $(BIN_DIR)
-	go run ./cmd/registry > $(BIN_DIR)/fetch_tickers.proposed.txt
-	@echo "Review: diff fetch_tickers.txt $(BIN_DIR)/fetch_tickers.proposed.txt"
-
 .PHONY: test
 test: ## Run all tests
 	go test ./...

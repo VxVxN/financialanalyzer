@@ -18,6 +18,19 @@
     .pill.partial, .pill.abandoned, .pill.canceled { background: var(--warn-soft); color: var(--warn-ink); }
     .pill.failed { background: var(--dear-soft); color: var(--down); }
     .pill.running { background: var(--accent-soft); color: var(--accent-ink); }
+    .ops-form { display: grid; gap: 12px; }
+    .ops-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-3); font-weight: 500; }
+    .ops-form input[type="text"], .ops-form input[type="number"], .ops-form textarea {
+        min-height: 40px; padding: 8px 10px; background: var(--surface); color: var(--text-1);
+        border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 14px;
+    }
+    .ops-form textarea { min-height: 72px; resize: vertical; }
+    .ops-form .checks { display: flex; flex-wrap: wrap; gap: 16px; color: var(--text-2); font-size: 14px; font-weight: 400; }
+    .ops-form .checks label { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); }
+    .ops-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .ops-status { font-size: 13px; color: var(--text-3); }
+    .ops-pre { margin: 12px 0 0; max-height: 360px; overflow: auto; padding: 12px 14px; font-size: 12px; line-height: 1.45; white-space: pre; }
+
 </style>
 </head>
 <body>
@@ -26,9 +39,55 @@
     <div class="page-header">
         <div>
             <h1 class="page-title">Обновление данных</h1>
-            <p class="page-sub">Расписание автоматической загрузки, свежесть котировок и история запусков. Время московское. <a href="/">К скринеру</a></p>
+            <p class="page-sub">Загрузка отчётности и котировок, предложение реестра тикеров, расписание и история запусков. Время московское. <a href="/">К скринеру</a></p>
         </div>
     </div>
+
+    <section class="block" aria-labelledby="h-fetch">
+        <h2 id="h-fetch">Загрузка данных</h2>
+        <div class="card note">
+            <p>Пустые тикеры — обновить компании, которые уже есть в базе. «Весь реестр» берёт все строки из <code>fetch_tickers.txt</code> и <code>bank_tickers.txt</code>. Тикер без ИНН резолвится через MOEX ISS. Банки — отдельный список (форма 102/101 ЦБ).</p>
+            <form id="fetch-form" class="ops-form" style="margin-top:16px">
+                <label>Тикеры ГИР БО (через запятую)
+                    <textarea id="fetch-tickers" placeholder="OZON, X5:retail, MGNT:2309085638:retail"></textarea>
+                </label>
+                <label>Банки (через запятую)
+                    <input type="text" id="fetch-banks" placeholder="SBER, T">
+                </label>
+                <label>Первый год банковской отчётности
+                    <input type="number" id="fetch-bank-year" min="2009" placeholder="2020">
+                </label>
+                <div class="checks">
+                    <label><input type="checkbox" id="fetch-all"> Весь реестр</label>
+                    <label><input type="checkbox" id="fetch-quotes"> Только котировки</label>
+                    <label><input type="checkbox" id="fetch-force"> Перезаписать уже загруженные периоды</label>
+                </div>
+                <div class="ops-actions">
+                    <button type="submit" class="btn btn-primary" id="fetch-submit">Запустить</button>
+                    {{if .FetchRunning}}<span class="pill running">выполняется сейчас</span>{{end}}
+                    <span class="ops-status" id="fetch-status"></span>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-registry">
+        <h2 id="h-registry">Реестр тикеров</h2>
+        <div class="card note">
+            <p>Предложение <code>fetch_tickers.txt</code> из MOEX ISS и ГИР БО. Полный прогон — 10–15 минут; можно проверить несколько тикеров. Файл не перезаписывается: скачайте, сравните и закоммитьте.</p>
+            <form id="registry-form" class="ops-form" style="margin-top:16px">
+                <label>Только эти тикеры (пусто — вся доска TQBR)
+                    <input type="text" id="registry-tickers" placeholder="NLMK, PHOR">
+                </label>
+                <div class="ops-actions">
+                    <button type="submit" class="btn btn-primary" id="registry-submit">Собрать предложение</button>
+                    <a class="btn" id="registry-download" hidden download="fetch_tickers.proposed.txt">Скачать</a>
+                    <span class="ops-status" id="registry-status"></span>
+                </div>
+            </form>
+            <pre class="ops-pre" id="registry-text" hidden></pre>
+        </div>
+    </section>
 
     <section class="block" aria-labelledby="h-schedule">
         <h2 id="h-schedule">Расписание</h2>
@@ -47,7 +106,7 @@
         </div>
         {{else}}
         <div class="card note">
-            Автоматическое обновление выключено: данные обновляются только ручным запуском <code>cmd/fetch</code>.
+            Автоматическое обновление выключено: данные обновляются только формой ниже.
             Чтобы сервер обновлял их сам, запустите его с <code>SCHEDULER_ENABLED=1</code>
             (по умолчанию котировки — ежедневно в 07:00, отчётность — по воскресеньям в 05:00;
             настраивается через <code>SCHEDULE_QUOTES</code> и <code>SCHEDULE_FINANCIALS</code>).
@@ -104,5 +163,93 @@
     </section>
 </main>
 {{template "footer" .Meta}}
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    async function post(url, body) {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const err = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(err.error || resp.status);
+        return err;
+    }
+
+    $('fetch-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const year = $('fetch-bank-year').value.trim();
+        const body = {
+            tickers: $('fetch-tickers').value,
+            banks: $('fetch-banks').value,
+            all: $('fetch-all').checked,
+            quotes_only: $('fetch-quotes').checked,
+            force: $('fetch-force').checked
+        };
+        if (year) {
+            const n = Number(year);
+            if (!Number.isInteger(n) || n < 0) { $('fetch-status').textContent = 'Некорректный год'; return; }
+            body.bank_from_year = n;
+        }
+        $('fetch-status').textContent = 'Запуск…';
+        $('fetch-submit').disabled = true;
+        try {
+            await post('/api/fetch', body);
+            location.reload();
+        } catch (err) {
+            $('fetch-status').textContent = 'Ошибка: ' + err.message;
+            $('fetch-submit').disabled = false;
+        }
+    });
+
+    let poll;
+    function showRegistry(st) {
+        const status = $('registry-status');
+        const pre = $('registry-text');
+        const dl = $('registry-download');
+        $('registry-submit').disabled = !!st.running;
+        if (st.running) {
+            status.textContent = 'Собирается… полный прогон занимает 10–15 минут.';
+        } else if (st.failed) {
+            status.textContent = 'Сборка не удалась — подробности в журнале сервера.';
+        } else if (st.generated_at) {
+            status.textContent = 'Включить: ' + st.include + ', исключить: ' + st.exclude + ', сбой: ' + st.failed_count;
+        } else {
+            status.textContent = '';
+        }
+        if (st.text) {
+            pre.hidden = false;
+            pre.textContent = st.text;
+            dl.hidden = false;
+            dl.href = URL.createObjectURL(new Blob([st.text], { type: 'text/plain;charset=utf-8' }));
+        }
+        if (st.running) {
+            if (!poll) poll = setInterval(loadRegistry, 3000);
+        } else if (poll) {
+            clearInterval(poll);
+            poll = null;
+        }
+    }
+    async function loadRegistry() {
+        try {
+            const resp = await fetch('/api/registry');
+            if (!resp.ok) return;
+            showRegistry(await resp.json());
+        } catch (e) {}
+    }
+    $('registry-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        $('registry-status').textContent = 'Запуск…';
+        try {
+            await post('/api/registry', { tickers: $('registry-tickers').value });
+            loadRegistry();
+        } catch (err) {
+            $('registry-status').textContent = 'Ошибка: ' + err.message;
+        }
+    });
+    loadRegistry();
+})();
+</script>
 </body>
 </html>

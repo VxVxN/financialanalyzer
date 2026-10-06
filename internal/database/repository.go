@@ -503,7 +503,7 @@ func (r *Repository) GetMarketQuote(ctx context.Context, company string) (q mode
 }
 
 // fetchLockKey is the Postgres advisory lock that serializes data refreshes
-// across processes (cmd/fetch and the cmd/plot scheduler). Any fixed value
+// across processes (two cmd/plot instances). Any fixed value
 // works as long as nothing else in the database uses it.
 const fetchLockKey int64 = 0x66615f6665746368 // "fa_fetch"
 

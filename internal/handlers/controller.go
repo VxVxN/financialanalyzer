@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
+	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/models"
+	"github.com/VxVxN/financialanalyzer/internal/ops"
 )
 
 // Repository is the data-access surface the HTTP handlers depend on. Defining it
@@ -37,11 +39,20 @@ type ScheduleSource interface {
 	Status() []models.ScheduledJob
 }
 
+// Jobs starts background fetch and registry builds (*ops.Ops).
+type Jobs interface {
+	StartFetch(req fetcher.Request) error
+	FetchRunning() bool
+	StartRegistry(tickers string) error
+	RegistrySnapshot() ops.RegistryStatus
+}
+
 type Controller struct {
 	repo     Repository
 	logger   *slog.Logger
 	now      func() time.Time // clock for quote freshness; tests pin it
 	schedule ScheduleSource   // nil when the scheduler is disabled
+	jobs     Jobs             // nil in tests that do not exercise /api/fetch
 }
 
 func NewController(repo Repository, logger *slog.Logger) *Controller {
@@ -58,6 +69,11 @@ func NewController(repo Repository, logger *slog.Logger) *Controller {
 // SetSchedule makes the updates page show the scheduler's timetable.
 func (controller *Controller) SetSchedule(s ScheduleSource) {
 	controller.schedule = s
+}
+
+// SetJobs wires the in-process fetch and registry runner.
+func (controller *Controller) SetJobs(j Jobs) {
+	controller.jobs = j
 }
 
 // serverError logs the underlying cause and returns a generic 500 to the client

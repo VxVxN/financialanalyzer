@@ -456,7 +456,7 @@ func TestManualFinancials(t *testing.T) {
 }
 
 // TestLockFetch checks the cross-process fetch lock with two pools standing in
-// for cmd/fetch and cmd/plot.
+// for the fetch pipelines and cmd/plot.
 func TestLockFetch(t *testing.T) {
 	a := openTestDB(t)
 	b := openTestDB(t)

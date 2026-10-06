@@ -1,4 +1,4 @@
-# Bank ticker list for `cmd/fetch` — exchange-listed credit institutions whose
+# Bank ticker list for the fetcher — exchange-listed credit institutions whose
 # quarterly figures come from the Central Bank's form 102 and 101 archives
 # (https://www.cbr.ru/vfs/credit/forms/102-YYYYMMDD.rar, 101-YYYYMMDD.rar).
 # Banks report to the CBR, not ГИР БО, so they are fetched through a separate
@@ -8,8 +8,8 @@
 #   TICKER   MOEX security id (also used for year-end market cap / P/E)
 #   REGN     CBR registration number (the key into form 102, NOT the INN)
 #
-# Usage:   go run ./cmd/fetch            # fetches these plus the ГИР БО list
-#          FETCH_BANKS="T" go run ./cmd/fetch   # subset
+# Usage:   POST /api/fetch from /updates (empty lists refresh stored banks too)
+#          banks=T on that request for a subset
 #
 # CAVEATS (inherent to the source — see internal/scraper/cbr docs):
 #   * Form 102 is RSBU of the bank legal entity, not consolidated IFRS, so

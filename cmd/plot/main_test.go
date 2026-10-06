@@ -10,13 +10,22 @@ import (
 
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/database"
+	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/handlers"
 	"github.com/VxVxN/financialanalyzer/internal/models"
+	"github.com/VxVxN/financialanalyzer/internal/ops"
 )
 
 // stubRepo satisfies handlers.Repository with empty results; the router tests
 // only care whether a request reaches a handler, not what it returns.
 type stubRepo struct{ writes int }
+
+type stubJobs struct{}
+
+func (stubJobs) StartFetch(fetcher.Request) error     { return nil }
+func (stubJobs) FetchRunning() bool                   { return false }
+func (stubJobs) StartRegistry(string) error           { return nil }
+func (stubJobs) RegistrySnapshot() ops.RegistryStatus { return ops.RegistryStatus{} }
 
 func (s *stubRepo) Ping(context.Context) error                        { return nil }
 func (s *stubRepo) GetAllCompanies(context.Context) ([]string, error) { return nil, nil }
@@ -51,6 +60,11 @@ var writeRoutes = []routeCase{
 	{http.MethodDelete, "/api/manual-financials?company=SBER&year=2025", ""},
 }
 
+var startRoutes = []routeCase{
+	{http.MethodPost, "/api/fetch", `{}`},
+	{http.MethodPost, "/api/registry", `{}`},
+}
+
 func serve(h http.Handler, rc routeCase, auth bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(rc.method, rc.target, strings.NewReader(rc.body))
 	if rc.body != "" {
@@ -66,13 +80,15 @@ func serve(h http.Handler, rc routeCase, auth bool) *httptest.ResponseRecorder {
 
 func newTestRouter(cfg *config.Config) (http.Handler, *stubRepo) {
 	repo := &stubRepo{}
-	return newRouter(cfg, handlers.NewController(repo, slog.New(slog.DiscardHandler))), repo
+	c := handlers.NewController(repo, slog.New(slog.DiscardHandler))
+	c.SetJobs(stubJobs{})
+	return newRouter(cfg, c), repo
 }
 
 func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 	h, repo := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
 
-	for _, rc := range writeRoutes {
+	for _, rc := range append(writeRoutes, startRoutes...) {
 		if rec := serve(h, rc, false); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s without auth: status = %d, want 401", rc.method, rc.target, rec.Code)
 		}
@@ -86,6 +102,11 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 			t.Errorf("%s %s with auth: status = %d, want 200 (%s)", rc.method, rc.target, rec.Code, rec.Body)
 		}
 	}
+	for _, rc := range startRoutes {
+		if rec := serve(h, rc, true); rec.Code != http.StatusAccepted {
+			t.Errorf("%s %s with auth: status = %d, want 202 (%s)", rc.method, rc.target, rec.Code, rec.Body)
+		}
+	}
 	if repo.writes != len(writeRoutes) {
 		t.Errorf("writes = %d, want %d", repo.writes, len(writeRoutes))
 	}
@@ -93,7 +114,7 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 
 func TestRouterReadEndpointsStayOpen(t *testing.T) {
 	h, _ := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	for _, target := range []string{"/", "/compare", "/static/app.css", "/static/app.js", "/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/manual-financials?company=SBER"} {
+	for _, target := range []string{"/", "/compare", "/static/app.css", "/static/app.js", "/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/registry", "/api/manual-financials?company=SBER"} {
 		rec := serve(h, routeCase{method: http.MethodGet, target: target}, false)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status = %d, want 200", target, rec.Code)
@@ -114,6 +135,11 @@ func TestRouterAuthDisabled(t *testing.T) {
 	for _, rc := range writeRoutes {
 		if rec := serve(h, rc, false); rec.Code != http.StatusOK {
 			t.Errorf("%s %s: status = %d, want 200 when auth is disabled", rc.method, rc.target, rec.Code)
+		}
+	}
+	for _, rc := range startRoutes {
+		if rec := serve(h, rc, false); rec.Code != http.StatusAccepted {
+			t.Errorf("%s %s: status = %d, want 202 when auth is disabled", rc.method, rc.target, rec.Code)
 		}
 	}
 	if repo.writes != len(writeRoutes) {

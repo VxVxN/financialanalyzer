@@ -38,7 +38,8 @@ tables.
   automatic refresh overwrites them (stored separately, overlaid on read).
 - **Automatic refresh** — with `SCHEDULER_ENABLED=1` the server itself refreshes
   quotes daily and financials weekly, catching up slots missed while it was
-  down; `/updates` shows the timetable, quote freshness and every run's outcome.
+  down; `/updates` starts a fetch or registry proposal on demand, and shows the
+  timetable, quote freshness and every run's outcome.
   Refreshes never overlap (a Postgres advisory lock makes a second run wait),
   and a failed or partial run can be reported to Telegram.
 - **Self-contained binaries** — migrations, templates and the UI's stylesheet,
@@ -51,11 +52,12 @@ tables.
 
 ```
 cmd/
-  plot    HTTP server (UI + chart/dashboard pages + JSON API)
+  plot    HTTP server (UI + JSON API + fetch/registry jobs + optional scheduler)
   import  one-shot CSV ingestion
-  fetch   free primary-source fetcher (ГИР БО RSBU + MOEX market cap)
 internal/
-  fetcher      the fetch pipelines, shared by cmd/fetch and the scheduler
+  fetcher      the fetch pipelines (ГИР БО, CBR, MOEX), run from the server
+  ops          in-process fetch and registry jobs started from /updates
+  registry     ticker-registry proposal from MOEX ISS + ГИР БО
   scheduler    timetable that runs the fetcher inside cmd/plot
   application  composition root (wires config → db → repo)
   config       env-var configuration + validation
@@ -102,34 +104,30 @@ Migrations are applied automatically on startup.
 
 ## Data ingestion
 
+CSV import is still a one-shot binary. Fetching financials, quotes, banks and a
+ticker-registry proposal happens **on the running server** (`/updates`):
+
 ```bash
 # Import a CSV file (filename encodes company + category: SBER_banks.csv)
 CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
-
-# Fetch from free primary sources — entries are TICKER:INN:CATEGORY
-FETCH_TICKERS="LKOH:7708004767:oil,MGNT:2309085638:retail" go run ./cmd/fetch
-FETCH_TICKERS_FILE=/path/to/list.txt go run ./cmd/fetch
-
-# No list: refresh only the companies already in the DB; FETCH_ALL=1 fetches
-# every ticker in the bundled registries
-go run ./cmd/fetch
-FETCH_ALL=1 go run ./cmd/fetch
-
-# Refresh only the latest exchange closes (current P/E etc.)
-FETCH_QUOTES_ONLY=1 go run ./cmd/fetch
 ```
 
-Instead of running `cmd/fetch` by hand, the server can refresh the stored
-companies itself: start it with `SCHEDULER_ENABLED=1` and it refreshes quotes
-daily at 07:00 and financials (incrementally, then quotes) on Sundays at 05:00,
-Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off` disables a job).
-Runs are sequential; a slot missed while the server was down is caught up 30 s
-after startup. New companies are still added with `cmd/fetch`. Every run, from
-either binary, is logged in `fetch_runs` and shown on `/updates`. Runs from both
-binaries are serialized by a Postgres advisory lock: a `cmd/fetch` started
-during a scheduled refresh (or vice versa) waits for it to finish. With
-`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, a failed or partial run sends a
-message (status, failed tickers, error) to that chat.
+On `/updates`:
+
+- **Загрузка данных** — empty tickers refresh companies already in the DB;
+  tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks separately;
+  «весь реестр», «только котировки», «перезаписать периоды» (`force`).
+- **Реестр тикеров** — propose `fetch_tickers.txt` from MOEX ISS + ГИР БО
+  (optional subset of tickers); download, diff, commit.
+
+`POST /api/fetch` and `POST /api/registry` are the same actions (JSON, auth when
+`AUTH_*` are set). The run is recorded in `fetch_runs`. With
+`SCHEDULER_ENABLED=1` the server also refreshes quotes daily at 07:00 and
+financials on Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` /
+`SCHEDULE_FINANCIALS`; `off` disables a job). Runs are sequential; a slot missed
+while the server was down is caught up 30 s after startup. Overlapping runs wait
+on a Postgres advisory lock. With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
+set, a failed or partial run sends a message to that chat.
 
 Dividends have no free exchange API, so they come from CSV: a row starting with
 `Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
@@ -141,12 +139,11 @@ jumps more than 4× year over year so a missing split can be added.
 
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
-102/101 archives (`FETCH_BANKS`, registry `bank_tickers.txt`; bank revenue is
-net interest income + fee income), and EBITDA is left empty; profit from sales
-(line 2200) stands in for EBIT in EV/EBIT. Cash, operating cash flow and capex
-(lines 1250, 4100, 4221) feed net debt, EV and FCF; rows fetched before these
-columns existed get them with `FETCH_FORCE=1 go run ./cmd/fetch`. See package
-docs for details.
+102/101 archives (`bank_tickers.txt`; bank revenue is net interest income + fee
+income), and EBITDA is left empty; profit from sales (line 2200) stands in for
+EBIT in EV/EBIT. Cash, operating cash flow and capex (lines 1250, 4100, 4221)
+feed net debt, EV and FCF; rows fetched before these columns existed get them
+with `force` on `/updates`. See package docs for details.
 
 ## Configuration
 
@@ -185,8 +182,11 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/screener`                       | Redirects to `/`                     |
 | GET    | `/static/*`                       | Embedded stylesheet, script, fonts   |
 | GET    | `/api/screener`                   | Screener rows as JSON (null = no data) |
-| GET    | `/updates`                        | Refresh timetable, quote freshness, run history |
+| GET    | `/updates`                        | Fetch/registry forms, timetable, quote freshness, run history |
 | GET    | `/api/fetch-runs`                 | Scheduler jobs and the latest 50 runs as JSON |
+| GET    | `/api/registry`                   | Last ticker-registry proposal (status + text) |
+| POST   | `/api/fetch`                      | Start a data refresh 🔒              |
+| POST   | `/api/registry`                   | Start a registry proposal 🔒         |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |
