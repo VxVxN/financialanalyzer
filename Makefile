@@ -26,7 +26,7 @@ build: ## Build all binaries into ./bin with version stamping
 	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/ ./cmd/...
 
 .PHONY: run
-run: ## Run the web server (cmd/plot)
+run: ## Run the web server (cmd/plot; scheduler on unless SCHEDULER_ENABLED=0)
 	go run -ldflags "$(LDFLAGS)" ./cmd/plot
 
 .PHONY: test

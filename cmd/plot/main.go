@@ -219,5 +219,11 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		r.Post("/api/fetch", controller.StartFetch)
 		r.Post("/api/registry", controller.StartRegistry)
 	})
+	r.Group(func(r chi.Router) {
+		if cfg.AuthEnabled() {
+			r.Use(handlers.RequireBasicAuth(cfg.AuthUser, cfg.AuthPassword))
+		}
+		r.Post("/api/import", controller.ImportCSV)
+	})
 	return r
 }

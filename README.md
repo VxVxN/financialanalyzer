@@ -52,8 +52,7 @@ tables.
 
 ```
 cmd/
-  plot    HTTP server (UI + JSON API + fetch/registry jobs + optional scheduler)
-  import  one-shot CSV ingestion
+  plot    HTTP server (UI + JSON API + fetch/registry/import jobs + scheduler)
 internal/
   fetcher      the fetch pipelines (ГИР БО, CBR, MOEX), run from the server
   ops          in-process fetch and registry jobs started from /updates
@@ -104,30 +103,27 @@ Migrations are applied automatically on startup.
 
 ## Data ingestion
 
-CSV import is still a one-shot binary. Fetching financials, quotes, banks and a
-ticker-registry proposal happens **on the running server** (`/updates`):
-
-```bash
-# Import a CSV file (filename encodes company + category: SBER_banks.csv)
-CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
-```
+Fetching financials, quotes, banks, a ticker-registry proposal and CSV import
+happen **on the running server** (`/updates`):
 
 On `/updates`:
 
 - **Загрузка данных** — empty tickers refresh companies already in the DB;
   tickers like `OZON`, `X5:retail`, `MGNT:2309085638:retail`; banks separately;
   «весь реестр», «только котировки», «перезаписать периоды» (`force`).
+- **Импорт CSV** — `КОМПАНИЯ_КАТЕГОРИЯ.csv`, semicolon-delimited.
 - **Реестр тикеров** — propose `fetch_tickers.txt` from MOEX ISS + ГИР БО
   (optional subset of tickers); download, diff, commit.
 
-`POST /api/fetch` and `POST /api/registry` are the same actions (JSON, auth when
-`AUTH_*` are set). The run is recorded in `fetch_runs`. With
-`SCHEDULER_ENABLED=1` the server also refreshes quotes daily at 07:00 and
-financials on Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` /
-`SCHEDULE_FINANCIALS`; `off` disables a job). Runs are sequential; a slot missed
-while the server was down is caught up 30 s after startup. Overlapping runs wait
-on a Postgres advisory lock. With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
-set, a failed or partial run sends a message to that chat.
+`POST /api/fetch`, `POST /api/registry` and `POST /api/import` are the same
+actions (auth when `AUTH_*` are set). The fetch is recorded in `fetch_runs`.
+The scheduler (on by default) refreshes quotes daily at 07:00 and financials on
+Sundays at 05:00, Moscow time (`SCHEDULE_QUOTES` / `SCHEDULE_FINANCIALS`; `off`
+disables a job). On startup, if a job has no completed run today (Moscow), it
+is caught up after 30 s — including when the process starts before the slot.
+Runs are sequential; overlapping runs wait on a Postgres advisory lock. With
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, a failed or partial run sends a
+message to that chat.
 
 Dividends have no free exchange API, so they come from CSV: a row starting with
 `Дивиденды` holds the year's total in billions of RUB in the Q4 column (`0` there
@@ -158,10 +154,9 @@ All configuration is via environment variables (`internal/config`):
 | `DB_PASSWORD` | `password`    | Postgres password (**change for prod**)  |
 | `DB_NAME`     | `postgres`    | Database name                            |
 | `DB_SSLMODE`  | `disable`     | `lib/pq` sslmode                         |
-| `CSV_PATH`    | _(empty)_     | CSV file path for `cmd/import`           |
 | `AUTH_USER`   | _(empty)_     | Basic Auth user for write endpoints      |
 | `AUTH_PASSWORD` | _(empty)_   | Basic Auth password (set with `AUTH_USER`) |
-| `SCHEDULER_ENABLED` | _(off)_ | `1` makes `cmd/plot` refresh data on a schedule |
+| `SCHEDULER_ENABLED` | `1`     | `0`/`off` disables the data-refresh timetable |
 | `SCHEDULE_QUOTES` | `07:00`   | Daily quotes slot, Moscow time (`off` disables) |
 | `SCHEDULE_FINANCIALS` | `sun 05:00` | Weekly financials slot, Moscow time (`off` disables) |
 | `TELEGRAM_BOT_TOKEN` | _(empty)_ | Bot token for failed-refresh notifications |
@@ -187,6 +182,7 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/api/registry`                   | Last ticker-registry proposal (status + text) |
 | POST   | `/api/fetch`                      | Start a data refresh 🔒              |
 | POST   | `/api/registry`                   | Start a registry proposal 🔒         |
+| POST   | `/api/import`                     | Import a COMPANY_CATEGORY.csv 🔒     |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |
 | GET    | `/api/categories`                 | List categories                      |

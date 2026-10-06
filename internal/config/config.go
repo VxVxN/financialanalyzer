@@ -22,17 +22,15 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 
-	CSVPath string
-
 	// AuthUser/AuthPassword enable HTTP Basic Auth on the web server's
 	// state-changing endpoints. Both empty disables auth (dev only).
 	AuthUser     string
 	AuthPassword string
 
 	// SchedulerEnabled makes cmd/plot run the fetch pipelines on a timetable
-	// (off by default so a dev server never calls the external sources).
-	// ScheduleQuotes/ScheduleFinancials are Moscow-time slots, "HH:MM" daily or
-	// "DAY HH:MM" weekly (see scheduler.ParseSpec); "off" disables that job.
+	// (on by default). Set SCHEDULER_ENABLED=0 to disable. ScheduleQuotes/
+	// ScheduleFinancials are Moscow-time slots, "HH:MM" daily or "DAY HH:MM"
+	// weekly (see scheduler.ParseSpec); "off" disables that job.
 	SchedulerEnabled   bool
 	ScheduleQuotes     string
 	ScheduleFinancials string
@@ -53,12 +51,11 @@ func LoadConfig() *Config {
 		DBPassword: getEnv("DB_PASSWORD", defaultDBPassword),
 		DBName:     getEnv("DB_NAME", "postgres"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
-		CSVPath:    getEnv("CSV_PATH", ""),
 
 		AuthUser:     getEnv("AUTH_USER", ""),
 		AuthPassword: getEnv("AUTH_PASSWORD", ""),
 
-		SchedulerEnabled:   getEnvBool("SCHEDULER_ENABLED"),
+		SchedulerEnabled:   getEnvBool("SCHEDULER_ENABLED", true),
 		ScheduleQuotes:     getEnv("SCHEDULE_QUOTES", "07:00"),
 		ScheduleFinancials: getEnv("SCHEDULE_FINANCIALS", "sun 05:00"),
 
@@ -117,12 +114,19 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvBool reports whether a variable is set to a true value (1, true, yes,
-// on; case-insensitive).
-func getEnvBool(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+// getEnvBool reads a boolean variable: 1/true/yes/on are true, 0/false/no/off
+// are false (case-insensitive). Unset or empty uses defaultValue; any other
+// value is false.
+func getEnvBool(key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(raw) {
 	case "1", "true", "yes", "on":
 		return true
+	case "0", "false", "no", "off":
+		return false
 	}
 	return false
 }

@@ -37,12 +37,16 @@ func (p *CSVParser) Parse() ([]models.QuarterData, error) {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
+	return p.ParseReader(file)
+}
 
-	records, err := p.readCSV(file)
+// ParseReader reads a semicolon CSV from r; the company and category still
+// come from the parser's file name ("COMPANY_CATEGORY.csv").
+func (p *CSVParser) ParseReader(r io.Reader) ([]models.QuarterData, error) {
+	records, err := p.readCSV(r)
 	if err != nil {
 		return nil, err
 	}
-
 	return p.processRecords(records)
 }
 

@@ -20,7 +20,7 @@
     .pill.running { background: var(--accent-soft); color: var(--accent-ink); }
     .ops-form { display: grid; gap: 12px; }
     .ops-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-3); font-weight: 500; }
-    .ops-form input[type="text"], .ops-form input[type="number"], .ops-form textarea {
+    .ops-form input[type="text"], .ops-form input[type="number"], .ops-form input[type="file"], .ops-form textarea {
         min-height: 40px; padding: 8px 10px; background: var(--surface); color: var(--text-1);
         border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 14px;
     }
@@ -66,6 +66,22 @@
                     <button type="submit" class="btn btn-primary" id="fetch-submit">Запустить</button>
                     {{if .FetchRunning}}<span class="pill running">выполняется сейчас</span>{{end}}
                     <span class="ops-status" id="fetch-status"></span>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-import">
+        <h2 id="h-import">Импорт CSV</h2>
+        <div class="card note">
+            <p>Файл <code>КОМПАНИЯ_КАТЕГОРИЯ.csv</code>, разделитель «;», колонки вида <code>2023-Q1</code>. Нулевые ячейки не пишутся (как в выгрузках агрегаторов).</p>
+            <form id="import-form" class="ops-form" style="margin-top:16px">
+                <label>Файл
+                    <input type="file" id="import-file" accept=".csv,text/csv" required>
+                </label>
+                <div class="ops-actions">
+                    <button type="submit" class="btn btn-primary" id="import-submit">Импортировать</button>
+                    <span class="ops-status" id="import-status"></span>
                 </div>
             </form>
         </div>
@@ -249,6 +265,26 @@
         }
     });
     loadRegistry();
+
+    $('import-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = $('import-file').files[0];
+        if (!file) { $('import-status').textContent = 'Выберите файл'; return; }
+        const body = new FormData();
+        body.append('file', file, file.name);
+        $('import-status').textContent = 'Импорт…';
+        $('import-submit').disabled = true;
+        try {
+            const resp = await fetch('/api/import', { method: 'POST', body: body });
+            const err = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(err.error || resp.status);
+            $('import-status').textContent = 'Сохранено строк: ' + err.saved + ' из ' + err.total + ' (' + err.company + ')';
+            $('import-file').value = '';
+        } catch (err) {
+            $('import-status').textContent = 'Ошибка: ' + err.message;
+        }
+        $('import-submit').disabled = false;
+    });
 })();
 </script>
 </body>

@@ -254,6 +254,21 @@ func TestSchedulerCatchUpQuotesOnly(t *testing.T) {
 	})
 }
 
+// Restart before today's 07:00: yesterday's quotes do not count as "ran
+// today", so catch-up runs immediately rather than waiting for the slot.
+func TestSchedulerCatchUpDailyBeforeSlot(t *testing.T) {
+	start := msk(2026, 9, 30, 6, 0)
+	store := &fakeStore{completed: map[string]time.Time{
+		fetcher.KindQuotes:     msk(2026, 9, 29, 7, 0),
+		fetcher.KindFinancials: msk(2026, 9, 27, 5, 0),
+	}}
+	got := runScheduler(t, start, store, 2, false)
+	assertCalls(t, got, []call{
+		{fetcher.KindQuotes, fetcher.TriggerCatchUp, start.Add(defaultStartupDelay)},
+		{fetcher.KindQuotes, fetcher.TriggerSchedule, msk(2026, 10, 1, 7, 0)},
+	})
+}
+
 // A failed run is not retried before its next slot, and a lookup error skips
 // catch-up rather than guessing.
 func TestSchedulerFailuresWaitForNextSlot(t *testing.T) {

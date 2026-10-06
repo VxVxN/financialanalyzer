@@ -4,12 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Go application that ingests Russian-language quarterly financial data and serves an interactive web UI for cross-company metric comparison. Two binaries share `internal/`:
+Go application that ingests Russian-language quarterly financial data and serves an interactive web UI for cross-company metric comparison. One binary:
 
-- `cmd/import` — one-shot CSV ingestion (set `CSV_PATH`, run, exits).
-- `cmd/plot` — HTTP server (default `:8088`) that renders the UI and chart pages, runs the fetch pipelines from `/updates` (`POST /api/fetch`, `POST /api/registry`; see "Primary-source fetch" and "Ticker registry generator"), and (with `SCHEDULER_ENABLED=1`) on a timetable (see "Scheduled refresh"). Listed banks come from the CBR's quarterly form 102/101 archives (see "Bank fetch"). The pipelines live in `internal/fetcher`.
+- `cmd/plot` — HTTP server (default `:8088`) that renders the UI and chart pages, runs the fetch pipelines from `/updates` (`POST /api/fetch`, `POST /api/registry`, `POST /api/import`; see "Primary-source fetch" and "Ticker registry generator"), and on a timetable (see "Scheduled refresh"; `SCHEDULER_ENABLED=0` disables it). Listed banks come from the CBR's quarterly form 102/101 archives (see "Bank fetch"). The pipelines live in `internal/fetcher`.
 
-`import` and `plot` call `database.RunMigrations` on startup, so any entrypoint will bring the schema up to date.
+`plot` calls `database.RunMigrations` on startup.
 
 ## Commands
 
@@ -17,21 +16,15 @@ Go application that ingests Russian-language quarterly financial data and serves
 # Run web server (reads env vars, see config.go for defaults)
 go run ./cmd/plot
 
-# Import a CSV file (filename encodes company + category, see "CSV format" below)
-CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
+# Fetch, registry and CSV import live on the server: open /updates
+# (POST /api/fetch, POST /api/registry, POST /api/import). JSON mirrors the old
+# FETCH_* knobs: tickers, banks, all, force, quotes_only, concurrency,
+# bank_from_year. Empty tickers refresh companies already in the DB; all=true is
+# the full bundled registries; a ticker without an INN is looked up in MOEX ISS.
+# CSV filename is COMPANY_CATEGORY.csv. Auth applies when AUTH_* are set.
 
-# Import a CSV file (filename encodes company + category, see "CSV format" below)
-CSV_PATH=/path/to/SBER_banks.csv go run ./cmd/import
-
-# Fetch and registry live on the server: open /updates (POST /api/fetch,
-# POST /api/registry). JSON mirrors the old FETCH_* knobs: tickers, banks,
-# all, force, quotes_only, concurrency, bank_from_year. Empty tickers refresh
-# companies already in the DB; all=true is the full bundled registries; a
-# ticker without an INN is looked up in MOEX ISS. Auth applies when AUTH_* are set.
-
-# Let the server refresh the stored companies itself (quotes daily 07:00,
-# financials Sundays 05:00, Moscow time; "off" disables a job):
-SCHEDULER_ENABLED=1 SCHEDULE_QUOTES=07:00 SCHEDULE_FINANCIALS="sun 05:00" go run ./cmd/plot
+# Disable the timetable (quotes 07:00, financials "sun 05:00" Moscow time otherwise):
+SCHEDULER_ENABLED=0 go run ./cmd/plot
 
 # Build
 go build ./...
@@ -45,7 +38,7 @@ TEST_DATABASE_DSN="host=127.0.0.1 port=55432 user=test dbname=postgres sslmode=d
 
 Migrations, templates and the UI assets are embedded (`embed.go`: `financialanalyzer.MigrationsFS` / `TemplatesFS` / `StaticFS`), so binaries run from any working directory.
 
-Config is env-var only (`internal/config/config.go`): `PORT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`, `CSV_PATH`, `AUTH_USER`, `AUTH_PASSWORD`, `SCHEDULER_ENABLED`, `SCHEDULE_QUOTES`, `SCHEDULE_FINANCIALS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Defaults target a local Postgres (`localhost:5432`, user `postgres`, password `password`, db `postgres`). `AUTH_USER`/`AUTH_PASSWORD` must be set together (`Validate` rejects one without the other), and so must `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`.
+Config is env-var only (`internal/config/config.go`): `PORT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`, `AUTH_USER`, `AUTH_PASSWORD`, `SCHEDULER_ENABLED`, `SCHEDULE_QUOTES`, `SCHEDULE_FINANCIALS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Defaults target a local Postgres (`localhost:5432`, user `postgres`, password `password`, db `postgres`). `AUTH_USER`/`AUTH_PASSWORD` must be set together (`Validate` rejects one without the other), and so must `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`.
 
 ## Architecture
 
@@ -57,7 +50,7 @@ Config is env-var only (`internal/config/config.go`): `PORT`, `DB_HOST`, `DB_POR
 
 A row starting with `Дивиденды` (and containing no `/`, `%` or `акци`) holds the **year's total dividends in billions**; only its Q4 columns are read, and there `0` is a real "no payout" (the placeholder rule doesn't apply). Per-share (`Дивиденд, руб/акцию`), payout (`Дивиденды/прибыль, %`) and yield rows are ignored. Company name and category are parsed from the **filename**: `<COMPANY>_<CATEGORY>.csv` (split on `_`). Numeric values are normalized by stripping spaces, `%`, quotes, and converting `,` → `.`. Any value that parses to 0 is treated as **no data** (aggregator exports use 0 as a placeholder, e.g. a bank's revenue or a loss quarter's P/E) — honest zeros come only from the primary sources.
 
-**HTTP layer (`cmd/plot/main.go`, `internal/handlers/`).** Routes are registered in `newRouter` in `main.go` (tested in `cmd/plot/main_test.go` without a DB); each handler is a method on `Controller` (one file per route in `internal/handlers/`). `Controller` depends on the consumer-side `handlers.Repository` interface. State-changing routes (`DELETE /api/companies`, `POST`/`DELETE /api/company-note`, `PUT`/`DELETE /api/manual-financials`, `POST /api/fetch`, `POST /api/registry`) sit in a group behind `handlers.RequireBasicAuth` (only when `AUTH_USER`/`AUTH_PASSWORD` are set; the browser shows its native login dialog) and `handlers.RequireJSONBody` (always; a body must be `application/json`, which forces a CORS preflight and blocks cross-site form CSRF). Any new mutating route belongs in that group. **Pages and design system.** `/` is the screener (home), `/compare` the comparison page (`?companies=A,B` preselects), `/company/{name}` the company card, `/updates` the run log; `/screener` redirects to `/`. Every page shares `templates/layout.html` (blocks `head`, `topbar`, `footer`, data `pageMeta{Title, Active}`) and the embedded `static/` (`financialanalyzer.StaticFS`): `app.css` (design tokens for light and dark under `:root[data-theme]`, components), `app.js` (`window.FA`: theme switching with a `fa:themechange` event, the `/`/Ctrl+K company palette, the comparison tray kept in `localStorage` under `compare`, at most 8 companies = the chart palette, plus `FA.fmt` Russian number formatting) and the fonts (Golos Text, Literata; OFL). Template pages are parsed with `parsePage` (layout + page, func `asset`); the dashboard is written with `fmt` and pulls the layout blocks through `writeLayout`. `StaticHandler` serves `/static/` with content-hash versions (`assetURL` → `?v=`; a matching version is cached immutable, directory listings are 404). The theme lives client-side (`localStorage` `theme`, else the system preference) — pages no longer take `?theme=`; framed `/chart/{metric}` pages (go-echarts + a data table, `?theme=dark|light` normalized, `?companies=A,B,C`) get it from the framing page, link `app.css` and use the validated categorical palette (`chartPaletteFor`). Templates are embedded: edits need a rebuild/restart. **The UI is in Russian**: templates, chart/dashboard pages, and the user-facing strings from `analytics` (`SourceLabel`/`SourceNote`, anomaly messages, the "(устарело)" label) — keep new UI text Russian; JSON API errors and logs stay English. Money values (stored in billions of RUB) render as `млрд`/`трлн` (`humanFormat` and the chart tooltip); the chart CSV export uses `;` + UTF-8 BOM for Russian Excel.
+**HTTP layer (`cmd/plot/main.go`, `internal/handlers/`).** Routes are registered in `newRouter` in `main.go` (tested in `cmd/plot/main_test.go` without a DB); each handler is a method on `Controller` (one file per route in `internal/handlers/`). `Controller` depends on the consumer-side `handlers.Repository` interface. State-changing routes (`DELETE /api/companies`, `POST`/`DELETE /api/company-note`, `PUT`/`DELETE /api/manual-financials`, `POST /api/fetch`, `POST /api/registry`, `POST /api/import`) sit in a group behind `handlers.RequireBasicAuth` (only when `AUTH_USER`/`AUTH_PASSWORD` are set; the browser shows its native login dialog) and `handlers.RequireJSONBody` (always; a body must be `application/json`, which forces a CORS preflight and blocks cross-site form CSRF). Any new mutating route belongs in that group. **Pages and design system.** `/` is the screener (home), `/compare` the comparison page (`?companies=A,B` preselects), `/company/{name}` the company card, `/updates` the run log; `/screener` redirects to `/`. Every page shares `templates/layout.html` (blocks `head`, `topbar`, `footer`, data `pageMeta{Title, Active}`) and the embedded `static/` (`financialanalyzer.StaticFS`): `app.css` (design tokens for light and dark under `:root[data-theme]`, components), `app.js` (`window.FA`: theme switching with a `fa:themechange` event, the `/`/Ctrl+K company palette, the comparison tray kept in `localStorage` under `compare`, at most 8 companies = the chart palette, plus `FA.fmt` Russian number formatting) and the fonts (Golos Text, Literata; OFL). Template pages are parsed with `parsePage` (layout + page, func `asset`); the dashboard is written with `fmt` and pulls the layout blocks through `writeLayout`. `StaticHandler` serves `/static/` with content-hash versions (`assetURL` → `?v=`; a matching version is cached immutable, directory listings are 404). The theme lives client-side (`localStorage` `theme`, else the system preference) — pages no longer take `?theme=`; framed `/chart/{metric}` pages (go-echarts + a data table, `?theme=dark|light` normalized, `?companies=A,B,C`) get it from the framing page, link `app.css` and use the validated categorical palette (`chartPaletteFor`). Templates are embedded: edits need a rebuild/restart. **The UI is in Russian**: templates, chart/dashboard pages, and the user-facing strings from `analytics` (`SourceLabel`/`SourceNote`, anomaly messages, the "(устарело)" label) — keep new UI text Russian; JSON API errors and logs stay English. Money values (stored in billions of RUB) render as `млрд`/`трлн` (`humanFormat` and the chart tooltip); the chart CSV export uses `;` + UTF-8 BOM for Russian Excel.
 
 **Adding a metric** requires changes in several places that must stay in sync: `models.QuarterData` (`*float64` field + `IsEmpty`), `rawValue` in `analytics/analytics.go`, a migration to add the column, the `SaveQuarterData` upsert, parser handlers/special-type switch in `csv_parser.go`, the `indexMetricGroups` list in `handlers/index.go` (the compare page) and, when the company card should chart it, `dashboardChartMetrics` in `handlers/dashboard.go`, and `formatMetricName`/`getMetricUnit`/`getTooltipFormatter` in `handlers/chart.go`. A reported (non-market) metric that can come from an annual report also belongs in the manual-entry path: a `manual_financials` column, `models.ManualFinancials` (+ `HasFundamentals`), `ApplyManual`, the repository's manual SQL, and `manualFields` in `handlers/dashboard_manual.go`.
 

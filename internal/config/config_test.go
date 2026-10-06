@@ -4,7 +4,7 @@ import "testing"
 
 func TestLoadConfigDefaults(t *testing.T) {
 	// Ensure a clean environment for the defaults.
-	for _, k := range []string{"PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE", "CSV_PATH"} {
+	for _, k := range []string{"PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE"} {
 		t.Setenv(k, "")
 	}
 	cfg := LoadConfig()
@@ -96,10 +96,10 @@ func TestLoadConfigScheduler(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	cfg := LoadConfig()
-	if cfg.SchedulerEnabled || cfg.ScheduleQuotes != "07:00" || cfg.ScheduleFinancials != "sun 05:00" {
+	if !cfg.SchedulerEnabled || cfg.ScheduleQuotes != "07:00" || cfg.ScheduleFinancials != "sun 05:00" {
 		t.Errorf("defaults = %v %q %q", cfg.SchedulerEnabled, cfg.ScheduleQuotes, cfg.ScheduleFinancials)
 	}
-	for in, want := range map[string]bool{"1": true, "TRUE": true, " yes ": true, "on": true, "0": false, "no": false, "nope": false} {
+	for in, want := range map[string]bool{"1": true, "TRUE": true, " yes ": true, "on": true, "0": false, "off": false, "no": false, "nope": false} {
 		t.Setenv("SCHEDULER_ENABLED", in)
 		if got := LoadConfig().SchedulerEnabled; got != want {
 			t.Errorf("SCHEDULER_ENABLED=%q -> %v, want %v", in, got, want)

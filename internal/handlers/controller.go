@@ -32,6 +32,7 @@ type Repository interface {
 	GetManualFinancials(ctx context.Context, company string) ([]models.ManualFinancials, error)
 	SaveManualFinancials(ctx context.Context, m models.ManualFinancials) error
 	DeleteManualFinancials(ctx context.Context, company string, year int) error
+	SaveQuarterData(ctx context.Context, data models.QuarterData) error
 }
 
 // ScheduleSource reports the data-refresh timetable (*scheduler.Scheduler).

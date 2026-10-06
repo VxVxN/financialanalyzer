@@ -1,0 +1,52 @@
+package handlers
+
+import (
+	"bytes"
+	"log/slog"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func TestImportCSV(t *testing.T) {
+	repo := &fakeRepo{}
+	c := NewController(repo, slog.New(slog.DiscardHandler))
+	r := chi.NewRouter()
+	r.Post("/api/import", c.ImportCSV)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", "SBER_banks.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fw.Write([]byte("Метрика;2023-Q1\nКапитализация;1 000\nROE;15,5\n"))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/import", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if repo.imported == 0 || repo.savedCompany != "SBER" {
+		t.Errorf("imported = %d company = %q", repo.imported, repo.savedCompany)
+	}
+	if !strings.Contains(rec.Body.String(), `"saved"`) {
+		t.Errorf("body = %s", rec.Body)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/import", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("no file: %d", rec.Code)
+	}
+}

@@ -40,6 +40,7 @@ type fakeRepo struct {
 	savedManual []models.ManualFinancials
 	deletedYear int
 	manualErr   error
+	imported    int
 
 	savedCompany string
 	savedNote    string
@@ -109,6 +110,11 @@ func (f *fakeRepo) DeleteManualFinancials(_ context.Context, company string, yea
 		return f.manualErr
 	}
 	f.deletedYear = year
+	return nil
+}
+func (f *fakeRepo) SaveQuarterData(_ context.Context, data models.QuarterData) error {
+	f.savedCompany = data.Company
+	f.imported++
 	return nil
 }
 

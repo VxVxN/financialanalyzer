@@ -4,9 +4,9 @@
 // Jobs fire at wall-clock slots in Moscow time (daily "HH:MM" or weekly
 // "sun HH:MM"). Runs are strictly sequential — one goroutine, one fetch at a
 // time — and a slot that fires while another job is running waits for it. On
-// startup a job whose latest slot passed without a completed full-scope run
-// (per fetch_runs, which also records manual /updates runs) is caught up at once, so
-// a server that was down at 07:00 still refreshes the day's quotes.
+// startup a job with no completed full-scope run today (Moscow time; weekly
+// jobs only on their weekday) is caught up at once, so a server that was down
+// at 07:00 — or that starts before the slot — still refreshes.
 package scheduler
 
 import (
@@ -214,6 +214,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	if err := s.sleep(ctx, now.Add(s.startupDelay)); err != nil {
 		return
 	}
+	caught := make([]bool, len(s.jobs))
 	for _, i := range s.catchUpOrder() {
 		if ctx.Err() != nil {
 			return
@@ -225,13 +226,21 @@ func (s *Scheduler) Run(ctx context.Context) {
 			// this one waited for may have done the work meanwhile.
 			j := s.jobs[i]
 			s.execute(ctx, i, fetcher.TriggerCatchUp, func(ctx context.Context) bool { return s.missed(ctx, j) })
+			caught[i] = true
 		}
 	}
 	// Slots that passed during the startup delay or a catch-up run were either
 	// just caught up or found satisfied; either way they must not fire now.
+	// A catch-up before today's slot also covers that slot (do not fire at 07:00
+	// after a 06:00 catch-up).
 	s.mu.Lock()
+	after := maxTime(now, s.now())
 	for i, j := range s.jobs {
-		s.next[i] = j.Spec.Next(maxTime(now, s.now()))
+		n := j.Spec.Next(after)
+		if caught[i] && sameMoscowDay(n, after) {
+			n = j.Spec.Next(n)
+		}
+		s.next[i] = n
 	}
 	s.mu.Unlock()
 
@@ -261,7 +270,32 @@ func (s *Scheduler) missed(ctx context.Context, j Job) bool {
 		s.logger.Warn("Scheduler: cannot read the last run", "job", j.Name(), "error", err)
 		return false
 	}
-	return !ok || last.Before(j.Spec.Prev(s.now()))
+	return !ok || last.Before(catchUpSince(j.Spec, s.now()))
+}
+
+// catchUpSince is the instant a completed run must be at or after to count as
+// this job having run "this period". For a daily job that is the start of the
+// Moscow day: a restart before the slot still refreshes if nothing ran today.
+// A weekly job on a different weekday keeps the last slot (Sunday's financials
+// are not rerun every Wednesday).
+func catchUpSince(spec Spec, now time.Time) time.Time {
+	since := spec.Prev(now)
+	if spec.Weekly && spec.Weekday != now.In(Moscow).Weekday() {
+		return since
+	}
+	if day := moscowDayStart(now); day.After(since) {
+		return day
+	}
+	return since
+}
+
+func moscowDayStart(t time.Time) time.Time {
+	m := t.In(Moscow)
+	return time.Date(m.Year(), m.Month(), m.Day(), 0, 0, 0, 0, Moscow)
+}
+
+func sameMoscowDay(a, b time.Time) bool {
+	return moscowDayStart(a).Equal(moscowDayStart(b))
 }
 
 // catchUpOrder lists job indices with the jobs that satisfy the most other
