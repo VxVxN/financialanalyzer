@@ -150,7 +150,7 @@
             </div>
         </div>
         <div class="panel-foot">
-            <label class="check"><input id="comparable" type="checkbox"> Только сопоставимые данные (МСФО группы, без РСБУ/ЦБ)</label>
+            <label class="check"><input id="comparable" type="checkbox" checked> Только сопоставимые данные (МСФО группы, без РСБУ/ЦБ)</label>
             <label class="check"><input id="noflags" type="checkbox"> Без замечаний к качеству данных</label>
             <span class="spacer" style="flex:1"></span>
             <button type="button" class="btn btn-sm btn-ghost" id="reset">Сбросить всё</button>
@@ -182,13 +182,13 @@
             не показываются. «Отчёт» — значения, сохранённые за последний период. При убытке P/E не считается.
             <b>EV/EBIT</b> — (капитализация + чистый долг) / операционная прибыль LTM (для РСБУ — прибыль от продаж);
             <b>P/FCF</b> — капитализация / (операционный денежный поток − капзатраты) LTM; при убытке или отрицательном FCF не считаются.
-            <b>Сопоставимость</b>: неконсолидированная РСБУ и данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями. Флажок «Только сопоставимые данные» оставляет в таблице МСФО группы.
+            <b>Сопоставимость</b>: неконсолидированная РСБУ и данные ЦБ (уровень юрлица, не группы) несопоставимы между компаниями. Флажок «Только сопоставимые данные» включён сразу и оставляет в таблице МСФО группы.
             <b>P/E к сектору</b> — отклонение P/E от медианы остальных компаний той же категории с актуальной оценкой
             (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
             <b>история P/E</b> — перцентиль: доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего;
             низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
             <b>Медиана</b> внизу таблицы — простая медиана по показанным компаниям, поэтому может отличаться от медианы сектора.
-            <b>Балл</b> — эвристика из роста, рентабельности, маржи, долга и P/E, а не рекомендация.
+            <b>Балл</b> — эвристика из роста, рентабельности, маржи, долга и P/E (у банков — из роста дохода, ROE и P/B). Рядом с баллом — сколько компонентов было в данных: балл по двум из пяти нельзя сравнивать с баллом по всем. Это не рекомендация.
         </p>
     </details>
 </main>
@@ -444,8 +444,14 @@
                 return '<td title="Доля периодов за 10 лет, где P/E был ниже текущего"><div class="rel"><div class="ruler" aria-hidden="true">' +
                     '<div class="ruler-mark" style="left:' + (v * 0.72).toFixed(1) + 'px"></div></div><span class="num ' + cls + '">' + pctText(v) + '</span></div></td>';
             }
-            case 'score':
-                return '<td><span class="score num' + (v >= 70 ? ' hi' : '') + '">' + v + '</span></td>';
+            case 'score': {
+                const of = r.score_scale || 5;
+                const parts = (r.score_parts || 0) + '/' + of;
+                const title = (r.bank ? 'Шкала банка: рост дохода, ROE и P/B. ' : 'Рост, ROE, маржа, долг и P/E. ') +
+                    'Посчитано по ' + (r.score_parts || 0) + ' из ' + of + '. Незаполненные компоненты не входят в итог.';
+                return '<td title="' + esc(title) + '"><span class="score num' + (v >= 70 ? ' hi' : '') + '">' + v +
+                    '</span> <span class="meta num">' + parts + (r.bank ? ' банк' : '') + '</span></td>';
+            }
             case 'flags':
                 return v ? '<td class="warn" title="Замечания к качеству данных — подробности в карточке компании">▲ ' + v + '</td>' : '<td class="na">—</td>';
             case 'basis':
@@ -671,8 +677,13 @@
     });
     document.querySelectorAll('#filtersPanel input, #filtersPanel select, #q').forEach((el) =>
         el.addEventListener('input', () => { activeUserView = null; render(); }));
+    function clearedFilters() {
+        const ranges = {};
+        for (const [k] of RANGE_KEYS) ranges[k] = [null, null];
+        return { q: '', category: '', comparable: true, noflags: false, ranges: ranges };
+    }
     $('reset').addEventListener('click', () => {
-        applyFilterState({});
+        applyFilterState(clearedFilters());
         preset = 'all';
         activeUserView = null;
         render();

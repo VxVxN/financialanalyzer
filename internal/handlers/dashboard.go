@@ -435,7 +435,7 @@ func renderHeadlineStrip(w http.ResponseWriter, s analytics.Snapshot, current *a
 		{name: "Выручка LTM", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("г/г", s.RevenueYoY)},
 		{name: "Прибыль LTM", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("г/г", s.NetProfitYoY)},
 		{name: "ROE", value: fmtPct(s.ROE), sub: s.ROELabel},
-		{name: "Балл", value: fmt.Sprintf("%d", s.Score), sub: "из 100"},
+		{name: "Балл", value: fmt.Sprintf("%d", s.Score), sub: fmt.Sprintf("по %d из %d", s.ScoreParts, s.ScoreScale())},
 	}
 	fmt.Fprint(w, `<div class="strip">`)
 	for _, c := range cells {
@@ -760,24 +760,36 @@ func renderDashboardChart(w http.ResponseWriter, company string) {
 }
 
 func renderScoreBreakdown(w http.ResponseWriter, s analytics.Snapshot) {
-	rows := []struct {
+	type scoreRow struct {
 		name   string
 		value  string
 		weight string
 		ok     bool
 		good   bool
-	}{
-		{"Рост (CAGR выручки, 3 года)", fmtPct(s.RevenueCAGR3Y), "30%", !math.IsNaN(s.RevenueCAGR3Y), s.RevenueCAGR3Y >= 10},
-		{"Рентабельность (ROE)", fmtPct(s.ROE), "25%", !math.IsNaN(s.ROE), s.ROE >= 15},
-		{"Маржинальность (чистая маржа)", fmtPct(s.NetMargin), "15%", !math.IsNaN(s.NetMargin), s.NetMargin >= 10},
-		{"Долговая нагрузка (Долг/EBITDA)", fmtMultiple(s.DebtEBITDA), "15%", !math.IsNaN(s.DebtEBITDA), s.DebtEBITDA <= 2},
-		{"Оценка (P/E)", fmtRatio(s.PE), "15%", !math.IsNaN(s.PE) && s.PE > 0, s.PE > 0 && s.PE <= 12},
+	}
+	var rows []scoreRow
+	note := "Эвристический балл, а не рекомендация. Компонент без данных не входит в итог, и оставшиеся пересчитываются на 100 — поэтому балл по двум компонентам нельзя сравнивать с баллом по всем."
+	if s.Bank {
+		note = "Шкала для банков: рост дохода (чистый процентный плюс комиссии), ROE и P/B. " + note
+		rows = []scoreRow{
+			{"Рост дохода (CAGR, 3 года)", fmtPct(s.RevenueCAGR3Y), "35%", !math.IsNaN(s.RevenueCAGR3Y), s.RevenueCAGR3Y >= 10},
+			{"Рентабельность (ROE)", fmtPct(s.ROE), "40%", !math.IsNaN(s.ROE), s.ROE >= 15},
+			{"Оценка (P/B)", fmtRatio(s.PB), "25%", !math.IsNaN(s.PB) && s.PB > 0, s.PB > 0 && s.PB <= 1},
+		}
+	} else {
+		rows = []scoreRow{
+			{"Рост (CAGR выручки, 3 года)", fmtPct(s.RevenueCAGR3Y), "30%", !math.IsNaN(s.RevenueCAGR3Y), s.RevenueCAGR3Y >= 10},
+			{"Рентабельность (ROE)", fmtPct(s.ROE), "25%", !math.IsNaN(s.ROE), s.ROE >= 15},
+			{"Маржинальность (чистая маржа)", fmtPct(s.NetMargin), "15%", !math.IsNaN(s.NetMargin), s.NetMargin >= 10},
+			{"Долговая нагрузка (Долг/EBITDA)", fmtMultiple(s.DebtEBITDA), "15%", !math.IsNaN(s.DebtEBITDA), s.DebtEBITDA <= 2},
+			{"Оценка (P/E)", fmtRatio(s.PE), "15%", !math.IsNaN(s.PE) && s.PE > 0, s.PE > 0 && s.PE <= 12},
+		}
 	}
 	fmt.Fprintf(w, `<div class="card score-breakdown">
-  <div class="score-head"><span class="big num">%d</span><span class="muted">из 100</span></div>
+  <div class="score-head"><span class="big num">%d</span><span class="muted">из 100 · по %d из %d</span></div>
   <div class="table-wrap"><table class="table">
     <thead><tr><th>Компонент</th><th class="left">Вес</th><th>Значение</th><th class="left">Вывод</th></tr></thead>
-    <tbody>`, s.Score)
+    <tbody>`, s.Score, s.ScoreParts, s.ScoreScale())
 	for _, r := range rows {
 		var verdict string
 		switch {
@@ -791,9 +803,9 @@ func renderScoreBreakdown(w http.ResponseWriter, s analytics.Snapshot) {
 		fmt.Fprintf(w, `<tr><td>%s</td><td class="left">%s</td><td class="num">%s</td><td class="left">%s</td></tr>`,
 			html.EscapeString(r.name), r.weight, html.EscapeString(r.value), verdict)
 	}
-	fmt.Fprint(w, `</tbody></table></div>
-  <div class="score-note">Эвристический балл, а не рекомендация. Изучите каждый компонент и составьте собственное мнение.</div>
-</div>`)
+	fmt.Fprintf(w, `</tbody></table></div>
+  <div class="score-note">%s</div>
+</div>`, html.EscapeString(note))
 }
 
 func renderNotes(w http.ResponseWriter, note string) {

@@ -8,14 +8,17 @@ import (
 	"testing"
 
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
+	"github.com/VxVxN/financialanalyzer/internal/ifrs"
 	"github.com/VxVxN/financialanalyzer/internal/ops"
 	"github.com/go-chi/chi/v5"
 )
 
 type fakeJobs struct {
-	mu       sync.Mutex
-	fetches  []fetcher.Request
-	fetchErr error
+	mu            sync.Mutex
+	fetches       []fetcher.Request
+	fetchErr      error
+	ifrsCompanies []string
+	ifrsYears     []int
 }
 
 func (f *fakeJobs) StartFetch(req fetcher.Request) error {
@@ -28,6 +31,19 @@ func (f *fakeJobs) StartFetch(req fetcher.Request) error {
 	return nil
 }
 func (f *fakeJobs) FetchRunning() bool { return false }
+
+func (f *fakeJobs) StartIFRS(companies []string, years []int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fetchErr != nil {
+		return f.fetchErr
+	}
+	f.ifrsCompanies = append([]string(nil), companies...)
+	f.ifrsYears = append([]int(nil), years...)
+	return nil
+}
+
+func (f *fakeJobs) IFRSStatus() ifrs.Status { return ifrs.Status{} }
 
 func newJobsServer(j Jobs) *chi.Mux {
 	c := NewController(&fakeRepo{}, slog.New(slog.DiscardHandler))

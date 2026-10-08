@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -43,6 +44,7 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
+	loadDotEnv()
 	return &Config{
 		Port:       getEnvInt("PORT", 8088),
 		DBHost:     getEnv("DB_HOST", "localhost"),
@@ -105,6 +107,35 @@ func (c *Config) AuthEnabled() bool {
 // NotifyEnabled reports whether failure notifications are configured.
 func (c *Config) NotifyEnabled() bool {
 	return c.TelegramBotToken != "" && c.TelegramChatID != ""
+}
+
+// loadDotEnv reads KEY=VALUE lines from .env in the working directory.
+// A variable already set in the environment is left as it is. A missing
+// file is not an error.
+func loadDotEnv() {
+	f, err := os.Open(".env")
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		val = strings.Trim(val, `"'`)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		_ = os.Setenv(key, val)
+	}
 }
 
 func getEnv(key, defaultValue string) string {

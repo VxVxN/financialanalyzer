@@ -13,8 +13,11 @@
 // (the CSV/smart-lab convention). ISSUESIZE is only the current share count,
 // so the count at a past date is rebuilt by undoing the splits since then:
 // MOEX's split list (/iss/statistics/engines/stock/splits/{SECID}) plus
-// Client.ExtraSplits for splits it misses. Additional issues and buybacks are
-// not tracked, so caps across those remain approximate. A renamed security
+// Client.ExtraSplits for splits it misses. The fetcher keeps the share count
+// behind each saved quote and warns when it moves and no split between the
+// two dates explains it (an extra issue, a buyback, or a 1:2–1:4 split the
+// cap-jump check does not see). Those events are still not undone in older
+// caps. A renamed security
 // (TCSG -> T) keeps its old history under the old secid; Client.Predecessors
 // lets CapitalizationAt price those years there, on the old secid's own
 // (frozen) ISSUESIZE, which is the share count at the time of the rename.
@@ -377,7 +380,8 @@ const quoteLookback = 14 * 24 * time.Hour
 type Quote struct {
 	Price          float64 // RUB per share
 	Date           string  // trade date of Price, "YYYY-MM-DD"
-	Capitalization float64 // Price x current ISSUESIZE, billions of RUB
+	Capitalization float64 // Price x shares, billions of RUB
+	Shares         float64 // shares outstanding used for Capitalization
 }
 
 // LatestQuote returns the last close of secid in the two weeks up to now. It
@@ -407,7 +411,7 @@ func (c *Client) LatestQuote(ctx context.Context, secid string, now time.Time) (
 			return Quote{}, fmt.Errorf("issue size %s: zero", secid)
 		}
 	}
-	return Quote{Price: price, Date: date, Capitalization: price * shares / rubPerBillion}, nil
+	return Quote{Price: price, Date: date, Shares: shares, Capitalization: price * shares / rubPerBillion}, nil
 }
 
 // history fetches the EOD history block of secid for [from, till].

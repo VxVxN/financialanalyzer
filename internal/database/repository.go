@@ -473,16 +473,22 @@ func (r *Repository) DeleteCompanyNote(ctx context.Context, company string) erro
 }
 
 // SaveMarketQuote stores the latest quote for a company, replacing the old one.
+// A zero share count is stored as NULL (a row from before the count was kept).
 func (r *Repository) SaveMarketQuote(ctx context.Context, q models.MarketQuote) error {
+	var shares any
+	if q.Shares > 0 {
+		shares = q.Shares
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO market_quotes (company, price, capitalization, price_date, updated_at)
-		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		INSERT INTO market_quotes (company, price, capitalization, shares, price_date, updated_at)
+		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
 		ON CONFLICT (company) DO UPDATE SET
 			price = EXCLUDED.price,
 			capitalization = EXCLUDED.capitalization,
+			shares = EXCLUDED.shares,
 			price_date = EXCLUDED.price_date,
 			updated_at = CURRENT_TIMESTAMP`,
-		q.Company, q.Price, q.Capitalization, q.PriceDate)
+		q.Company, q.Price, q.Capitalization, shares, q.PriceDate)
 	if err != nil {
 		return fmt.Errorf("save market quote %s: %w", q.Company, err)
 	}
@@ -492,7 +498,7 @@ func (r *Repository) SaveMarketQuote(ctx context.Context, q models.MarketQuote) 
 // GetMarketQuotes returns the stored quotes keyed by company.
 func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.MarketQuote, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT company, price, capitalization, price_date FROM market_quotes`)
+		`SELECT company, price, capitalization, shares, price_date FROM market_quotes`)
 	if err != nil {
 		return nil, fmt.Errorf("query market quotes: %w", err)
 	}
@@ -501,8 +507,12 @@ func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.Mar
 	out := make(map[string]models.MarketQuote)
 	for rows.Next() {
 		var q models.MarketQuote
-		if err := rows.Scan(&q.Company, &q.Price, &q.Capitalization, &q.PriceDate); err != nil {
+		var shares sql.NullFloat64
+		if err := rows.Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &q.PriceDate); err != nil {
 			return nil, fmt.Errorf("scan market quote: %w", err)
+		}
+		if shares.Valid {
+			q.Shares = shares.Float64
 		}
 		out[q.Company] = q
 	}
@@ -514,9 +524,13 @@ func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.Mar
 
 // GetMarketQuote returns one company's quote; ok is false when none is stored.
 func (r *Repository) GetMarketQuote(ctx context.Context, company string) (q models.MarketQuote, ok bool, err error) {
+	var shares sql.NullFloat64
 	err = r.db.QueryRowContext(ctx,
-		`SELECT company, price, capitalization, price_date FROM market_quotes WHERE company = $1`, company).
-		Scan(&q.Company, &q.Price, &q.Capitalization, &q.PriceDate)
+		`SELECT company, price, capitalization, shares, price_date FROM market_quotes WHERE company = $1`, company).
+		Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &q.PriceDate)
+	if shares.Valid {
+		q.Shares = shares.Float64
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.MarketQuote{}, false, nil
 	}
@@ -671,6 +685,30 @@ func (r *Repository) LastCompletedRun(ctx context.Context, kinds []string) (star
 		return time.Time{}, false, fmt.Errorf("last completed fetch run: %w", err)
 	}
 	return t.Time, t.Valid, nil
+}
+
+// CheapListSent reports whether the Monday note for monday (a date) was delivered.
+func (r *Repository) CheapListSent(ctx context.Context, monday time.Time) (bool, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cheap_list_sends WHERE monday = $1::date`, monday.Format(time.DateOnly)).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("cheap list sent: %w", err)
+	}
+	return n > 0, nil
+}
+
+// MarkCheapListSent records that the Monday note for monday was delivered.
+// A repeat for the same Monday does nothing.
+func (r *Repository) MarkCheapListSent(ctx context.Context, monday time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO cheap_list_sends (monday, sent_at)
+		VALUES ($1::date, CURRENT_TIMESTAMP)
+		ON CONFLICT (monday) DO NOTHING`, monday.Format(time.DateOnly))
+	if err != nil {
+		return fmt.Errorf("mark cheap list sent: %w", err)
+	}
+	return nil
 }
 
 // AbandonStaleRuns marks as abandoned the runs still "running" that started

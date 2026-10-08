@@ -782,7 +782,13 @@ type Snapshot struct {
 	NetProfitCAGR3                         float64
 	RevenueCAGR5Y                          float64
 	NetProfitCAGR5                         float64
-	Score                                  int // 0-100 composite long-term-investor score
+	// Score is a 0-100 heuristic. Bank selects the bank scale (income growth,
+	// ROE, P/B). ScoreParts is how many of that scale's components had data;
+	// missing ones are left out and the rest are rescaled, so a high score
+	// on few parts is not the same as a high score on all of them.
+	Bank       bool
+	Score      int
+	ScoreParts int
 	// PEPoint, PBPoint, DivYieldPoint are the periods PE, PB and DivYield
 	// were taken from (zero when NaN); Standalone tells their reporting kind.
 	PEPoint, PBPoint, DivYieldPoint Point
@@ -883,18 +889,36 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	snap.RevenueCAGR5Y = lastNonNaN(DerivedSeries(hist, "revenue_cagr5", PeriodTTM))
 	snap.NetProfitCAGR5 = lastNonNaN(DerivedSeries(hist, "net_profit_cagr5", PeriodTTM))
 
-	snap.Score = computeScore(snap)
+	snap.Bank = last.Source == models.SourceCBR102
+	if snap.Bank {
+		snap.Score, snap.ScoreParts = bankScore(snap)
+	} else {
+		snap.Score, snap.ScoreParts = computeScore(snap)
+	}
 	return snap
 }
 
-// computeScore returns a 0-100 composite quality score for long-term investing.
-// The thresholds are intentionally simple and explained on the dashboard.
-func computeScore(s Snapshot) int {
+// ScoreScale is how many components the company's score is built from:
+// three for a bank, five otherwise.
+func (s Snapshot) ScoreScale() int {
+	if s.Bank {
+		return 3
+	}
+	return 5
+}
+
+// computeScore returns a 0-100 composite quality score for long-term investing
+// and how many of the five components had data. The thresholds are
+// intentionally simple and explained on the dashboard. A missing component
+// is left out and the rest are rescaled to 100.
+func computeScore(s Snapshot) (int, int) {
 	score := 0.0
 	components := 0.0
+	parts := 0
 
 	// Growth (30 pts): revenue 3y CAGR
 	if !math.IsNaN(s.RevenueCAGR3Y) {
+		parts++
 		components += 30
 		switch {
 		case s.RevenueCAGR3Y >= 20:
@@ -910,6 +934,7 @@ func computeScore(s Snapshot) int {
 
 	// Profitability (25 pts): ROE
 	if !math.IsNaN(s.ROE) {
+		parts++
 		components += 25
 		switch {
 		case s.ROE >= 20:
@@ -927,6 +952,7 @@ func computeScore(s Snapshot) int {
 
 	// Margins (15 pts): net margin
 	if !math.IsNaN(s.NetMargin) {
+		parts++
 		components += 15
 		switch {
 		case s.NetMargin >= 20:
@@ -942,6 +968,7 @@ func computeScore(s Snapshot) int {
 
 	// Leverage (15 pts): Debt/EBITDA (lower is better)
 	if !math.IsNaN(s.DebtEBITDA) {
+		parts++
 		components += 15
 		switch {
 		case s.DebtEBITDA <= 1:
@@ -955,8 +982,10 @@ func computeScore(s Snapshot) int {
 		}
 	}
 
-	// Valuation (15 pts): P/E (lower is better, very low is suspicious)
+	// Valuation (15 pts): P/E (lower is better, very low is suspicious).
+	// A loss (negative P/E) counts as a component that scores nothing.
 	if !math.IsNaN(s.PE) {
+		parts++
 		components += 15
 		switch {
 		case s.PE > 0 && s.PE <= 8:
@@ -971,9 +1000,73 @@ func computeScore(s Snapshot) int {
 	}
 
 	if components == 0 {
-		return 0
+		return 0, 0
 	}
-	return int(math.Round(score * 100 / components))
+	return int(math.Round(score * 100 / components)), parts
+}
+
+// bankScore is the bank scale: income-growth (the CBR revenue proxy), ROE
+// and P/B. Debt/EBITDA and net margin are not meaningful on form 102, so
+// they are not part of the scale. parts is how many of the three had data.
+func bankScore(s Snapshot) (int, int) {
+	score := 0.0
+	components := 0.0
+	parts := 0
+
+	// Income growth (35 pts): 3y CAGR of the net-interest-plus-fee proxy.
+	if !math.IsNaN(s.RevenueCAGR3Y) {
+		parts++
+		components += 35
+		switch {
+		case s.RevenueCAGR3Y >= 20:
+			score += 35
+		case s.RevenueCAGR3Y >= 10:
+			score += 26
+		case s.RevenueCAGR3Y >= 5:
+			score += 18
+		case s.RevenueCAGR3Y >= 0:
+			score += 9
+		}
+	}
+
+	// Profitability (40 pts): ROE.
+	if !math.IsNaN(s.ROE) {
+		parts++
+		components += 40
+		switch {
+		case s.ROE >= 20:
+			score += 40
+		case s.ROE >= 15:
+			score += 30
+		case s.ROE >= 10:
+			score += 20
+		case s.ROE >= 5:
+			score += 10
+		case s.ROE >= 0:
+			score += 4
+		}
+	}
+
+	// Valuation (25 pts): P/B, lower is cheaper. Non-positive equity has no P/B.
+	if !math.IsNaN(s.PB) && s.PB > 0 {
+		parts++
+		components += 25
+		switch {
+		case s.PB <= 0.7:
+			score += 25
+		case s.PB <= 1:
+			score += 18
+		case s.PB <= 1.3:
+			score += 12
+		case s.PB <= 1.8:
+			score += 6
+		}
+	}
+
+	if components == 0 {
+		return 0, 0
+	}
+	return int(math.Round(score * 100 / components)), parts
 }
 
 // Current is a company's valuation at its latest exchange close: the stored

@@ -44,6 +44,16 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 	return rows, nil
 }
 
+// CheapList is the Monday operator note: comparable companies cheap against
+// both their own P/E history and their sector.
+func (controller *Controller) CheapList(ctx context.Context) (string, error) {
+	rows, err := controller.buildScreener(ctx)
+	if err != nil {
+		return "", err
+	}
+	return analytics.CheapListMessage(rows), nil
+}
+
 // ScreenerAPI returns the screener rows as JSON (null = no data).
 func (controller *Controller) ScreenerAPI(w http.ResponseWriter, r *http.Request) {
 	rows, err := controller.buildScreener(r.Context())

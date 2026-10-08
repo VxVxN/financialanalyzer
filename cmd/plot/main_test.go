@@ -14,6 +14,7 @@ import (
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/handlers"
+	"github.com/VxVxN/financialanalyzer/internal/ifrs"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
@@ -25,6 +26,8 @@ type stubJobs struct{}
 
 func (stubJobs) StartFetch(fetcher.Request) error { return nil }
 func (stubJobs) FetchRunning() bool               { return false }
+func (stubJobs) StartIFRS([]string, []int) error  { return nil }
+func (stubJobs) IFRSStatus() ifrs.Status          { return ifrs.Status{} }
 
 func (s *stubRepo) Ping(context.Context) error                        { return nil }
 func (s *stubRepo) GetAllCompanies(context.Context) ([]string, error) { return nil, nil }
@@ -61,6 +64,7 @@ var writeRoutes = []routeCase{
 
 var startRoutes = []routeCase{
 	{http.MethodPost, "/api/fetch", `{}`},
+	{http.MethodPost, "/api/fetch-ifrs", `{}`},
 }
 
 func serve(h http.Handler, rc routeCase, auth bool) *httptest.ResponseRecorder {
@@ -112,7 +116,7 @@ func TestRouterWriteEndpointsRequireAuth(t *testing.T) {
 
 func TestRouterReadEndpointsStayOpen(t *testing.T) {
 	h, _ := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
-	for _, target := range []string{"/", "/compare", "/static/app.css", "/static/app.js", "/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/manual-financials?company=SBER"} {
+	for _, target := range []string{"/", "/compare", "/static/app.css", "/static/app.js", "/healthz", "/api/companies", "/api/categories", "/api/company-note?company=SBER", "/updates", "/api/fetch-runs", "/api/fetch-ifrs", "/api/manual-financials?company=SBER"} {
 		rec := serve(h, routeCase{method: http.MethodGet, target: target}, false)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status = %d, want 200", target, rec.Code)

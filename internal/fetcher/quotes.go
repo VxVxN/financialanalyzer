@@ -29,6 +29,8 @@ func uniqueNames(names []string) []string {
 
 // capJumpRatio is the year-over-year market-cap change beyond which a split
 // missing from MOEX's list (and share_splits.txt) is the likely cause.
+// Splits of 1:2-1:4 stay under it; those show up as a share-count change
+// (see unexplainedShares) once the next quote is saved.
 const capJumpRatio = 4.0
 
 type capJump struct {
@@ -117,12 +119,43 @@ func warnCapJumps(ctx context.Context, repo *database.Repository, companies []st
 // quoteStore is the slice of the repository fetchQuotes needs (a fake in tests).
 type quoteStore interface {
 	ExistingPeriods(ctx context.Context, company string) (map[string]struct{}, error)
+	GetMarketQuote(ctx context.Context, company string) (models.MarketQuote, bool, error)
 	SaveMarketQuote(ctx context.Context, q models.MarketQuote) error
 }
 
 // quoteSource is the MOEX call fetchQuotes needs (a fake in tests).
 type quoteSource interface {
 	LatestQuote(ctx context.Context, secid string, now time.Time) (moex.Quote, error)
+	Splits(ctx context.Context, secid string) ([]moex.Split, error)
+}
+
+// shareChangeRatio is the smallest relative move in shares outstanding, after
+// known splits, that is worth a warning. Smaller moves are rounding.
+const shareChangeRatio = 0.01
+
+// unexplainedShares reports whether next shares differ from prev by more than
+// shareChangeRatio once every split whose first post-split session falls
+// strictly after prevDate and on or before nextDate has been applied.
+// Dates are YYYY-MM-DD. ratio is next/expected (1 when the change is a known
+// split). unexplained is false when there is nothing to compare.
+func unexplainedShares(prevShares, nextShares float64, prevDate, nextDate string, splits []moex.Split) (ratio float64, unexplained bool) {
+	if prevShares <= 0 || nextShares <= 0 || prevDate == "" || nextDate == "" || nextDate < prevDate {
+		return 0, false
+	}
+	expected := prevShares
+	for _, sp := range splits {
+		if sp.TradeDate > prevDate && sp.TradeDate <= nextDate && sp.Before > 0 && sp.After > 0 {
+			expected *= sp.After / sp.Before
+		}
+	}
+	if expected <= 0 {
+		return 0, false
+	}
+	ratio = nextShares / expected
+	if ratio > 1+shareChangeRatio || ratio < 1/(1+shareChangeRatio) {
+		return ratio, true
+	}
+	return ratio, false
 }
 
 // fetchQuotes stores the latest close for each company (the ticker doubles as
@@ -154,7 +187,18 @@ func fetchQuotes(ctx context.Context, repo quoteStore, mx quoteSource, companies
 			failed = append(failed, company)
 			continue
 		}
-		mq := models.MarketQuote{Company: company, Price: q.Price, Capitalization: q.Capitalization, PriceDate: date}
+		if prev, ok, err := repo.GetMarketQuote(ctx, company); err != nil {
+			logger.Warn("Share-count check skipped", "ticker", company, "error", err)
+		} else if ok && q.Shares > 0 {
+			splits, serr := mx.Splits(ctx, company)
+			if serr != nil {
+				logger.Warn("Share-count check skipped: split list unavailable", "ticker", company, "error", serr)
+			} else if ratio, bad := unexplainedShares(prev.Shares, q.Shares, prev.PriceDate.Format(time.DateOnly), q.Date, splits); bad {
+				logger.Warn("Share count changed without a matching split — possible extra issue, buyback, or a missing share_splits.txt row",
+					"ticker", company, "from", prev.Shares, "to", q.Shares, "residual", fmt.Sprintf("%.2fx", ratio))
+			}
+		}
+		mq := models.MarketQuote{Company: company, Price: q.Price, Capitalization: q.Capitalization, Shares: q.Shares, PriceDate: date}
 		if err := repo.SaveMarketQuote(ctx, mq); err != nil {
 			logger.Warn("Quote not saved", "ticker", company, "error", err)
 			failed = append(failed, company)

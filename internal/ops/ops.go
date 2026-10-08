@@ -12,6 +12,7 @@ import (
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
+	"github.com/VxVxN/financialanalyzer/internal/ifrs"
 	"github.com/VxVxN/financialanalyzer/internal/notify"
 )
 
@@ -24,11 +25,15 @@ var ErrBusy = errors.New("already running")
 type Ops struct {
 	ctx    context.Context
 	logger *slog.Logger
+	repo   *database.Repository
+	ifrs   *ifrs.Client
 
 	runFetch func(context.Context, fetcher.Request) error
 
 	mu           sync.Mutex
 	fetchRunning bool
+	ifrsRunning  bool
+	ifrsStatus   ifrs.Status
 }
 
 // New binds jobs to ctx (canceled on server shutdown).
@@ -36,7 +41,7 @@ func New(ctx context.Context, repo *database.Repository, n notify.Notifier, logg
 	if logger == nil {
 		logger = slog.Default()
 	}
-	o := &Ops{ctx: ctx, logger: logger}
+	o := &Ops{ctx: ctx, logger: logger, repo: repo, ifrs: ifrs.NewClient()}
 	o.runFetch = func(ctx context.Context, req fetcher.Request) error {
 		_, err := fetcher.RunRecorded(ctx, repo, req, fetcher.TriggerCLI, fetcher.RunOptions{Notifier: n}, logger)
 		return err
@@ -75,4 +80,45 @@ func (o *Ops) FetchRunning() bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.fetchRunning
+}
+
+// StartIFRS downloads annual IFRS reports for the given companies (nil means
+// every company in the database) and fills empty manual fields. years is the
+// window, usually the five years up to the last completed one.
+func (o *Ops) StartIFRS(companies []string, years []int) error {
+	o.mu.Lock()
+	if o.ifrsRunning {
+		o.mu.Unlock()
+		return ErrBusy
+	}
+	o.ifrsRunning = true
+	o.ifrsStatus = ifrs.Status{Running: true}
+	o.mu.Unlock()
+
+	list := append([]string(nil), companies...)
+	ys := append([]int(nil), years...)
+	go func() {
+		defer func() {
+			o.mu.Lock()
+			o.ifrsRunning = false
+			o.mu.Unlock()
+		}()
+		// A nil list means "everyone"; copying a nil slice stays nil.
+		var companies []string
+		if list != nil {
+			companies = list
+		}
+		res := ifrs.Run(o.ctx, o.repo, o.ifrs, companies, ys, o.logger)
+		o.mu.Lock()
+		o.ifrsStatus = res.Status()
+		o.mu.Unlock()
+	}()
+	return nil
+}
+
+// IFRSStatus is the latest automatic IFRS run, for the updates page to poll.
+func (o *Ops) IFRSStatus() ifrs.Status {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.ifrsStatus
 }

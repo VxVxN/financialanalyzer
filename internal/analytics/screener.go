@@ -40,6 +40,9 @@ type ScreenerRow struct {
 	RevenueYoY      *float64 `json:"revenue_yoy"`
 	NetProfitYoY    *float64 `json:"net_profit_yoy"`
 	Score           int      `json:"score"`
+	ScoreParts      int      `json:"score_parts"` // components that had data
+	ScoreScale      int      `json:"score_scale"` // 5, or 3 on the bank scale
+	Bank            bool     `json:"bank"`
 	Anomalies       int      `json:"anomalies"` // data-quality flags over the history
 
 	// *HistPct: the valuation's percentile within the company's own history
@@ -120,6 +123,9 @@ func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 		RevenueYoY:      finite(snap.RevenueYoY),
 		NetProfitYoY:    finite(snap.NetProfitYoY),
 		Score:           snap.Score,
+		ScoreParts:      snap.ScoreParts,
+		ScoreScale:      snap.ScoreScale(),
+		Bank:            snap.Bank,
 		Anomalies:       len(CheckHistory(history)),
 	}
 	for _, s := range sources {

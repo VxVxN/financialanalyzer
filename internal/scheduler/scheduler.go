@@ -144,6 +144,7 @@ type Scheduler struct {
 	now          func() time.Time
 	sleep        func(ctx context.Context, until time.Time) error
 	startupDelay time.Duration
+	afterCatchUp func(context.Context) // once, after the startup catch-up finishes
 
 	mu      sync.Mutex
 	next    []time.Time // per job, next slot
@@ -164,6 +165,13 @@ func New(jobs []Job, store Store, run RunFunc, logger *slog.Logger) *Scheduler {
 	}
 	s.sleep = s.sleepUntil
 	return s
+}
+
+// SetAfterCatchUp runs fn once, after missed slots have been caught up and
+// before the timetable loop. A startup canceled during that wait does not
+// call it.
+func (s *Scheduler) SetAfterCatchUp(fn func(context.Context)) {
+	s.afterCatchUp = fn
 }
 
 // Status reports each job's schedule and next slot.
@@ -243,6 +251,10 @@ func (s *Scheduler) Run(ctx context.Context) {
 		s.next[i] = n
 	}
 	s.mu.Unlock()
+
+	if s.afterCatchUp != nil && ctx.Err() == nil {
+		s.afterCatchUp(ctx)
+	}
 
 	for {
 		i := s.earliest()

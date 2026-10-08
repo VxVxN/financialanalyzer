@@ -8,6 +8,7 @@ import (
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
+	"github.com/VxVxN/financialanalyzer/internal/ifrs"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
 
@@ -39,10 +40,12 @@ type ScheduleSource interface {
 	Status() []models.ScheduledJob
 }
 
-// Jobs starts a background fetch (*ops.Ops).
+// Jobs starts a background fetch or an IFRS pull (*ops.Ops).
 type Jobs interface {
 	StartFetch(req fetcher.Request) error
 	FetchRunning() bool
+	StartIFRS(companies []string, years []int) error
+	IFRSStatus() ifrs.Status
 }
 
 type Controller struct {

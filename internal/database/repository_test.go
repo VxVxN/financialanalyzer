@@ -34,7 +34,7 @@ func openTestDB(t *testing.T) *database.Repository {
 	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs, manual_financials`); err != nil {
+	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs, manual_financials, cheap_list_sends`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return database.NewRepository(db)
@@ -146,14 +146,14 @@ func TestMarketQuotes(t *testing.T) {
 	day := func(d int) time.Time { return time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC) }
 	for _, q := range []models.MarketQuote{
 		{Company: "SBER", Price: 270, Capitalization: 5800, PriceDate: day(28)},
-		{Company: "SBER", Price: 274.65, Capitalization: 5928.85, PriceDate: day(29)}, // replaces
+		{Company: "SBER", Price: 274.65, Capitalization: 5928.85, Shares: 21586948000, PriceDate: day(29)}, // replaces
 	} {
 		if err := repo.SaveMarketQuote(ctx, q); err != nil {
 			t.Fatalf("save: %v", err)
 		}
 	}
 	q, ok, err := repo.GetMarketQuote(ctx, "SBER")
-	if err != nil || !ok || q.Price != 274.65 || q.Capitalization != 5928.85 || !q.PriceDate.Equal(day(29)) {
+	if err != nil || !ok || q.Price != 274.65 || q.Capitalization != 5928.85 || q.Shares != 21586948000 || !q.PriceDate.Equal(day(29)) {
 		t.Fatalf("quote = %+v ok=%v err=%v", q, ok, err)
 	}
 	all, err := repo.GetMarketQuotes(ctx)
@@ -537,4 +537,28 @@ func TestLockFetch(t *testing.T) {
 		t.Fatalf("relock: %v", err)
 	}
 	release()
+}
+
+func TestCheapListSent(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	monday := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	sent, err := repo.CheapListSent(ctx, monday)
+	if err != nil || sent {
+		t.Fatalf("before send: sent=%v err=%v", sent, err)
+	}
+	if err := repo.MarkCheapListSent(ctx, monday); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if err := repo.MarkCheapListSent(ctx, monday); err != nil {
+		t.Fatalf("mark again: %v", err)
+	}
+	sent, err = repo.CheapListSent(ctx, monday)
+	if err != nil || !sent {
+		t.Fatalf("after send: sent=%v err=%v", sent, err)
+	}
+	other := time.Date(2026, 9, 28, 15, 0, 0, 0, time.UTC)
+	if sent, err = repo.CheapListSent(ctx, other); err != nil || sent {
+		t.Fatalf("other Monday: sent=%v err=%v", sent, err)
+	}
 }

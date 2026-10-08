@@ -53,6 +53,11 @@
                     <span class="ops-status" id="manual-status"></span>
                 </div>
             </form>
+            <div class="ops-actions" style="margin-top:16px">
+                <button type="button" class="btn" id="ifrs-submit">Подтянуть МСФО</button>
+                <span class="ops-status" id="ifrs-status"></span>
+            </div>
+            <p>Кнопка сама скачивает годовые отчёты с российского сервера, без VPN, и дописывает только пустые поля за пять последних лет. Цифры, которые уже введены, не меняются.</p>
         </div>
     </section>
 
@@ -157,6 +162,46 @@
             $('manual-status').textContent = 'Ошибка: ' + err.message;
         }
         $('manual-submit').disabled = false;
+    });
+
+    const pollIFRS = () => {
+        fetch('/api/fetch-ifrs').then((resp) => resp.json()).then((data) => {
+            if (data.running) {
+                $('ifrs-status').textContent = 'Загрузка…';
+                $('ifrs-submit').disabled = true;
+                setTimeout(pollIFRS, 2000);
+                return;
+            }
+            $('ifrs-submit').disabled = false;
+            if (data.message) $('ifrs-status').textContent = data.message;
+        }).catch(() => {
+            $('ifrs-submit').disabled = false;
+            $('ifrs-status').textContent = 'Не удалось узнать статус';
+        });
+    };
+
+    $('ifrs-submit').addEventListener('click', async () => {
+        $('ifrs-status').textContent = 'Запуск…';
+        $('ifrs-submit').disabled = true;
+        try {
+            const resp = await fetch('/api/fetch-ifrs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.status === 409) {
+                $('ifrs-status').textContent = 'Уже выполняется';
+                pollIFRS();
+                return;
+            }
+            if (!resp.ok) throw new Error(data.error || resp.status);
+            $('ifrs-status').textContent = 'Загрузка…';
+            pollIFRS();
+        } catch (err) {
+            $('ifrs-status').textContent = 'Ошибка: ' + err.message;
+            $('ifrs-submit').disabled = false;
+        }
     });
 })();
 </script>

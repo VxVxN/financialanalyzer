@@ -243,8 +243,8 @@ func TestComputeScore_AllGood(t *testing.T) {
 		DebtEBITDA:    0.5,
 		PE:            7,
 	}
-	if got := computeScore(s); got != 100 {
-		t.Fatalf("all-good score should be 100, got %d", got)
+	if got, parts := computeScore(s); got != 100 || parts != 5 {
+		t.Fatalf("all-good score should be 100 from 5 parts, got %d (%d parts)", got, parts)
 	}
 }
 
@@ -256,8 +256,44 @@ func TestComputeScore_AllBad(t *testing.T) {
 		DebtEBITDA:    10,
 		PE:            100,
 	}
-	if got := computeScore(s); got != 0 {
-		t.Fatalf("all-bad score should be 0, got %d", got)
+	if got, parts := computeScore(s); got != 0 || parts != 5 {
+		t.Fatalf("all-bad score should be 0 from 5 parts, got %d (%d parts)", got, parts)
+	}
+}
+
+func TestComputeScore_Partial(t *testing.T) {
+	s := Snapshot{RevenueCAGR3Y: math.NaN(), ROE: 22, NetMargin: math.NaN(), DebtEBITDA: math.NaN(), PE: 7}
+	got, parts := computeScore(s)
+	if parts != 2 {
+		t.Fatalf("parts = %d, want 2", parts)
+	}
+	// ROE 25/25 and P/E 15/15, rescaled: 40/40 = 100. The parts count is what
+	// stops this from reading as a complete profile.
+	if got != 100 {
+		t.Fatalf("two perfect components rescale to 100, got %d", got)
+	}
+}
+
+func TestBankScoreFull(t *testing.T) {
+	got, parts := bankScore(Snapshot{RevenueCAGR3Y: 25, ROE: 22, PB: 0.5})
+	if got != 100 || parts != 3 {
+		t.Fatalf("full bank score = %d (%d parts), want 100 (3)", got, parts)
+	}
+}
+
+func TestBuildSnapshotMarksBanks(t *testing.T) {
+	h := []models.QuarterData{{
+		Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceCBR102, ROE: models.Float(20),
+	}}
+	snap := BuildSnapshot(h)
+	if !snap.Bank || snap.ScoreScale() != 3 {
+		t.Fatalf("bank = %v, scale = %d", snap.Bank, snap.ScoreScale())
+	}
+	plain := BuildSnapshot([]models.QuarterData{{
+		Year: 2025, Quarter: "Q4", Company: "X5", Source: models.SourceManual, ROE: models.Float(20),
+	}})
+	if plain.Bank || plain.ScoreScale() != 5 {
+		t.Fatalf("company = bank %v, scale %d", plain.Bank, plain.ScoreScale())
 	}
 }
 

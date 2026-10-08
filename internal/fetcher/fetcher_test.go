@@ -129,6 +129,7 @@ func TestCapitalization(t *testing.T) {
 
 type fakeQuoteStore struct {
 	periods map[string]int
+	prev    map[string]models.MarketQuote
 	saved   []models.MarketQuote
 }
 
@@ -138,6 +139,18 @@ func (f *fakeQuoteStore) ExistingPeriods(_ context.Context, company string) (map
 		out[fmt.Sprintf("%d-Q4", 2020+i)] = struct{}{}
 	}
 	return out, nil
+}
+
+func (f *fakeQuoteStore) GetMarketQuote(_ context.Context, company string) (models.MarketQuote, bool, error) {
+	for i := len(f.saved) - 1; i >= 0; i-- {
+		if f.saved[i].Company == company {
+			return f.saved[i], true, nil
+		}
+	}
+	if q, ok := f.prev[company]; ok {
+		return q, true, nil
+	}
+	return models.MarketQuote{}, false, nil
 }
 
 func (f *fakeQuoteStore) SaveMarketQuote(_ context.Context, q models.MarketQuote) error {
@@ -153,6 +166,10 @@ func (f fakeQuoteSource) LatestQuote(_ context.Context, secid string, _ time.Tim
 		return moex.Quote{}, errors.New("no trades")
 	}
 	return q, nil
+}
+
+func (f fakeQuoteSource) Splits(context.Context, string) ([]moex.Split, error) {
+	return nil, nil
 }
 
 func TestFetchQuotes(t *testing.T) {
@@ -200,6 +217,22 @@ func TestCapJumps(t *testing.T) {
 	// A gap year is not "consecutive".
 	if got := capJumps([]models.QuarterData{row(2020, 10), row(2022, 100)}); len(got) != 0 {
 		t.Errorf("gap years flagged: %+v", got)
+	}
+}
+
+func TestUnexplainedShares(t *testing.T) {
+	splits := []moex.Split{{TradeDate: "2024-07-15", Before: 1, After: 10}}
+	// A recorded 1:10 between the two quotes is the whole change.
+	if _, bad := unexplainedShares(100, 1000, "2024-07-01", "2024-07-20", splits); bad {
+		t.Error("a known split was reported as unexplained")
+	}
+	// Doubling with no split in the window (a 1:2 the registry missed, or an issue).
+	if ratio, bad := unexplainedShares(100, 200, "2024-01-01", "2024-06-01", splits); !bad || math.Abs(ratio-2) > 1e-9 {
+		t.Errorf("unexplained double = %v, %v", ratio, bad)
+	}
+	// Nothing stored yet.
+	if _, bad := unexplainedShares(0, 200, "2024-01-01", "2024-06-01", nil); bad {
+		t.Error("missing previous count must not warn")
 	}
 }
 

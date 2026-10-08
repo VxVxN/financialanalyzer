@@ -98,11 +98,14 @@ func ValueOrNaN(p *float64) float64 {
 }
 
 // MarketQuote is a company's latest exchange close and the market cap it
-// implies (price x current shares outstanding), refreshed by the fetcher.
+// implies (price x shares outstanding), refreshed by the fetcher.
+// Shares is the count behind Capitalization; 0 means a row stored before
+// that count was kept.
 type MarketQuote struct {
 	Company        string
 	Price          float64   // RUB per share
 	Capitalization float64   // billions of RUB
+	Shares         float64   // shares outstanding; 0 = not stored
 	PriceDate      time.Time // trade date of Price
 }
 
