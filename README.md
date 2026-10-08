@@ -100,6 +100,62 @@ The server listens on `:8088` by default. Open <http://localhost:8088>.
 
 Migrations are applied automatically on startup.
 
+## Deploy
+
+In production the app sits behind nginx, which terminates TLS and proxies to
+the local port:
+
+```
+browser → domain:443 (nginx, TLS) → 127.0.0.1:8088 (Go service)
+```
+
+1. **DNS.** Point `A` records for `@` and `www` at the VPS public IP.
+2. **Config.** Copy `.env.example` to `.env` in the working directory (it is
+   gitignored) and set a real `DB_PASSWORD`, `DB_NAME`, and `AUTH_USER` /
+   `AUTH_PASSWORD`. The process reads `.env` on startup and does not override
+   variables already in the environment. An optional
+   `/etc/financialanalyzer.env` (see the unit file) overrides `.env`.
+3. **nginx + certificate** (replace `financialanalyzer.local` in
+   `deploy/nginx.conf`):
+
+   ```bash
+   sudo apt install -y nginx certbot python3-certbot-nginx
+   sudo cp deploy/nginx.conf /etc/nginx/sites-available/financialanalyzer
+   sudo ln -s /etc/nginx/sites-available/financialanalyzer /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo certbot --nginx -d financialanalyzer.local -d www.financialanalyzer.local
+   ```
+
+   `certbot` writes `listen 443 ssl`, the HTTP→HTTPS redirect, and renewal.
+4. **systemd.** Install the unit and enable it (adjust `User` and
+   `WorkingDirectory` in `deploy/financialanalyzer.service` if the checkout
+   is not `/home/vladimir/projects/financialanalyzer`):
+
+   ```bash
+   sudo cp deploy/financialanalyzer.service /etc/systemd/system/financialanalyzer.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now financialanalyzer
+   ```
+
+   The first start needs a built binary. Run `./deploy.sh` once, or
+   `go build -o financialanalyzer ./cmd/plot` before `enable --now`.
+5. **Updates.** `./deploy.sh` does `git pull --ff-only`, rebuilds
+   `./cmd/plot` (with the same version ldflags as `make build`) into
+   `./financialanalyzer`, and restarts the systemd unit. It needs `sudo` for
+   `systemctl` and Go at `/usr/local/go/bin/go` or on `PATH`.
+6. **Firewall (`ufw`).** Open only the web ports, and allow SSH **before**
+   enabling the firewall:
+
+   ```bash
+   sudo ufw allow OpenSSH
+   sudo ufw allow 'Nginx Full'     # 80 and 443
+   sudo ufw deny 8088/tcp          # no direct access to the Go process
+   sudo ufw enable
+   ```
+
+Database backups stay on the Postgres side (`pg_dump` / `pg_basebackup`);
+the deploy script does not dump the database.
+
 ## Data ingestion
 
 Fetching financials, quotes, banks and the annual IFRS batch happen **on the

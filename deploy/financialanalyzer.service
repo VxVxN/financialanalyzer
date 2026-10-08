@@ -1,0 +1,29 @@
+# systemd-юнит для Financial Analyzer.
+#
+# Переменные окружения читаются из .env в рабочей директории (файл не в git).
+# EnvironmentFile ниже опционален и нужен, только если хотите переопределить
+# PORT/DB_*/AUTH_*/TELEGRAM_* поверх .env (уже заданные переменные .env не
+# перезаписывает).
+#
+# Установка (замените WorkingDirectory/User под конкретную машину):
+#   sudo cp deploy/financialanalyzer.service /etc/systemd/system/financialanalyzer.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now financialanalyzer
+#
+# Дальше deploy.sh лишь пересобирает бинарник и рестартует этот юнит.
+
+[Unit]
+Description=Financial Analyzer
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=vladimir
+WorkingDirectory=/home/vladimir/projects/financialanalyzer
+ExecStart=/home/vladimir/projects/financialanalyzer/financialanalyzer
+Restart=on-failure
+RestartSec=2
+EnvironmentFile=-/etc/financialanalyzer.env
+
+[Install]
+WantedBy=multi-user.target
