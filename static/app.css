@@ -329,6 +329,7 @@ details.more[open] > summary::before { transform: rotate(90deg); }
 }
 .palette-list li[aria-selected="true"] { background: var(--accent-soft); }
 .palette-list .ticker { font-weight: 600; }
+.palette-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .palette-list .empty-row { color: var(--text-3); cursor: default; }
 .palette-hint { margin: 0; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
 

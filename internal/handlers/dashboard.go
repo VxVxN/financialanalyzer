@@ -178,7 +178,7 @@ func (controller *Controller) DashboardHandler(w http.ResponseWriter, r *http.Re
 	freshQuote := hasQuote && analytics.QuoteIsFresh(quote, controller.now())
 
 	fmt.Fprint(w, `<div class="report"><article class="report-main">`)
-	renderDashboardHeader(w, snap, sources, ownRow, peersKnown)
+	renderDashboardHeader(w, snap, sources, ownRow, peersKnown, inPortfolio(company))
 	var current *analytics.Current
 	if freshQuote {
 		c := analytics.BuildCurrent(history, quote)
@@ -400,7 +400,7 @@ func valuationVerdict(row analytics.ScreenerRow, peersKnown bool) (sentence stri
 	return "", nil, false
 }
 
-func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources []string, row analytics.ScreenerRow, peersKnown bool) {
+func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources []string, row analytics.ScreenerRow, peersKnown, held bool) {
 	srcLabel, srcNotes, comparable := sourcesLabel(sources)
 	sentence, pills, ok := valuationVerdict(row, peersKnown)
 	if !ok {
@@ -409,6 +409,9 @@ func renderDashboardHeader(w http.ResponseWriter, s analytics.Snapshot, sources 
 	srcPill := "pill"
 	if !comparable {
 		srcPill += " pill-warn"
+	}
+	if held {
+		pills = append([]string{`<span class="pill pill-accent">В портфеле</span>`}, pills...)
 	}
 	pills = append(pills, fmt.Sprintf(`<span class="%s" title="%s">Источник: %s</span>`,
 		srcPill, html.EscapeString(srcNotes), html.EscapeString(srcLabel)))

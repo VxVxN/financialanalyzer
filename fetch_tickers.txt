@@ -4,30 +4,63 @@
 # Format:  TICKER  INN  CATEGORY   (one per line, "#" starts a comment)
 # Usage:   POST /api/fetch from /updates (or the scheduler)
 #
-# Each row's INN was verified against the live ГИР БО API on 2026-09-29 (the
-# INN resolves to the listed issuer and it has published reports). The earlier
-# multi-sector list (oil, metals, power, ...) was dropped; see git history.
+# Each row's INN was checked against the live ГИР БО API on 2026-10-08: the
+# INN resolves to the listed issuer and at least one report is published.
+# A "latest YYYY" note means that year is the newest filing still on the site.
 #
 # CAVEATS (inherent to the source — see CLAUDE.md / package docs):
 #   * Figures are ANNUAL, unconsolidated RSBU (parent legal entity), NOT IFRS,
 #     so P/E and ROE differ from group-level/"market" numbers, sometimes a lot.
 #   * Rows land at Q4 of each year (no quarterly breakdown exists in ГИР БО).
 #   * EBITDA is not populated (no single RSBU line for it).
+#   * One ticker per issuer. A preferred share (TATNP, LSNG) is the same filing
+#     as the ordinary and is not listed again.
 
-# --- Consumer / retail (HOLDING-level RSBU: parent revenue is mostly
-#     dividends/management fees, so P/E and ROE are not comparable to IFRS) ---
+# --- Portfolio (portfolio.txt): OZON, X5, BELU. T is a bank, see bank_tickers.txt ---
 OZON  3900045916  retail    # МКПАО "Озон" (re-domiciled 2025, latest/only 2025)
 X5    9722079341  retail    # ПАО "Корпоративный центр ИКС 5" (2024+)
 BELU  7705634425  consumer  # ПАО "НоваБев Групп" (ex-Белуга, 2021+)
+
+# --- Oil & gas ---
+LKOH  7708004767  oil       # ПАО "ЛУКОЙЛ" (2021–2025)
+GAZP  7736050003  oil       # ПАО "Газпром" (2021–2025)
+TATN  1644003838  oil       # ПАО "Татнефть" (2021–2025)
+SIBN  5504036333  oil       # ПАО "Газпром нефть" (latest 2021)
+
+# --- Metals & mining ---
+NLMK  4823006703  metals    # ПАО "НЛМК" (2024–2025)
+SELG  1402047184  metals    # ПАО "Селигдар" (2021–2025; parent revenue is small)
+UGLD  7424024375  metals    # ПАО "ЮГК" (latest 2022)
+
+# --- Chemicals ---
+PHOR  7736216869  chem      # ПАО "ФосАгро" (2021–2025; parent profit can exceed revenue)
+AKRN  5321029508  chem      # ПАО "Акрон" (2022–2025)
+KZOS  1658008723  chem      # ПАО "Казаньоргсинтез" (2022–2025)
+NKNC  1651000010  chem      # ПАО "Нижнекамскнефтехим" (2022–2025)
+
+# --- Power generation / grids ---
+IRAO  2320109650  power     # ПАО "Интер РАО" (2023–2025)
+MSNG  7705035012  power     # ПАО "Мосэнерго" (2021–2025)
+OGKB  2607018122  power     # ПАО "ОГК-2" (2021–2025)
+TGKA  7841312071  power     # ПАО "ТГК-1" (2021–2025)
+UPRO  7203162698  power     # ПАО "Форвард Энерго" (ex-Юнипро, latest 2022)
+LSNGP 7803002209  power     # ПАО "Россети Ленэнерго" (preferred; ordinary LSNG is the same issuer)
+
+# --- Telecom, transport, developers ---
+MTSS  7740000076  telecom   # ПАО "МТС" (2021–2025)
+AFLT  7712040126  transport # ПАО "Аэрофлот" (2021–2025)
+PIKK  7713011336  develop   # ПАО "ПИК СЗ" (latest 2023)
 
 # ============================================================================
 # NOT AVAILABLE via this pipeline — do not expect data for these:
 #
 #  Banks / financials (report to the Central Bank, not ГИР БО):
 #    SBER VTBR TCSG SVCB BSPB CBOM MOEX
+#    T is fetched via bank_tickers.txt
 #
-#  Closed RSBU publication (sanctions-related secrecy — ГИР БО returns nothing):
+#  Closed RSBU publication (ГИР БО returns no organization or no reports):
 #    ROSN SNGS SNGSP BANE TRNFP GMKN MAGN CHMF PLZL ALRS MTLR RTKM HYDR AFKS
+#    NVTK RASP   (no organization on 2026-10-08; both resolved in May 2026)
 #
 #  Holding companies with ~zero parent-entity revenue (data exists but useless,
 #  the real revenue sits in subsidiaries):

@@ -423,7 +423,7 @@ func TestDashboardDataQuality(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Источник: РСБУ (эмитент)", "Качество данных", "2025-Q4", "чистая прибыль больше выручки"} {
+	for _, want := range []string{"Источник: РСБУ (эмитент)", "Качество данных", "2025-Q4", "чистая прибыль больше выручки", "В портфеле"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -432,8 +432,69 @@ func TestDashboardDataQuality(t *testing.T) {
 	clean := &fakeRepo{companyHist: []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER",
 		Source: models.SourceSmartLab, Revenue: models.Float(100), NetProfit: models.Float(30), PE: models.Float(4)}}}
 	rec = do(t, newTestServer(clean), http.MethodGet, "/company/SBER", "")
-	if strings.Contains(rec.Body.String(), "Качество данных") {
+	body = rec.Body.String()
+	if strings.Contains(body, "Качество данных") {
 		t.Error("clean IFRS data must not show the data-quality warning")
+	}
+	if strings.Contains(body, "В портфеле") {
+		t.Error("SBER is not a portfolio holding")
+	}
+}
+
+func TestPortfolioMark(t *testing.T) {
+	for _, c := range []string{"OZON", "X5", "BELU", "T"} {
+		if !inPortfolio(c) {
+			t.Errorf("%s is missing from the portfolio", c)
+		}
+	}
+	if inPortfolio("LKOH") || inPortfolio("sber") {
+		t.Error("portfolio must stay the four holdings")
+	}
+
+	repo := &fakeRepo{
+		companies: []string{"X5", "LKOH"},
+		history: map[string][]models.QuarterData{
+			"X5":   {{Year: 2025, Quarter: "Q4", Company: "X5", Category: "retail", Revenue: models.Float(1)}},
+			"LKOH": {{Year: 2025, Quarter: "Q4", Company: "LKOH", Category: "oil", Revenue: models.Float(1)}},
+		},
+		withCats: []database.CompanyWithCategory{
+			{Company: "X5", Category: "retail"},
+			{Company: "LKOH", Category: "oil"},
+		},
+	}
+	r := newTestServer(repo)
+
+	rec := do(t, r, http.MethodGet, "/api/screener", "")
+	var rows []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode screener: %v", err)
+	}
+	got := map[string]bool{}
+	for _, row := range rows {
+		name, _ := row["company"].(string)
+		held, _ := row["portfolio"].(bool)
+		got[name] = held
+	}
+	if !got["X5"] || got["LKOH"] {
+		t.Errorf("screener portfolio flags = %v", got)
+	}
+
+	rec = do(t, r, http.MethodGet, "/api/companies-with-categories", "")
+	var list []companyListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode companies: %v", err)
+	}
+	flags := map[string]bool{}
+	for _, c := range list {
+		flags[c.Company] = c.Portfolio
+	}
+	if !flags["X5"] || flags["LKOH"] {
+		t.Errorf("search portfolio flags = %v", flags)
+	}
+
+	page := do(t, r, http.MethodGet, "/", "").Body.String()
+	if !strings.Contains(page, "Портфель") || !strings.Contains(page, `"portfolio":true`) {
+		t.Error("screener page should offer the portfolio view and mark X5")
 	}
 }
 

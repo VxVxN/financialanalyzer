@@ -139,6 +139,7 @@
         matches.sort(function (a, b) {
             const pa = a.company.toLowerCase().indexOf(q) === 0 ? 0 : 1;
             const pb = b.company.toLowerCase().indexOf(q) === 0 ? 0 : 1;
+            if (!q) return (a.portfolio ? 0 : 1) - (b.portfolio ? 0 : 1) || a.company.localeCompare(b.company);
             return pa - pb || a.company.localeCompare(b.company);
         });
         matches = matches.slice(0, 30);
@@ -160,10 +161,19 @@
             const t = document.createElement('span');
             t.className = 'ticker';
             t.textContent = c.company;
+            const name = document.createElement('span');
+            name.className = 'palette-name';
+            name.append(t);
+            if (c.portfolio) {
+                const mark = document.createElement('span');
+                mark.className = 'pill pill-accent';
+                mark.textContent = 'портфель';
+                name.append(mark);
+            }
             const cat = document.createElement('span');
             cat.className = 'muted small';
             cat.textContent = c.category || '';
-            li.append(t, cat);
+            li.append(name, cat);
             li.addEventListener('mousemove', function () { if (active !== i) { active = i; markActive(); } });
             li.addEventListener('click', function () { openCompany(c.company); });
             list.append(li);

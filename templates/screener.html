@@ -57,6 +57,7 @@
     .screener-table td.sel, .screener-table th.sel { width: 44px; padding-right: 0; }
     .screener-table td.sel input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
     .co { display: flex; flex-direction: column; gap: 1px; }
+    .co-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .co a { color: var(--text-1); font-weight: 600; }
     .co .meta { font-size: 12px; color: var(--text-3); }
     .co .meta .warn-mark { color: var(--warn); }
@@ -212,6 +213,7 @@
     // ------------------------------------------------------------ presets
     const PRESETS = [
         { id: 'all', label: 'Все компании', test: () => true },
+        { id: 'portfolio', label: 'Портфель', why: 'компания из портфеля', test: (r) => r.portfolio },
         { id: 'cheap_hist', label: 'Дешевле истории', why: 'P/E в нижней четверти своей истории', test: (r) => known(r.pe_hist_pct) && r.pe_hist_pct <= 25 },
         { id: 'cheap_sector', label: 'Дешевле сектора', why: 'P/E на 20% и более ниже медианы сектора', test: (r) => known(r.pe_vs_sector) && r.pe_vs_sector <= -20 },
         { id: 'dividend', label: 'Дивидендные', why: 'дивидендная доходность от 8%', test: (r) => known(r.div_yield) && r.div_yield >= 8 },
@@ -304,7 +306,10 @@
         const base = Object.assign({}, s, { q: '', category: '', noflags: false, ranges: {} });
         for (const [k] of RANGE_KEYS) base.ranges[k] = [null, null];
         const html = PRESETS.map((p) => {
-            const n = ROWS.filter((r) => passes(r, base, p)).length;
+            // Holdings are RSBU/CBR, which the default "comparable only" filter
+            // hides, so the portfolio count ignores that filter.
+            const countState = p.id === 'portfolio' ? Object.assign({}, base, { comparable: false }) : base;
+            const n = ROWS.filter((r) => passes(r, countState, p)).length;
             const on = activeUserView === null && preset === p.id;
             return '<button type="button" class="chip-btn" data-preset="' + p.id + '" aria-pressed="' + on + '">' +
                 esc(p.label) + ' <span class="count num">' + n + '</span></button>';
@@ -324,6 +329,7 @@
         if (b.dataset.preset) {
             preset = b.dataset.preset;
             activeUserView = null;
+            if (preset === 'portfolio') $('comparable').checked = false;
             render();
         } else if (b.dataset.view !== undefined) {
             const i = Number(b.dataset.view), v = userViews[i];
@@ -426,8 +432,9 @@
             case 'text': {
                 const meta = [r.category || '—', sourceText(r)].map(esc).join(' · ');
                 const warn = r.comparable ? '' : ' <span class="warn-mark" title="Данные уровня юрлица (РСБУ/ЦБ): сравнение с другими компаниями условно">⚠</span>';
-                return '<td class="left"><div class="co"><a href="/company/' + encodeURIComponent(r.company) + '">' + esc(r.company) +
-                    '</a><span class="meta">' + meta + warn + '</span></div></td>';
+                const hold = r.portfolio ? '<span class="pill pill-accent" title="В портфеле">портфель</span>' : '';
+                return '<td class="left"><div class="co"><div class="co-name"><a href="/company/' + encodeURIComponent(r.company) + '">' + esc(r.company) +
+                    '</a>' + hold + '</div><span class="meta">' + meta + warn + '</span></div></td>';
             }
             case 'vs': {
                 if (!known(v)) return '<td class="na">—</td>';
@@ -627,7 +634,8 @@
         const inCmp = FA.compare.has(r.company);
         d.innerHTML =
             '<div class="drawer-head"><div><div class="small muted">' + esc(r.category || '—') + ' · ' + esc(sourceText(r)) + '</div>' +
-            '<h2 class="drawer-title" id="drawerTitle">' + esc(r.company) + '</h2>' +
+            '<h2 class="drawer-title" id="drawerTitle">' + esc(r.company) +
+            (r.portfolio ? ' <span class="pill pill-accent">портфель</span>' : '') + '</h2>' +
             '<div class="small muted">' + (r.current ? 'Оценка по закрытию ' + esc(fmt.date(r.price_date)) : 'По отчётности за ' + esc(r.last_period || '—')) + '</div></div>' +
             '<button type="button" class="icon-btn" id="drawerClose" aria-label="Закрыть панель">×</button></div>' +
             '<div class="kpi-grid">' +

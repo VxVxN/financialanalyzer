@@ -37,7 +37,9 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 		if q, ok := quotes[c]; ok && analytics.QuoteIsFresh(q, controller.now()) {
 			quote = &q
 		}
-		rows = append(rows, analytics.BuildScreenerRow(history, quote))
+		row := analytics.BuildScreenerRow(history, quote)
+		row.Portfolio = inPortfolio(row.Company)
+		rows = append(rows, row)
 	}
 	analytics.ApplySectorMedians(rows, controller.now())
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Company < rows[j].Company })

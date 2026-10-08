@@ -75,6 +75,16 @@ func TestLoadRegistry(t *testing.T) {
 	if x5.INN != "9722079341" || x5.Category != "retail" {
 		t.Errorf("X5 = %+v, want INN 9722079341 / retail", x5)
 	}
+	lkoh, ok := registry["LKOH"]
+	if !ok || lkoh.INN != "7708004767" || lkoh.Category != "oil" {
+		t.Errorf("LKOH = %+v, want INN 7708004767 / oil", lkoh)
+	}
+	if _, ok := registry["NVTK"]; ok {
+		t.Error("NVTK has no organization in ГИР БО")
+	}
+	if _, ok := registry["TATNP"]; ok {
+		t.Error("TATNP shares TATN's filing and must not be a second company")
+	}
 }
 
 func TestPERatioAndROE(t *testing.T) {

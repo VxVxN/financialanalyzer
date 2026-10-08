@@ -44,6 +44,9 @@ type ScreenerRow struct {
 	ScoreScale      int      `json:"score_scale"` // 5, or 3 on the bank scale
 	Bank            bool     `json:"bank"`
 	Anomalies       int      `json:"anomalies"` // data-quality flags over the history
+	// Portfolio marks a holding from the bundled portfolio list. BuildScreenerRow
+	// leaves it false; the HTTP layer sets it.
+	Portfolio bool `json:"portfolio,omitempty"`
 
 	// *HistPct: the valuation's percentile within the company's own history
 	// (HistoricalBand; low = cheap for P/E and P/B, high = cheap for yield).

@@ -1,0 +1,8 @@
+# Companies held in the portfolio. One ticker per line, "#" starts a comment.
+# The screener, the company search and the company card mark these names.
+# The fetcher does not read this file: a holding is loaded like any other ticker.
+
+OZON
+X5
+BELU
+T

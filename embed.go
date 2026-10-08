@@ -51,3 +51,10 @@ var SplitRegistry string
 //
 //go:embed ticker_renames.txt
 var RenameRegistry string
+
+// Portfolio is the bundled ticker list (portfolio.txt) of companies held in
+// the portfolio. The screener, the company search and the company card mark
+// them; the fetcher does not read this list.
+//
+//go:embed portfolio.txt
+var Portfolio string
