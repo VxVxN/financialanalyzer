@@ -161,10 +161,10 @@ func (r ScreenerRow) CurrentAt(metric string, now time.Time) bool {
 // median over the other companies of the same category (the company itself is
 // left out, so it is compared with its peers), when at least MinSectorPeers
 // qualify; *SectorPeers counts them. A peer qualifies when its value is
-// current at now (CurrentAt) and, for P/E and P/B, rests on figures of the
-// same kind (standalone or group) as the row's own. A row without a current
-// value of the metric, or without a category, gets no median: there is
-// nothing to compare.
+// current at now (CurrentAt) and the peer is a bank exactly when the row is.
+// For P/E and P/B the peer must also rest on figures of the same kind
+// (standalone or group) as the row's own. A row without a current value of
+// the metric, or without a category, gets no median: there is nothing to compare.
 func ApplySectorMedians(rows []ScreenerRow, now time.Time) {
 	byCat := map[string][]int{}
 	for i, r := range rows {
@@ -184,6 +184,12 @@ func ApplySectorMedians(rows []ScreenerRow, now time.Time) {
 				var vals []float64
 				for _, j := range idx {
 					if j == i || !rows[j].CurrentAt(m, now) {
+						continue
+					}
+					// A bank's P/E, P/B and yield are not peers of an industrial
+					// in the same category: the bank scale and the form-102
+					// revenue proxy are a different business.
+					if rows[j].Bank != rows[i].Bank {
 						continue
 					}
 					if kindMatters(m) && rows[j].Basis[m].Standalone != own {

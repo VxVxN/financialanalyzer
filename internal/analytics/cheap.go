@@ -25,7 +25,7 @@ func CheapListMessage(rows []ScreenerRow) string {
 	}
 	var picks []pick
 	for _, r := range rows {
-		if !r.Comparable || r.PE == nil || r.PEHistPct == nil || r.PESector == nil || *r.PESector <= 0 {
+		if !r.Comparable || r.Bank || !r.Liquid || r.PE == nil || r.PEHistPct == nil || r.PESector == nil || *r.PESector <= 0 {
 			continue
 		}
 		if *r.PEHistPct > cheapHistPct {
@@ -46,7 +46,8 @@ func CheapListMessage(rows []ScreenerRow) string {
 
 	var b strings.Builder
 	b.WriteString("Дешевле своей истории и сектора\n")
-	b.WriteString("P/E в нижней четверти 10 лет и минимум на 20% ниже медианы сектора. Только сопоставимая отчётность.\n")
+	b.WriteString("P/E в нижней четверти 10 лет и минимум на 20% ниже медианы сектора. " +
+		"Только сопоставимая отчётность, без банков, средний дневной оборот от 10 млн ₽ (если он уже известен).\n")
 	if len(picks) == 0 {
 		b.WriteString("Таких компаний нет.")
 		return b.String()

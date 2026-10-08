@@ -372,9 +372,15 @@ func (c *Client) IssueSize(ctx context.Context, secid string) (float64, error) {
 	return v, nil
 }
 
-// quoteLookback is how far back LatestQuote searches for a trading day; it
+// quoteLookback is how far back LatestQuote accepts a trading day; it
 // spans long holidays (the New Year break) and short trading suspensions.
 const quoteLookback = 14 * 24 * time.Hour
+
+// turnoverLookback is the window for the average daily turnover. A hundred
+// calendar days is about one quarter of sessions and stays inside the ISS
+// history page (100 rows), so the latest close and the average come from
+// one response.
+const turnoverLookback = 100 * 24 * time.Hour
 
 // Quote is a security's latest close and the market cap it implies.
 type Quote struct {
@@ -382,13 +388,18 @@ type Quote struct {
 	Date           string  // trade date of Price, "YYYY-MM-DD"
 	Capitalization float64 // Price x shares, billions of RUB
 	Shares         float64 // shares outstanding used for Capitalization
+	// Turnover is the average daily VALUE over the history window, billions
+	// of RUB. Nil when the history block has no VALUE column.
+	Turnover *float64
 }
 
 // LatestQuote returns the last close of secid in the two weeks up to now. It
 // uses the same EOD history endpoint as CapitalizationAt, so the price is the
-// last completed session's close, not an intraday quote.
+// last completed session's close, not an intraday quote. The request covers
+// turnoverLookback so Turnover can be averaged over the quarter; a last
+// trade older than quoteLookback is still "no trades".
 func (c *Client) LatestQuote(ctx context.Context, secid string, now time.Time) (Quote, error) {
-	body, err := c.history(ctx, secid, now.Add(-quoteLookback).Format(time.DateOnly), now.Format(time.DateOnly))
+	body, err := c.history(ctx, secid, now.Add(-turnoverLookback).Format(time.DateOnly), now.Format(time.DateOnly))
 	if err != nil {
 		return Quote{}, err
 	}
@@ -396,7 +407,8 @@ func (c *Client) LatestQuote(ctx context.Context, secid string, now time.Time) (
 	if err != nil {
 		return Quote{}, err
 	}
-	if price == 0 || date == "" {
+	cutoff := now.Add(-quoteLookback).Format(time.DateOnly)
+	if price == 0 || date == "" || date < cutoff {
 		return Quote{}, fmt.Errorf("no trades for %s in the last %d days", secid, int(quoteLookback.Hours()/24))
 	}
 	shares, err := c.SharesAt(ctx, secid, date)
@@ -411,7 +423,11 @@ func (c *Client) LatestQuote(ctx context.Context, secid string, now time.Time) (
 			return Quote{}, fmt.Errorf("issue size %s: zero", secid)
 		}
 	}
-	return Quote{Price: price, Date: date, Shares: shares, Capitalization: price * shares / rubPerBillion}, nil
+	q := Quote{Price: price, Date: date, Shares: shares, Capitalization: price * shares / rubPerBillion}
+	if avg, ok := ParseAverageTurnover(body); ok {
+		q.Turnover = &avg
+	}
+	return q, nil
 }
 
 // history fetches the EOD history block of secid for [from, till].
@@ -534,6 +550,37 @@ func ParseLastCloseDated(body []byte) (float64, string, error) {
 		}
 	}
 	return last, date, nil
+}
+
+// ParseAverageTurnover averages the VALUE column (session turnover, RUB) of a
+// history block and returns it in billions of RUB. ok is false when the
+// column is absent or every row is empty: a missing figure is not a zero day.
+func ParseAverageTurnover(body []byte) (float64, bool) {
+	b, err := decodeBlock(body, "history")
+	if err != nil {
+		return 0, false
+	}
+	col := b.col("VALUE")
+	if col < 0 {
+		return 0, false
+	}
+	var sum float64
+	var n int
+	for _, row := range b.Data {
+		if len(row) <= col {
+			continue
+		}
+		v, ok := asFloat(row[col])
+		if !ok || v < 0 {
+			continue
+		}
+		sum += v
+		n++
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / float64(n) / rubPerBillion, true
 }
 
 func asString(v interface{}) string {

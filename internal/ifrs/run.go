@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,28 +25,85 @@ type Source interface {
 	Text(ctx context.Context, ticker string, year int) (string, error)
 }
 
+// Fill is one company-year the run wrote, with the figures it added.
+// Text is Russian and lists only the fields that were empty before.
+type Fill struct {
+	Company string `json:"company"`
+	Year    int    `json:"year"`
+	Text    string `json:"text"`
+}
+
 // Result is what one button press changed. Counts are company-years.
 type Result struct {
 	Saved     int
 	Unchanged int
 	Missing   int
 	Failed    int
+	Fills     []Fill
+}
+
+// Progress is one step of a run, reported before each company-year is
+// downloaded. Done counts company-years already finished, so a slow report
+// still names the company the run is on.
+type Progress struct {
+	Done      int
+	Total     int
+	Company   string
+	Year      int
+	Saved     int
+	Unchanged int
+	Missing   int
+	Failed    int
+	Fills     []Fill
 }
 
 // Status is the poll payload for the updates page. Message is Russian;
 // it is shown as-is.
 type Status struct {
 	Running   bool   `json:"running"`
+	Done      int    `json:"done"`
+	Total     int    `json:"total"`
+	Company   string `json:"company,omitempty"`
+	Year      int    `json:"year,omitempty"`
 	Saved     int    `json:"saved"`
 	Unchanged int    `json:"unchanged"`
 	Missing   int    `json:"missing"`
 	Failed    int    `json:"failed"`
 	Message   string `json:"message"`
+	Fills     []Fill `json:"fills,omitempty"`
+}
+
+// Status renders Progress for the page while the run is still going.
+func (p Progress) Status() Status {
+	cur := p.Done + 1
+	if p.Total > 0 && cur > p.Total {
+		cur = p.Total
+	}
+	s := Status{
+		Running:   true,
+		Done:      p.Done,
+		Total:     p.Total,
+		Company:   p.Company,
+		Year:      p.Year,
+		Saved:     p.Saved,
+		Unchanged: p.Unchanged,
+		Missing:   p.Missing,
+		Failed:    p.Failed,
+		Fills:     p.Fills,
+		Message:   fmt.Sprintf("%s, %d — %d из %d", p.Company, p.Year, cur, p.Total),
+	}
+	if p.Done > 0 {
+		s.Message += fmt.Sprintf(". Дописано: %d, без новых: %d, не найдено: %d", p.Saved, p.Unchanged, p.Missing)
+		if p.Failed > 0 {
+			s.Message += fmt.Sprintf(", ошибок: %d", p.Failed)
+		}
+	}
+	return s
 }
 
 // Status renders Result for the page.
 func (r Result) Status() Status {
-	s := Status{Saved: r.Saved, Unchanged: r.Unchanged, Missing: r.Missing, Failed: r.Failed}
+	s := Status{Saved: r.Saved, Unchanged: r.Unchanged, Missing: r.Missing, Failed: r.Failed, Fills: r.Fills}
 	if r.Saved == 0 && r.Unchanged == 0 && r.Missing == 0 && r.Failed == 0 {
 		s.Message = "В базе нет компаний."
 		return s
@@ -71,8 +129,9 @@ func Years(now time.Time) []int {
 
 // Run downloads annual IFRS for each company and fills empty manual fields.
 // A figure that is already stored is left as it was. companies nil means
-// every company in the store.
-func Run(ctx context.Context, store Store, src Source, companies []string, years []int, logger *slog.Logger) Result {
+// every company in the store. progress may be nil; it is called before each
+// company-year download.
+func Run(ctx context.Context, store Store, src Source, companies []string, years []int, logger *slog.Logger, progress func(Progress)) Result {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -89,6 +148,8 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 	if len(companies) == 0 || len(years) == 0 {
 		return res
 	}
+	total := len(companies) * len(years)
+	done := 0
 	for _, company := range companies {
 		if ctx.Err() != nil {
 			return res
@@ -97,6 +158,7 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 		if err != nil {
 			logger.Error("ifrs: read manual entries", "company", company, "error", err)
 			res.Failed += len(years)
+			done += len(years)
 			continue
 		}
 		byYear := make(map[int]models.ManualFinancials, len(existing))
@@ -107,6 +169,15 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 			if ctx.Err() != nil {
 				return res
 			}
+			if progress != nil {
+				progress(Progress{
+					Done: done, Total: total, Company: company, Year: year,
+					Saved: res.Saved, Unchanged: res.Unchanged,
+					Missing: res.Missing, Failed: res.Failed,
+					Fills: append([]Fill(nil), res.Fills...),
+				})
+			}
+			done++
 			text, err := src.Text(ctx, company, year)
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {
@@ -123,8 +194,8 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 				res.Missing++
 				continue
 			}
-			merged, n := fillGaps(byYear[year], parsed)
-			if n == 0 {
+			merged, fields := fillGaps(byYear[year], parsed)
+			if len(fields) == 0 {
 				res.Unchanged++
 				continue
 			}
@@ -136,34 +207,47 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 				continue
 			}
 			byYear[year] = merged
+			line := strings.Join(fields, ", ")
+			res.Fills = append(res.Fills, Fill{Company: company, Year: year, Text: line})
 			res.Saved++
-			logger.Info("ifrs: filled manual entry", "company", company, "year", year, "fields", n)
+			logger.Info("ifrs: filled manual entry", "company", company, "year", year, "fields", line)
 		}
 	}
 	return res
 }
 
 // fillGaps copies parsed figures into the fields the stored row left empty.
-// n is how many fields changed.
-func fillGaps(dst, src models.ManualFinancials) (models.ManualFinancials, int) {
-	n := 0
-	take := func(d **float64, v *float64) {
+// The returned names are the Russian labels of the fields that changed,
+// each with the value in billions of RUB.
+func fillGaps(dst, src models.ManualFinancials) (models.ManualFinancials, []string) {
+	var fields []string
+	take := func(name string, d **float64, v *float64) {
 		if *d == nil && v != nil {
 			*d = v
-			n++
+			fields = append(fields, name+" "+formatBln(*v))
 		}
 	}
-	take(&dst.Revenue, src.Revenue)
-	take(&dst.NetProfit, src.NetProfit)
-	take(&dst.EBITDA, src.EBITDA)
-	take(&dst.OperatingProfit, src.OperatingProfit)
-	take(&dst.OperatingCashFlow, src.OperatingCashFlow)
-	take(&dst.Capex, src.Capex)
-	take(&dst.Debt, src.Debt)
-	take(&dst.Cash, src.Cash)
-	take(&dst.Equity, src.Equity)
-	take(&dst.Dividends, src.Dividends)
-	return dst, n
+	take("выручка", &dst.Revenue, src.Revenue)
+	take("чистая прибыль", &dst.NetProfit, src.NetProfit)
+	take("EBITDA", &dst.EBITDA, src.EBITDA)
+	take("операционная прибыль", &dst.OperatingProfit, src.OperatingProfit)
+	take("опер. денежный поток", &dst.OperatingCashFlow, src.OperatingCashFlow)
+	take("капзатраты", &dst.Capex, src.Capex)
+	take("долг", &dst.Debt, src.Debt)
+	take("денежные средства", &dst.Cash, src.Cash)
+	take("капитал", &dst.Equity, src.Equity)
+	take("дивиденды", &dst.Dividends, src.Dividends)
+	return dst, fields
+}
+
+// formatBln prints a billions-of-RUB figure with a comma decimal mark and
+// trailing zeros dropped, so a unit mistake (millions stored as billions)
+// is visible next to the other lines.
+func formatBln(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	return strings.ReplaceAll(s, ".", ",")
 }
 
 // MatchCompanies keeps the stored spelling of tickers named in a comma

@@ -474,21 +474,27 @@ func (r *Repository) DeleteCompanyNote(ctx context.Context, company string) erro
 
 // SaveMarketQuote stores the latest quote for a company, replacing the old one.
 // A zero share count is stored as NULL (a row from before the count was kept).
+// A nil turnover is left as it was on update, so a history response without
+// VALUE does not wipe a turnover measured earlier.
 func (r *Repository) SaveMarketQuote(ctx context.Context, q models.MarketQuote) error {
-	var shares any
+	var shares, turnover any
 	if q.Shares > 0 {
 		shares = q.Shares
 	}
+	if q.Turnover != nil {
+		turnover = *q.Turnover
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO market_quotes (company, price, capitalization, shares, price_date, updated_at)
-		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+		INSERT INTO market_quotes (company, price, capitalization, shares, turnover, price_date, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
 		ON CONFLICT (company) DO UPDATE SET
 			price = EXCLUDED.price,
 			capitalization = EXCLUDED.capitalization,
 			shares = EXCLUDED.shares,
+			turnover = COALESCE(EXCLUDED.turnover, market_quotes.turnover),
 			price_date = EXCLUDED.price_date,
 			updated_at = CURRENT_TIMESTAMP`,
-		q.Company, q.Price, q.Capitalization, shares, q.PriceDate)
+		q.Company, q.Price, q.Capitalization, shares, turnover, q.PriceDate)
 	if err != nil {
 		return fmt.Errorf("save market quote %s: %w", q.Company, err)
 	}
@@ -498,7 +504,7 @@ func (r *Repository) SaveMarketQuote(ctx context.Context, q models.MarketQuote) 
 // GetMarketQuotes returns the stored quotes keyed by company.
 func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.MarketQuote, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT company, price, capitalization, shares, price_date FROM market_quotes`)
+		`SELECT company, price, capitalization, shares, turnover, price_date FROM market_quotes`)
 	if err != nil {
 		return nil, fmt.Errorf("query market quotes: %w", err)
 	}
@@ -507,12 +513,16 @@ func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.Mar
 	out := make(map[string]models.MarketQuote)
 	for rows.Next() {
 		var q models.MarketQuote
-		var shares sql.NullFloat64
-		if err := rows.Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &q.PriceDate); err != nil {
+		var shares, turnover sql.NullFloat64
+		if err := rows.Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &turnover, &q.PriceDate); err != nil {
 			return nil, fmt.Errorf("scan market quote: %w", err)
 		}
 		if shares.Valid {
 			q.Shares = shares.Float64
+		}
+		if turnover.Valid {
+			v := turnover.Float64
+			q.Turnover = &v
 		}
 		out[q.Company] = q
 	}
@@ -524,12 +534,16 @@ func (r *Repository) GetMarketQuotes(ctx context.Context) (map[string]models.Mar
 
 // GetMarketQuote returns one company's quote; ok is false when none is stored.
 func (r *Repository) GetMarketQuote(ctx context.Context, company string) (q models.MarketQuote, ok bool, err error) {
-	var shares sql.NullFloat64
+	var shares, turnover sql.NullFloat64
 	err = r.db.QueryRowContext(ctx,
-		`SELECT company, price, capitalization, shares, price_date FROM market_quotes WHERE company = $1`, company).
-		Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &q.PriceDate)
+		`SELECT company, price, capitalization, shares, turnover, price_date FROM market_quotes WHERE company = $1`, company).
+		Scan(&q.Company, &q.Price, &q.Capitalization, &shares, &turnover, &q.PriceDate)
 	if shares.Valid {
 		q.Shares = shares.Float64
+	}
+	if turnover.Valid {
+		v := turnover.Float64
+		q.Turnover = &v
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.MarketQuote{}, false, nil

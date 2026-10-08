@@ -103,10 +103,14 @@ func ValueOrNaN(p *float64) float64 {
 // that count was kept.
 type MarketQuote struct {
 	Company        string
-	Price          float64   // RUB per share
-	Capitalization float64   // billions of RUB
-	Shares         float64   // shares outstanding; 0 = not stored
-	PriceDate      time.Time // trade date of Price
+	Price          float64 // RUB per share
+	Capitalization float64 // billions of RUB
+	Shares         float64 // shares outstanding; 0 = not stored
+	// Turnover is the average daily exchange turnover, billions of RUB.
+	// Nil means it was not measured (a quote stored before the column, or a
+	// history response without VALUE).
+	Turnover  *float64
+	PriceDate time.Time // trade date of Price
 }
 
 // Fetch run kinds (fetch_runs.kind).

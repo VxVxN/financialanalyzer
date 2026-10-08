@@ -63,7 +63,7 @@ func TestRunFillsGapsOnly(t *testing.T) {
 	}}
 	// 10000 million = 10 billion. One column, so it is the annual figure.
 	// Revenue is already stored and must stay 1; profit is empty and is filled.
-	res := Run(context.Background(), store, src, nil, []int{2025, 2024}, nil)
+	res := Run(context.Background(), store, src, nil, []int{2025, 2024}, nil, nil)
 	if res.Saved != 1 || res.Missing != 1 || res.Unchanged != 0 {
 		t.Fatalf("result = %+v", res)
 	}
@@ -77,6 +77,10 @@ func TestRunFillsGapsOnly(t *testing.T) {
 	if got.Dividends == nil || *got.Dividends != 0 {
 		t.Errorf("dividends lost: %v", got.Dividends)
 	}
+	if len(res.Fills) != 1 || res.Fills[0].Company != "X5" || res.Fills[0].Year != 2025 ||
+		!strings.Contains(res.Fills[0].Text, "чистая прибыль 10") || strings.Contains(res.Fills[0].Text, "выручка") {
+		t.Errorf("fills = %+v", res.Fills)
+	}
 	if got.NetProfit == nil || *got.NetProfit != 10 {
 		t.Errorf("net profit = %v, want 10", value(got.NetProfit))
 	}
@@ -84,7 +88,7 @@ func TestRunFillsGapsOnly(t *testing.T) {
 
 func TestRunDownloadError(t *testing.T) {
 	store := &memStore{companies: []string{"X5"}}
-	res := Run(context.Background(), store, errSource{}, nil, []int{2025}, nil)
+	res := Run(context.Background(), store, errSource{}, nil, []int{2025}, nil, nil)
 	if res.Failed != 1 {
 		t.Fatalf("result = %+v", res)
 	}
@@ -101,6 +105,34 @@ func value(v *float64) any {
 		return nil
 	}
 	return *v
+}
+
+func TestRunReportsProgress(t *testing.T) {
+	store := &memStore{companies: []string{"X5", "BELU"}}
+	var steps []Progress
+	res := Run(context.Background(), store, memSource{}, nil, []int{2025, 2024}, nil, func(p Progress) {
+		steps = append(steps, p)
+	})
+	if res.Missing != 4 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("steps = %d, want one per company-year", len(steps))
+	}
+	if steps[0].Company != "X5" || steps[0].Year != 2025 || steps[0].Done != 0 || steps[0].Total != 4 {
+		t.Fatalf("first = %+v", steps[0])
+	}
+	last := steps[3]
+	if last.Company != "BELU" || last.Year != 2024 || last.Done != 3 || last.Missing != 3 {
+		t.Fatalf("last = %+v", last)
+	}
+	msg := last.Status().Message
+	if msg != "BELU, 2024 — 4 из 4. Дописано: 0, без новых: 0, не найдено: 3" {
+		t.Fatalf("message = %q", msg)
+	}
+	if !last.Status().Running {
+		t.Fatal("in-flight status must say the run is still going")
+	}
 }
 
 func TestMatchCompanies(t *testing.T) {

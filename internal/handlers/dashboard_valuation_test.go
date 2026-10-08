@@ -12,10 +12,13 @@ func ptr(v float64) *float64 { return &v }
 
 func TestValuationVerdict(t *testing.T) {
 	band := analytics.HistoryBand{Metric: "pe", Current: 3, Min: 3, Median: 7, Max: 10, Percentile: 12.5, N: 4, From: "2022-Q4", To: "2025-Q4"}
-	row := analytics.ScreenerRow{PE: ptr(3), PESector: ptr(9), Bands: map[string]analytics.HistoryBand{"pe": band}}
+	row := analytics.ScreenerRow{
+		PE: ptr(3), PESector: ptr(9), Bands: map[string]analytics.HistoryBand{"pe": band},
+		Basis: map[string]analytics.Point{"pe": {}},
+	}
 
 	sentence, pills, ok := valuationVerdict(row, true)
-	want := "P/E 3.00 — 12-й перцентиль собственной истории за 2022-Q4 – 2025-Q4 и на 67% ниже медианы сектора (9.00)."
+	want := "P/E 3.00 по МСФО группы — 12-й перцентиль собственной истории за 2022-Q4 – 2025-Q4 и на 67% ниже медианы сектора (9.00)."
 	if !ok || sentence != want {
 		t.Errorf("sentence = %q, want %q", sentence, want)
 	}
@@ -32,10 +35,22 @@ func TestValuationVerdict(t *testing.T) {
 		t.Errorf("without peers: %q, %d pills", sentence, len(pills))
 	}
 
-	// Sector only: no band.
-	sentence, _, ok = valuationVerdict(analytics.ScreenerRow{PE: ptr(12), PESector: ptr(8)}, true)
-	if !ok || sentence != "P/E 12.00 — на 50% выше медианы сектора (8.00)." {
+	// Sector only: no band. Standalone RSBU names the legal entity.
+	sentence, _, ok = valuationVerdict(analytics.ScreenerRow{
+		PE: ptr(12), PESector: ptr(8),
+		Basis: map[string]analytics.Point{"pe": {Standalone: true}},
+	}, true)
+	if !ok || sentence != "P/E 12.00 по РСБУ юрлица — на 50% выше медианы сектора (8.00)." {
 		t.Errorf("sector only: %q", sentence)
+	}
+
+	// A bank's multiple rests on the Central Bank forms.
+	sentence, _, ok = valuationVerdict(analytics.ScreenerRow{
+		Bank: true, PE: ptr(4), PESector: ptr(5),
+		Basis: map[string]analytics.Point{"pe": {Standalone: true}},
+	}, true)
+	if !ok || !strings.Contains(sentence, "по формам ЦБ") {
+		t.Errorf("bank basis: %q", sentence)
 	}
 
 	// No P/E (a loss): the verdict falls through to P/B.
@@ -45,9 +60,15 @@ func TestValuationVerdict(t *testing.T) {
 		t.Errorf("P/B fallback: %q %v", sentence, pills)
 	}
 
-	// A value with neither band nor sector says nothing.
+	// A value with neither band nor sector says nothing, until the basis is known.
 	if _, _, ok := valuationVerdict(analytics.ScreenerRow{PE: ptr(5)}, true); ok {
 		t.Error("a bare value should give no verdict")
+	}
+	sentence, _, ok = valuationVerdict(analytics.ScreenerRow{
+		PE: ptr(5), Basis: map[string]analytics.Point{"pe": {}},
+	}, true)
+	if !ok || sentence != "P/E 5.00 по МСФО группы." {
+		t.Errorf("basis only: %q", sentence)
 	}
 }
 

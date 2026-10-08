@@ -563,6 +563,12 @@ func TestScreener(t *testing.T) {
 	if !strings.Contains(body, `id="comparable" type="checkbox" checked`) {
 		t.Error("comparable filter must be on by default")
 	}
+	if !strings.Contains(body, "формы ЦБ") || !strings.Contains(body, "10 млн") {
+		t.Error("screener should name the reporting basis and the turnover floor")
+	}
+	if sber["reporting"] != "формы ЦБ" || sber["bank"] != true || sber["liquid"] != true {
+		t.Errorf("SBER basis = %v bank = %v liquid = %v", sber["reporting"], sber["bank"], sber["liquid"])
+	}
 }
 
 func TestDashboardCurrentValuation(t *testing.T) {

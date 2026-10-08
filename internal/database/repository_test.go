@@ -146,7 +146,7 @@ func TestMarketQuotes(t *testing.T) {
 	day := func(d int) time.Time { return time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC) }
 	for _, q := range []models.MarketQuote{
 		{Company: "SBER", Price: 270, Capitalization: 5800, PriceDate: day(28)},
-		{Company: "SBER", Price: 274.65, Capitalization: 5928.85, Shares: 21586948000, PriceDate: day(29)}, // replaces
+		{Company: "SBER", Price: 274.65, Capitalization: 5928.85, Shares: 21586948000, Turnover: models.Float(8.5), PriceDate: day(29)}, // replaces
 	} {
 		if err := repo.SaveMarketQuote(ctx, q); err != nil {
 			t.Fatalf("save: %v", err)
@@ -155,6 +155,9 @@ func TestMarketQuotes(t *testing.T) {
 	q, ok, err := repo.GetMarketQuote(ctx, "SBER")
 	if err != nil || !ok || q.Price != 274.65 || q.Capitalization != 5928.85 || q.Shares != 21586948000 || !q.PriceDate.Equal(day(29)) {
 		t.Fatalf("quote = %+v ok=%v err=%v", q, ok, err)
+	}
+	if q.Turnover == nil || *q.Turnover != 8.5 {
+		t.Errorf("turnover = %v, want 8.5", q.Turnover)
 	}
 	all, err := repo.GetMarketQuotes(ctx)
 	if err != nil || len(all) != 1 {

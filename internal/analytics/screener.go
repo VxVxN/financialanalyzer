@@ -44,6 +44,15 @@ type ScreenerRow struct {
 	ScoreScale      int      `json:"score_scale"` // 5, or 3 on the bank scale
 	Bank            bool     `json:"bank"`
 	Anomalies       int      `json:"anomalies"` // data-quality flags over the history
+	// Turnover is the average daily exchange turnover, billions of RUB, from
+	// the fresh quote. Nil when it was not measured.
+	Turnover *float64 `json:"turnover,omitempty"`
+	// Liquid is false only when Turnover is known and below MinDailyTurnover.
+	// Unknown turnover does not hide the company.
+	Liquid bool `json:"liquid"`
+	// Reporting names what P/E rests on, or P/B when there is no P/E:
+	// "МСФО группы", "РСБУ юрлица" or "формы ЦБ". Empty when neither has a basis.
+	Reporting string `json:"reporting,omitempty"`
 	// Portfolio marks a holding from the bundled portfolio list. BuildScreenerRow
 	// leaves it false; the HTTP layer sets it.
 	Portfolio bool `json:"portfolio,omitempty"`
@@ -130,6 +139,7 @@ func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 		ScoreScale:      snap.ScoreScale(),
 		Bank:            snap.Bank,
 		Anomalies:       len(CheckHistory(history)),
+		Liquid:          true,
 	}
 	for _, s := range sources {
 		if !IsComparable(s) {
@@ -145,6 +155,8 @@ func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 		row.PE, row.PB, row.DivYield = finite(cur.PE), finite(cur.PB), finite(cur.DivYield)
 		row.EVEBIT, row.PFCF = finite(cur.EVEBIT), finite(cur.PFCF)
 		row.setBasis(cur.EarningsPoint, cur.EquityPoint, cur.DividendsPoint)
+		row.setReporting()
+		row.setLiquidity(quote.Turnover)
 		return row
 	}
 	row.EarningsPeriod = snap.PELabel
@@ -152,6 +164,7 @@ func buildScreenerRow(history []models.QuarterData, quote *models.MarketQuote) S
 	row.PE, row.PB, row.DivYield = positive(snap.PE), finite(snap.PB), finite(snap.DivYield)
 	row.EVEBIT, row.PFCF = finite(snap.EVEBIT), finite(snap.PFCF)
 	row.setBasis(snap.PEPoint, snap.PBPoint, snap.DivYieldPoint)
+	row.setReporting()
 	return row
 }
 
@@ -162,6 +175,56 @@ func positive(v float64) *float64 {
 		return nil
 	}
 	return finite(v)
+}
+
+// MinDailyTurnover is the floor for the cheap screens, billions of RUB:
+// 10 million RUB of average daily exchange turnover. Below that a position
+// is hard to buy without moving the price.
+const MinDailyTurnover = 0.01
+
+// ReportingLabel is the Russian name of the figures a multiple rests on,
+// in the nominative ("МСФО группы", "РСБУ юрлица", "формы ЦБ").
+// standalone is a legal-entity source (RSBU or CBR); bank selects the CBR wording.
+func ReportingLabel(bank, standalone bool) string {
+	if !standalone {
+		return "МСФО группы"
+	}
+	if bank {
+		return "формы ЦБ"
+	}
+	return "РСБУ юрлица"
+}
+
+// ReportingPhrase is ReportingLabel in the phrase "по …" (the CBR name takes
+// the prepositional case).
+func ReportingPhrase(bank, standalone bool) string {
+	if bank && standalone {
+		return "по формам ЦБ"
+	}
+	return "по " + ReportingLabel(bank, standalone)
+}
+
+// setReporting names the entity behind P/E, falling back to P/B.
+func (r *ScreenerRow) setReporting() {
+	for _, m := range []string{"pe", "pb"} {
+		p, ok := r.Basis[m]
+		if !ok {
+			continue
+		}
+		r.Reporting = ReportingLabel(r.Bank, p.Standalone)
+		return
+	}
+}
+
+// setLiquidity copies a measured turnover and marks a thin book illiquid.
+// No measurement leaves Liquid true.
+func (r *ScreenerRow) setLiquidity(turnover *float64) {
+	r.Liquid = true
+	if turnover == nil {
+		return
+	}
+	r.Turnover = turnover
+	r.Liquid = *turnover >= MinDailyTurnover
 }
 
 // finite converts analytics' NaN/Inf "no data" into nil.

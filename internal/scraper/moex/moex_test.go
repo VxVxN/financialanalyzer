@@ -88,14 +88,54 @@ func TestLatestQuote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestQuote: %v", err)
 	}
-	if gotFrom != "2026-09-16" || gotTill != "2026-09-30" {
-		t.Errorf("window = %s..%s, want 2026-09-16..2026-09-30", gotFrom, gotTill)
+	if gotFrom != "2026-06-22" || gotTill != "2026-09-30" {
+		t.Errorf("window = %s..%s, want 2026-06-22..2026-09-30", gotFrom, gotTill)
 	}
 	if q.Price != 274.65 || q.Date != "2026-09-29" {
 		t.Errorf("quote = %+v, want 274.65 on 2026-09-29", q)
 	}
 	if want := 274.65 * 21586948000 / 1e9; math.Abs(q.Capitalization-want) > 1e-6 {
 		t.Errorf("capitalization = %v, want %v", q.Capitalization, want)
+	}
+	if q.Turnover == nil || *q.Turnover < 1 {
+		t.Errorf("turnover = %v, want SBER's multi-billion daily average", q.Turnover)
+	}
+}
+
+func TestParseAverageTurnover(t *testing.T) {
+	body := []byte(`{"history":{"columns":["TRADEDATE","VALUE","CLOSE"],"data":[
+		["2026-09-01", 2000000000, 10],
+		["2026-09-02", 4000000000, 11],
+		["2026-09-03", null, 11]
+	]}}`)
+	got, ok := ParseAverageTurnover(body)
+	if !ok || math.Abs(got-3) > 1e-9 {
+		t.Fatalf("turnover = %v ok=%v, want 3", got, ok)
+	}
+	if _, ok := ParseAverageTurnover([]byte(`{"history":{"columns":["CLOSE"],"data":[[10]]}}`)); ok {
+		t.Error("a history without VALUE must not invent a zero turnover")
+	}
+}
+
+func TestLatestQuoteStaleClose(t *testing.T) {
+	desc, err := os.ReadFile("testdata/sber_desc.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/iss/securities/SBER.json" {
+			_, _ = w.Write(desc)
+			return
+		}
+		_, _ = w.Write([]byte(`{"history":{"columns":["TRADEDATE","CLOSE","VALUE"],"data":[["2026-01-01", 100, 1e9]]}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.BaseURL, c.Delay = srv.URL, 0
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	if _, err := c.LatestQuote(context.Background(), "SBER", now); err == nil {
+		t.Error("a close outside the two-week window must not become the latest quote")
 	}
 }
 

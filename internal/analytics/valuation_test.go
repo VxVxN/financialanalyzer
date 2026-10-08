@@ -151,6 +151,11 @@ func TestApplySectorMedians(t *testing.T) {
 		sectorRow("O", "oil", old, f(1), f(9), f(1)),    // stopped reporting: no peer
 		sectorRow("S", "oil", solo, f(100), f(9), f(9)), // standalone RSBU
 		quoted,
+		func() ScreenerRow {
+			b := sectorRow("BK", "oil", group, f(1000), nil, f(50))
+			b.Bank = true
+			return b
+		}(),
 		sectorRow("E", "retail", group, f(20), nil, nil),
 		sectorRow("F", "retail", group, f(30), nil, nil),
 		sectorRow("G", "", group, f(5), nil, nil),
@@ -175,7 +180,7 @@ func TestApplySectorMedians(t *testing.T) {
 	}
 	a := byName["A"]
 	// A's group peers with a current P/E: B, C, Q (D has none, O is too old,
-	// S is standalone).
+	// S is standalone, BK is a bank).
 	check("A pe", a.PESector, a.PESectorPeers, 10, 3)
 	// Only C among A's peers has a current group P/B: too few.
 	check("A pb", a.PBSector, a.PBSectorPeers, math.NaN(), 0)
@@ -185,8 +190,9 @@ func TestApplySectorMedians(t *testing.T) {
 	check("D pe", byName["D"].PESector, byName["D"].PESectorPeers, math.NaN(), 0)
 	// O's own figures are too old to compare with today's sector.
 	check("O pe", byName["O"].PESector, byName["O"].PESectorPeers, math.NaN(), 0)
-	// S has no standalone peers.
+	// S has no standalone peers. The bank in the same category is not one.
 	check("S pe", byName["S"].PESector, byName["S"].PESectorPeers, math.NaN(), 0)
+	check("BK pe", byName["BK"].PESector, byName["BK"].PESectorPeers, math.NaN(), 0)
 	check("S yield", byName["S"].DivYieldSector, byName["S"].DivYieldSectorPeers, 6, 2)
 	// Retail has one peer each.
 	check("E pe", byName["E"].PESector, byName["E"].PESectorPeers, math.NaN(), 0)

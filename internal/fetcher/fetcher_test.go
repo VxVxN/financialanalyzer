@@ -184,8 +184,9 @@ func (f fakeQuoteSource) Splits(context.Context, string) ([]moex.Split, error) {
 
 func TestFetchQuotes(t *testing.T) {
 	store := &fakeQuoteStore{periods: map[string]int{"SBER": 3, "LOST": 2}}
+	turn := 12.5
 	src := fakeQuoteSource{
-		"SBER": {Price: 274.65, Date: "2026-09-29", Capitalization: 5929},
+		"SBER": {Price: 274.65, Date: "2026-09-29", Capitalization: 5929, Turnover: &turn},
 		"NEW":  {Price: 1, Date: "2026-09-29", Capitalization: 1},
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -197,6 +198,9 @@ func TestFetchQuotes(t *testing.T) {
 	got := store.saved[0]
 	if got.Company != "SBER" || got.Capitalization != 5929 || got.PriceDate.Format(time.DateOnly) != "2026-09-29" {
 		t.Errorf("saved quote = %+v", got)
+	}
+	if got.Turnover == nil || *got.Turnover != 12.5 {
+		t.Errorf("turnover = %v, want 12.5", got.Turnover)
 	}
 	// NEW has no financial rows (skipped silently); LOST has rows but no quote.
 	if len(failed) != 1 || failed[0] != "LOST" {

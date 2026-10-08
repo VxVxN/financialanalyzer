@@ -392,10 +392,21 @@ func valuationVerdict(row analytics.ScreenerRow, peersKnown bool) (sentence stri
 				pills = append(pills, verdictPill(text, cls))
 			}
 		}
-		if len(parts) == 0 {
-			continue
+		basis := ""
+		if m != "div_yield" {
+			if p, ok := row.Basis[m]; ok {
+				basis = " " + analytics.ReportingPhrase(row.Bank, p.Standalone)
+			}
 		}
-		return fmt.Sprintf("%s %s — %s.", bandMetricNames[m], fmtBandValue(m, *v), strings.Join(parts, " и ")), pills, true
+		// A multiple with no history band and no sector peers still names
+		// what it rests on: that is the sentence when nothing else compares.
+		if len(parts) == 0 {
+			if basis == "" {
+				continue
+			}
+			return fmt.Sprintf("%s %s%s.", bandMetricNames[m], fmtBandValue(m, *v), basis), pills, true
+		}
+		return fmt.Sprintf("%s %s%s — %s.", bandMetricNames[m], fmtBandValue(m, *v), basis, strings.Join(parts, " и ")), pills, true
 	}
 	return "", nil, false
 }

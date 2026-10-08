@@ -108,7 +108,12 @@ func (o *Ops) StartIFRS(companies []string, years []int) error {
 		if list != nil {
 			companies = list
 		}
-		res := ifrs.Run(o.ctx, o.repo, o.ifrs, companies, ys, o.logger)
+		res := ifrs.Run(o.ctx, o.repo, o.ifrs, companies, ys, o.logger, func(p ifrs.Progress) {
+			st := p.Status()
+			o.mu.Lock()
+			o.ifrsStatus = st
+			o.mu.Unlock()
+		})
 		o.mu.Lock()
 		o.ifrsStatus = res.Status()
 		o.mu.Unlock()

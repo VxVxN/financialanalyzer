@@ -26,6 +26,9 @@ func TestBuildScreenerRow(t *testing.T) {
 	if stored.Comparable {
 		t.Error("RSBU-only company must not be comparable")
 	}
+	if stored.Reporting != "РСБУ юрлица" || !stored.Liquid {
+		t.Errorf("reporting = %q, liquid = %v", stored.Reporting, stored.Liquid)
+	}
 	if stored.RevenueYoY == nil || !approx(*stored.RevenueYoY, 20, 1e-9) {
 		t.Errorf("revenue YoY = %v, want 20", stored.RevenueYoY)
 	}
@@ -33,7 +36,8 @@ func TestBuildScreenerRow(t *testing.T) {
 		t.Errorf("unknown metrics must be nil: div %v, debt/ebitda %v", stored.DivYield, stored.DebtEBITDA)
 	}
 
-	quote := &models.MarketQuote{Company: "R", Capitalization: 800, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
+	thin := 0.001 // 1 млн ₽ a day, under the 10 млн floor
+	quote := &models.MarketQuote{Company: "R", Capitalization: 800, Turnover: &thin, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
 	live := BuildScreenerRow(h, quote)
 	if !live.Current || live.PriceDate != "2026-09-29" {
 		t.Errorf("live row = %+v", live)
@@ -44,5 +48,8 @@ func TestBuildScreenerRow(t *testing.T) {
 	// ROE is a historical ratio, not re-priced.
 	if live.ROE == nil || *live.ROE != 40 {
 		t.Errorf("ROE = %v, want 40", live.ROE)
+	}
+	if live.Liquid || live.Turnover == nil || *live.Turnover != thin {
+		t.Errorf("turnover = %v, liquid = %v", live.Turnover, live.Liquid)
 	}
 }

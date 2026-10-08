@@ -198,7 +198,10 @@ func fetchQuotes(ctx context.Context, repo quoteStore, mx quoteSource, companies
 					"ticker", company, "from", prev.Shares, "to", q.Shares, "residual", fmt.Sprintf("%.2fx", ratio))
 			}
 		}
-		mq := models.MarketQuote{Company: company, Price: q.Price, Capitalization: q.Capitalization, Shares: q.Shares, PriceDate: date}
+		mq := models.MarketQuote{
+			Company: company, Price: q.Price, Capitalization: q.Capitalization,
+			Shares: q.Shares, Turnover: q.Turnover, PriceDate: date,
+		}
 		if err := repo.SaveMarketQuote(ctx, mq); err != nil {
 			logger.Warn("Quote not saved", "ticker", company, "error", err)
 			failed = append(failed, company)
