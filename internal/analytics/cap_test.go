@@ -47,7 +47,7 @@ func TestCapJumpAnomalies(t *testing.T) {
 		{Year: 2023, Quarter: "Q4", Capitalization: f(100)},
 		{Year: 2024, Quarter: "Q4", Capitalization: f(250)},
 	}
-	anoms := CapJumpAnomalies(rows)
+	anoms := CapJumpAnomalies(rows, nil)
 	if len(anoms) != 1 || anoms[0].Label != "2024-Q4" || len(anoms[0].Metrics) != 1 || anoms[0].Metrics[0] != "capitalization" {
 		t.Fatalf("anomalies = %+v", anoms)
 	}
@@ -60,5 +60,32 @@ func TestCapJumpAnomalies(t *testing.T) {
 	}
 	if len(AnomaliesByLabel(anoms, "revenue", PeriodQuarter)) != 0 {
 		t.Error("a cap jump must not flag revenue")
+	}
+}
+
+func TestBandWindow(t *testing.T) {
+	f := models.Float
+	rows := []models.QuarterData{
+		{Year: 2022, Quarter: "Q4", Capitalization: f(10)},
+		{Year: 2023, Quarter: "Q4", Capitalization: f(30)},
+		{Year: 2024, Quarter: "Q4", Capitalization: f(32)},
+	}
+	open := BandWindow(rows, nil)
+	if open.FromYear != 2023 || len(open.Drop) != 0 {
+		t.Fatalf("unreviewed window = %+v, want from 2023", open)
+	}
+	price := BandWindow(rows, []CapReview{{From: 2022, To: 2023, Kind: CapReviewPrice}})
+	if price.FromYear != 0 || len(price.Drop) != 0 {
+		t.Fatalf("price review window = %+v, want the whole series", price)
+	}
+	errw := BandWindow(rows, []CapReview{{From: 2022, To: 2023, Kind: CapReviewError}})
+	if errw.FromYear != 0 || !errw.Drop[2023] {
+		t.Fatalf("error review window = %+v, want 2023 dropped", errw)
+	}
+	if anoms := CapJumpAnomalies(rows, []CapReview{{From: 2022, To: 2023, Kind: CapReviewPrice}}); len(anoms) != 0 {
+		t.Errorf("a price review must not mark the chart, got %+v", anoms)
+	}
+	if anoms := CapJumpAnomalies(rows, []CapReview{{From: 2022, To: 2023, Kind: CapReviewIssue}}); len(anoms) != 1 || !strings.Contains(anoms[0].Message, "допэмиссия") {
+		t.Errorf("issue review message = %+v", anoms)
 	}
 }

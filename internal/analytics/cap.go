@@ -61,22 +61,132 @@ func CapJumps(rows []models.QuarterData) []CapJump {
 	return out
 }
 
+// Kinds a stored review of one cap jump may take. Price means the move is the
+// market's, so both years stay in the valuation band. Error drops the later
+// year as a bad point. Split, issue and buyback are a new share-count regime
+// the stored caps do not adjust for, so the band starts at the later year —
+// the same cut an unreviewed jump gets, until someone says the move is a price.
+const (
+	CapReviewSplit   = "split"
+	CapReviewIssue   = "issue"
+	CapReviewBuyback = "buyback"
+	CapReviewError   = "error"
+	CapReviewPrice   = "price"
+)
+
+// CapReview is one operator classification of a year-over-year cap jump.
+type CapReview struct {
+	Company  string
+	From, To int
+	Kind     string
+}
+
+// ValidCapReview reports whether kind is one of the stored classifications.
+func ValidCapReview(kind string) bool {
+	switch kind {
+	case CapReviewSplit, CapReviewIssue, CapReviewBuyback, CapReviewError, CapReviewPrice:
+		return true
+	}
+	return false
+}
+
+// CapReviewLabel is the Russian name of a review kind, empty when unknown.
+func CapReviewLabel(kind string) string {
+	switch kind {
+	case CapReviewSplit:
+		return "сплит"
+	case CapReviewIssue:
+		return "допэмиссия"
+	case CapReviewBuyback:
+		return "байбек"
+	case CapReviewError:
+		return "ошибка"
+	case CapReviewPrice:
+		return "это цена"
+	}
+	return ""
+}
+
+// ReviewKind is the stored kind for the from→to jump, or "" when none matches.
+func ReviewKind(reviews []CapReview, from, to int) string {
+	for _, r := range reviews {
+		if r.From == from && r.To == to {
+			return r.Kind
+		}
+	}
+	return ""
+}
+
+// GroupCapReviews indexes reviews by company.
+func GroupCapReviews(all []CapReview) map[string][]CapReview {
+	out := map[string][]CapReview{}
+	for _, r := range all {
+		out[r.Company] = append(out[r.Company], r)
+	}
+	return out
+}
+
+// CapBandWindow is which years of a cap-based multiple may share one
+// historical band. FromYear 0 means the series has no floor. Drop years are
+// points thrown out as bad data.
+type CapBandWindow struct {
+	FromYear int
+	Drop     map[int]bool
+}
+
+// Allows reports whether a period of year belongs in the band.
+func (w CapBandWindow) Allows(year int) bool {
+	if len(w.Drop) > 0 && w.Drop[year] {
+		return false
+	}
+	return w.FromYear == 0 || year >= w.FromYear
+}
+
+// BandWindow decides which years stay comparable after cap jumps.
+// A jump reviewed as a price keeps both years. A jump reviewed as an error
+// drops the later year and keeps the rest. Every other jump — unreviewed, or
+// a split, an issue or a buyback whose share count was not adjusted — starts
+// the band at the later year, so a percentile is not built across the break.
+func BandWindow(rows []models.QuarterData, reviews []CapReview) CapBandWindow {
+	var w CapBandWindow
+	for _, j := range CapJumps(rows) {
+		switch ReviewKind(reviews, j.From, j.To) {
+		case CapReviewPrice:
+			continue
+		case CapReviewError:
+			if w.Drop == nil {
+				w.Drop = map[int]bool{}
+			}
+			w.Drop[j.To] = true
+		default:
+			if j.To > w.FromYear {
+				w.FromYear = j.To
+			}
+		}
+	}
+	return w
+}
+
 // CapJumpAnomalies marks the later year of each cap jump the way CheckRow
 // marks a suspicious figure, so the capitalization chart can draw the same
-// triangle. The message names both years.
-func CapJumpAnomalies(rows []models.QuarterData) []Anomaly {
+// triangle. A jump reviewed as a price is not marked. reviews may be nil.
+func CapJumpAnomalies(rows []models.QuarterData, reviews []CapReview) []Anomaly {
 	var out []Anomaly
 	for _, j := range CapJumps(rows) {
+		kind := ReviewKind(reviews, j.From, j.To)
+		if kind == CapReviewPrice {
+			continue
+		}
 		out = append(out, Anomaly{
 			Year: j.To, Quarter: j.Quarter, Label: qLabel(j.To, j.Quarter),
 			Metrics: []string{"capitalization"},
-			Message: capJumpMessage(j),
+			Message: capJumpMessage(j, kind),
 		})
 	}
 	return out
 }
 
-func capJumpMessage(j CapJump) string {
+func capJumpMessage(j CapJump, kind string) string {
 	times := j.Ratio
 	dir := "выросла"
 	if j.Ratio < 1 {
@@ -84,6 +194,13 @@ func capJumpMessage(j CapJump) string {
 		dir = "упала"
 	}
 	n := strings.ReplaceAll(fmt.Sprintf("%.1f", times), ".", ",")
-	return fmt.Sprintf("капитализация %s в %s раза к %d — возможны неучтённый сплит, допэмиссия или байбэк",
-		dir, n, j.From)
+	head := fmt.Sprintf("капитализация %s в %s раза к %d", dir, n, j.From)
+	switch kind {
+	case CapReviewSplit, CapReviewIssue, CapReviewBuyback:
+		return fmt.Sprintf("%s — %s; в полосе оценки годы до %d не участвуют", head, CapReviewLabel(kind), j.To)
+	case CapReviewError:
+		return fmt.Sprintf("%s — ошибка данных, %d в полосе оценки не участвует", head, j.To)
+	default:
+		return head + " — возможны неучтённый сплит, допэмиссия или байбек"
+	}
 }

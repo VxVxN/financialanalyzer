@@ -333,7 +333,11 @@ func (controller *Controller) relativeValuationRow(ctx context.Context, company 
 	if hasQuote && analytics.QuoteIsFresh(quote, controller.now()) {
 		q = &quote
 	}
-	own := analytics.BuildScreenerRow(history, q)
+	revs, revErr := controller.repo.CapReviews(ctx)
+	if revErr != nil {
+		controller.logger.Warn("failed to load cap reviews", "company", company, "error", revErr)
+	}
+	own := analytics.BuildScreenerRow(history, q, analytics.GroupCapReviews(revs)[company])
 	if err != nil {
 		return own, false
 	}
@@ -449,7 +453,7 @@ func renderHeadlineStrip(w http.ResponseWriter, s analytics.Snapshot, current *a
 		{name: "Выручка LTM", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("г/г", s.RevenueYoY)},
 		{name: "Прибыль LTM", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("г/г", s.NetProfitYoY)},
 		{name: "ROE", value: fmtPct(s.ROE), sub: s.ROELabel},
-		{name: "Балл", value: fmt.Sprintf("%d", s.Score), sub: fmt.Sprintf("по %d из %d", s.ScoreParts, s.ScoreScale())},
+		{name: "Балл", value: fmt.Sprintf("%d", s.Score), sub: scoreSub(s)},
 	}
 	fmt.Fprint(w, `<div class="strip">`)
 	for _, c := range cells {
@@ -534,8 +538,8 @@ func renderCurrent(w http.ResponseWriter, c analytics.Current) {
 		{name: "P/E (сейчас)", value: fmtRatio(c.PE), sub: sub("прибыль LTM на", c.EarningsLabel)},
 		{name: "P/B (сейчас)", value: fmtRatio(c.PB), sub: sub("капитал на", c.EquityLabel)},
 		{name: "Див. доходность (сейчас)", value: fmtPct(c.DivYield), sub: yieldSub("дивиденды за", c.DividendsLabel, c.DividendsMissing)},
-		{name: "EV/EBIT (сейчас)", value: fmtRatio(c.EVEBIT), sub: sub("EBIT LTM на", c.EBITLabel)},
-		{name: "P/FCF (сейчас)", value: fmtRatio(c.PFCF), sub: sub("FCF LTM на", c.FCFLabel)},
+		{name: "EV/EBIT (сейчас)", value: fmtRatio(c.EVEBIT), sub: balanceSub(sub("EBIT LTM на", c.EBITLabel), c.EVEBIT, c.BalanceNote)},
+		{name: "P/FCF (сейчас)", value: fmtRatio(c.PFCF), sub: balanceSub(sub("FCF LTM на", c.FCFLabel), c.PFCF, c.BalanceNote)},
 	})
 }
 
@@ -562,6 +566,41 @@ func yieldSub(prefix, label string, missing bool) string {
 }
 
 // joinSub joins non-empty KPI sub-lines.
+// payoutCard is the year's dividends over that year's profit. Banks are left
+// out: their Q4 profit is one quarter, so the ratio would not be a payout.
+func payoutCard(s analytics.Snapshot) []kpiCard {
+	if s.Bank {
+		return nil
+	}
+	return []kpiCard{{name: "Коэффициент выплат", value: fmtPct(s.Payout), sub: s.PayoutLabel}}
+}
+
+// netDebtSub names the period, or the mixed-source sentence when the figure is blank for that reason.
+func netDebtSub(s analytics.Snapshot) string {
+	if math.IsNaN(s.NetDebt) && s.BalanceNote != "" {
+		return s.BalanceNote
+	}
+	return periodNote(s, s.NetDebtLabel)
+}
+
+// scoreSub is the line under the headline score. A bank's number stays on
+// the card and says it is not the industrial column.
+func scoreSub(s analytics.Snapshot) string {
+	sub := fmt.Sprintf("по %d из %d", s.ScoreParts, s.ScoreScale())
+	if s.Bank {
+		return sub + " · шкала банка, в скринере не сортируется"
+	}
+	return sub
+}
+
+// balanceSub adds the mixed-source sentence when the multiple itself is blank.
+func balanceSub(base string, value float64, note string) string {
+	if !math.IsNaN(value) || note == "" {
+		return base
+	}
+	return joinSub(base, note)
+}
+
 func joinSub(parts ...string) string {
 	var out []string
 	for _, p := range parts {
@@ -579,14 +618,14 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 		name  string
 		cards []kpiCard
 	}{
-		{"Оценка по отчётности", []kpiCard{
+		{"Оценка по отчётности", append([]kpiCard{
 			{name: "Капитализация", value: fmtMoney(s.Capitalization), sub: periodNote(s, s.CapLabel)},
 			{name: "P/E", value: fmtRatio(s.PE), sub: joinSub(peComment(s.PE), periodNote(s, s.PELabel))},
 			{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
 			{name: "Див. доходность", value: fmtPct(s.DivYield), sub: yieldSub("", s.DivYieldLabel, s.DividendsMissing)},
-			{name: "EV/EBIT", value: fmtRatio(s.EVEBIT), sub: s.EVEBITLabel},
-			{name: "P/FCF", value: fmtRatio(s.PFCF), sub: s.PFCFLabel},
-		}},
+			{name: "EV/EBIT", value: fmtRatio(s.EVEBIT), sub: balanceSub(s.EVEBITLabel, s.EVEBIT, s.BalanceNote)},
+			{name: "P/FCF", value: fmtRatio(s.PFCF), sub: balanceSub(s.PFCFLabel, s.PFCF, s.BalanceNote)},
+		}, payoutCard(s)...)},
 		{"Прибыль и рентабельность", []kpiCard{
 			{name: "Выручка (LTM)", value: fmtMoney(s.Revenue), sub: fmtSignedPctSub("г/г", s.RevenueYoY)},
 			{name: "Чистая прибыль (LTM)", value: fmtMoney(s.NetProfit), sub: fmtSignedPctSub("г/г", s.NetProfitYoY)},
@@ -599,7 +638,7 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 		}},
 		{"Долг", []kpiCard{
 			{name: "Долг", value: fmtMoney(s.Debt), sub: periodNote(s, s.DebtLabel)},
-			{name: "Чистый долг", value: fmtMoney(s.NetDebt), sub: periodNote(s, s.NetDebtLabel)},
+			{name: "Чистый долг", value: fmtMoney(s.NetDebt), sub: netDebtSub(s)},
 			{name: "Долг / EBITDA", value: fmtMultiple(s.DebtEBITDA), sub: leverageComment(s.DebtEBITDA)},
 		}},
 		{"Рост", []kpiCard{
@@ -607,6 +646,8 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 			{name: "CAGR прибыли (3 года)", value: fmtPct(s.NetProfitCAGR3)},
 			{name: "CAGR выручки (5 лет)", value: fmtPct(s.RevenueCAGR5Y)},
 			{name: "CAGR прибыли (5 лет)", value: fmtPct(s.NetProfitCAGR5)},
+			{name: "CAGR дивидендов (3 года)", value: fmtPct(s.DividendsCAGR3)},
+			{name: "CAGR дивидендов (5 лет)", value: fmtPct(s.DividendsCAGR5)},
 		}},
 	}
 	fmt.Fprint(w, `<div class="groups">`)
@@ -762,10 +803,11 @@ func buildSparklineSVG(s analytics.Series, name string) string {
 var dashboardChartMetrics = []metricItem{
 	{"revenue", "Выручка"}, {"net_profit", "Чистая прибыль"}, {"ebitda", "EBITDA"},
 	{"capitalization", "Капитализация"}, {"debt", "Долг"}, {"net_debt", "Чистый долг"},
-	{"pe", "P/E"}, {"pb", "P/B"}, {"div_yield", "Див. доходность"}, {"roe", "ROE"},
+	{"pe", "P/E"}, {"pb", "P/B"}, {"div_yield", "Див. доходность"}, {"payout", "Выплаты"}, {"roe", "ROE"},
 	{"ev_ebit", "EV/EBIT"}, {"p_fcf", "P/FCF"}, {"fcf", "FCF"},
 	{"net_margin", "Чистая маржа"}, {"ebitda_margin", "Маржа EBITDA"}, {"operating_margin", "Опер. маржа"},
 	{"debt_ebitda", "Долг/EBITDA"}, {"revenue_yoy", "Выручка г/г"}, {"net_profit_yoy", "Прибыль г/г"},
+	{"dividends_cagr3", "Дивиденды 3г"}, {"dividends_cagr5", "Дивиденды 5л"},
 }
 
 // renderDashboardChart renders the chart frame and its controls; the script

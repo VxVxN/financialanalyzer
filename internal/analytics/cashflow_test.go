@@ -129,7 +129,7 @@ func TestSnapshotAndCurrentCashFlow(t *testing.T) {
 		t.Errorf("stale: EV/EBIT %v, P/FCF %v, stale %v", c.EVEBIT, c.PFCF, c.Stale)
 	}
 
-	row := BuildScreenerRow(h, nil)
+	row := BuildScreenerRow(h, nil, nil)
 	if row.EVEBIT == nil || *row.EVEBIT != s.EVEBIT || row.PFCF == nil || row.OperatingMargin == nil {
 		t.Errorf("screener row = %+v", row)
 	}
@@ -149,7 +149,7 @@ func TestNegativeEV(t *testing.T) {
 	if c := BuildCurrent(h, quote); !math.IsNaN(c.EVEBIT) {
 		t.Errorf("current EV/EBIT = %v for a negative EV, want NaN", c.EVEBIT)
 	}
-	if row := BuildScreenerRow(h, nil); row.EVEBIT != nil {
+	if row := BuildScreenerRow(h, nil, nil); row.EVEBIT != nil {
 		t.Errorf("screener EV/EBIT = %v, want null", *row.EVEBIT)
 	}
 }

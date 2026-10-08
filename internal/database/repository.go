@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 	"github.com/lib/pq"
 )
@@ -829,6 +830,52 @@ func (r *Repository) SavePortfolioBands(ctx context.Context, bands map[string]st
 		if err != nil {
 			return fmt.Errorf("save portfolio band: %w", err)
 		}
+	}
+	return nil
+}
+
+// CapReviews returns every stored classification of a capitalization jump.
+func (r *Repository) CapReviews(ctx context.Context) ([]analytics.CapReview, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT company, year_from, year_to, kind FROM cap_reviews`)
+	if err != nil {
+		return nil, fmt.Errorf("query cap reviews: %w", err)
+	}
+	defer rows.Close()
+	var out []analytics.CapReview
+	for rows.Next() {
+		var rev analytics.CapReview
+		if err := rows.Scan(&rev.Company, &rev.From, &rev.To, &rev.Kind); err != nil {
+			return nil, fmt.Errorf("scan cap review: %w", err)
+		}
+		out = append(out, rev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cap reviews: %w", err)
+	}
+	return out, nil
+}
+
+// SaveCapReview stores the classification of one jump, replacing a previous one.
+func (r *Repository) SaveCapReview(ctx context.Context, rev analytics.CapReview) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO cap_reviews (company, year_from, year_to, kind)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (company, year_from, year_to) DO UPDATE SET kind = EXCLUDED.kind`,
+		rev.Company, rev.From, rev.To, rev.Kind)
+	if err != nil {
+		return fmt.Errorf("save cap review: %w", err)
+	}
+	return nil
+}
+
+// DeleteCapReview forgets the classification of one jump. A missing row is fine.
+func (r *Repository) DeleteCapReview(ctx context.Context, company string, from, to int) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM cap_reviews WHERE company = $1 AND year_from = $2 AND year_to = $3`,
+		company, from, to)
+	if err != nil {
+		return fmt.Errorf("delete cap review: %w", err)
 	}
 	return nil
 }

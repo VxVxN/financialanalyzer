@@ -54,12 +54,18 @@ func (controller *Controller) ChartHandler(w http.ResponseWriter, r *http.Reques
 		controller.htmlServerError(w, "failed to load chart history", err)
 		return
 	}
+	reviews, err := controller.repo.CapReviews(r.Context())
+	if err != nil {
+		controller.htmlServerError(w, "failed to load cap reviews", err)
+		return
+	}
+	byCompany := analytics.GroupCapReviews(reviews)
 
 	seriesByCompany := make(map[string]analytics.Series, len(companies))
 	quality := make(map[string]companyQuality, len(companies))
 	for _, c := range companies {
 		seriesByCompany[c] = analytics.SeriesFor(history[c], metric, period)
-		quality[c] = qualityFor(history[c], metric, period)
+		quality[c] = qualityFor(history[c], metric, period, byCompany[c])
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -133,8 +139,8 @@ type companyQuality struct {
 	Flags   map[string][]analytics.Anomaly // Point label -> anomalies for this metric
 }
 
-func qualityFor(history []models.QuarterData, metric string, period analytics.Period) companyQuality {
-	anoms := append(analytics.CheckHistory(history), analytics.CapJumpAnomalies(history)...)
+func qualityFor(history []models.QuarterData, metric string, period analytics.Period, reviews []analytics.CapReview) companyQuality {
+	anoms := append(analytics.CheckHistory(history), analytics.CapJumpAnomalies(history, reviews)...)
 	return companyQuality{
 		Sources: analytics.Sources(history),
 		Flags:   analytics.AnomaliesByLabel(anoms, metric, period),
@@ -594,6 +600,12 @@ func formatMetricName(metric string) string {
 		return "P/B"
 	case "div_yield":
 		return "Дивидендная доходность"
+	case "payout":
+		return "Коэффициент выплат"
+	case "dividends_cagr3":
+		return "CAGR дивидендов (3 года)"
+	case "dividends_cagr5":
+		return "CAGR дивидендов (5 лет)"
 	case "net_margin":
 		return "Чистая маржа"
 	case "ebitda_margin":
@@ -682,6 +694,12 @@ func metricDescription(metric string) string {
 		return "Цена / балансовая стоимость — капитализация на рубль капитала"
 	case "div_yield":
 		return "Дивиденды с датой отсечки в этом году / капитализация на конец года, %"
+	case "payout":
+		return "Дивиденды за год / чистая прибыль этого года, %. Только годовая РСБУ или МСФО; у банков не считается"
+	case "dividends_cagr3":
+		return "Среднегодовой рост дивидендов за 3 года"
+	case "dividends_cagr5":
+		return "Среднегодовой рост дивидендов за 5 лет"
 	case "equity":
 		return "Собственный капитал (банки: баланс самого банка по РСБУ, форма 101)"
 	case "dividends":
@@ -692,11 +710,12 @@ func metricDescription(metric string) string {
 
 func getMetricUnit(metric string) string {
 	switch metric {
-	case "roe", "div_yield",
+	case "roe", "div_yield", "payout",
 		"net_margin", "ebitda_margin", "operating_margin",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
-		"revenue_cagr5", "net_profit_cagr5":
+		"revenue_cagr5", "net_profit_cagr5",
+		"dividends_cagr3", "dividends_cagr5":
 		return "%"
 	case "debt_ebitda", "pb", "ev_ebit", "p_fcf":
 		return "x"

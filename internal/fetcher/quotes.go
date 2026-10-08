@@ -61,6 +61,12 @@ func newMoexClient(logger *slog.Logger) *moex.Client {
 // so an incremental run that adds one year still sees the pair) for year-end
 // caps that jump like an unrecorded split.
 func warnCapJumps(ctx context.Context, repo *database.Repository, companies []string, logger *slog.Logger) {
+	var reviewed map[string][]analytics.CapReview
+	if all, err := repo.CapReviews(ctx); err != nil {
+		logger.Warn("Cap-jump reviews unavailable", "error", err)
+	} else {
+		reviewed = analytics.GroupCapReviews(all)
+	}
 	for _, company := range companies {
 		if ctx.Err() != nil {
 			return
@@ -71,6 +77,9 @@ func warnCapJumps(ctx context.Context, repo *database.Repository, companies []st
 			continue
 		}
 		for _, j := range analytics.CapJumps(history) {
+			if analytics.ReviewKind(reviewed[company], j.From, j.To) != "" {
+				continue
+			}
 			logger.Warn("Market cap jumps between years — possibly an unrecorded split, extra issue or buyback; add a split to share_splits.txt",
 				"ticker", company, "from", j.From, "to", j.To, "ratio", fmt.Sprintf("%.1fx", j.Ratio))
 		}

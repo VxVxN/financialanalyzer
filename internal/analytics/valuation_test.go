@@ -209,7 +209,7 @@ func TestScreenerRowHistoryPercentile(t *testing.T) {
 	for i, pe := range []float64{4, 6, 8, 10} {
 		h = append(h, bandYear(2022+i, f(pe), f(pe*10), f(10), nil))
 	}
-	row := BuildScreenerRow(h, nil)
+	row := BuildScreenerRow(h, nil, nil)
 	// The stored P/E is the latest year's 10: 4, 6, 8 below, itself a tie.
 	if row.PEHistPct == nil || !approx(*row.PEHistPct, 100*3.5/4, 1e-9) {
 		t.Errorf("P/E percentile = %v", row.PEHistPct)
@@ -235,7 +235,7 @@ func TestScreenerRowBandFollowsQuoteBasis(t *testing.T) {
 			Source: models.SourceCSV, PE: f(30), NetProfit: f(30)})
 	}
 	quote := models.MarketQuote{Company: "R", Capitalization: 1000, PriceDate: time.Date(2025, 11, 3, 0, 0, 0, 0, time.UTC)}
-	row := BuildScreenerRow(h, &quote)
+	row := BuildScreenerRow(h, &quote, nil)
 
 	if row.PE == nil || *row.PE != 10 {
 		t.Fatalf("current P/E = %v, want 1000/100", row.PE)
@@ -266,15 +266,19 @@ func TestScreenerRowBankBands(t *testing.T) {
 			row := models.QuarterData{Year: y, Quarter: "Q" + string(rune('0'+q)), Company: "B", Category: "banks",
 				Source: models.SourceCBR102, NetProfit: f(100), Equity: f(1000)}
 			if q == 4 {
-				row.Capitalization, row.PE = f(float64(y-2020)*1000), f(float64(y-2020)*2.5)
+				// Caps grow slowly: a 2× year-over-year jump would cut the band.
+				row.Capitalization, row.PE = f(4000+float64(y-2021)*400), f(float64(y-2020)*2.5)
 			}
 			h = append(h, row)
 		}
 	}
 	h = append(h, models.QuarterData{Year: 2026, Quarter: "Q1", Company: "B", Category: "banks",
 		Source: models.SourceCBR102, NetProfit: f(100), Equity: f(1000)})
-	row := BuildScreenerRow(h, nil)
+	row := BuildScreenerRow(h, nil, nil)
 
+	if row.Score != nil {
+		t.Errorf("bank score = %v, want nil so it does not sort with industrials", *row.Score)
+	}
 	if row.LastPeriod != "2026-Q1" || row.Basis["pe"].Label != "2025-Q4" || row.Basis["pb"].Label != "2025-Q4" {
 		t.Errorf("last %s, P/E basis %s, P/B basis %s", row.LastPeriod, row.Basis["pe"].Label, row.Basis["pb"].Label)
 	}
@@ -282,7 +286,25 @@ func TestScreenerRowBankBands(t *testing.T) {
 	if !ok || pe.N != 5 || pe.From != "2021-Q4" || pe.Current != 12.5 {
 		t.Errorf("P/E band = %+v (ok %v)", pe, ok)
 	}
-	if pb, ok := row.Bands["pb"]; !ok || pb.N != 5 || pb.Max != 5 {
+	if pb, ok := row.Bands["pb"]; !ok || pb.N != 5 || math.Abs(pb.Max-5.6) > 1e-9 {
 		t.Errorf("P/B band = %+v (ok %v)", pb, ok)
+	}
+}
+
+func TestScreenerBandStopsAtUnreviewedCapJump(t *testing.T) {
+	f := models.Float
+	var h []models.QuarterData
+	for y := 2016; y <= 2023; y++ {
+		h = append(h, models.QuarterData{Year: y, Quarter: "Q4", Company: "R", Source: models.SourceRSBU,
+			PE: f(10), Capitalization: f(100), NetProfit: f(10), Equity: f(50)})
+	}
+	h = append(h, models.QuarterData{Year: 2024, Quarter: "Q4", Company: "R", Source: models.SourceRSBU,
+		PE: f(4), Capitalization: f(300), NetProfit: f(75), Equity: f(50)})
+	if row := BuildScreenerRow(h, nil, nil); row.PEHistPct != nil {
+		t.Errorf("unreviewed 3× jump still has a P/E percentile %v", *row.PEHistPct)
+	}
+	row := BuildScreenerRow(h, nil, []CapReview{{From: 2023, To: 2024, Kind: CapReviewPrice}})
+	if row.PEHistPct == nil || row.Bands["pe"].N < MinBandPoints {
+		t.Errorf("a price review must keep the decade in the band, got %+v", row.Bands["pe"])
 	}
 }

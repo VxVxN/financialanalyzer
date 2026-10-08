@@ -21,12 +21,16 @@ func StaleQuotes(quotes map[string]models.MarketQuote, now time.Time) []NoteQuot
 	return out
 }
 
-// CollectJumps lists capitalization jumps across the given histories, by
-// company and then by year.
-func CollectJumps(histories map[string][]models.QuarterData) []NoteJump {
+// CollectJumps lists capitalization jumps that nobody has classified yet,
+// by company and then by year. A stored review — whatever the cause — takes
+// the jump off the Monday warning.
+func CollectJumps(histories map[string][]models.QuarterData, reviews map[string][]CapReview) []NoteJump {
 	var out []NoteJump
 	for company, rows := range histories {
 		for _, j := range CapJumps(rows) {
+			if ReviewKind(reviews[company], j.From, j.To) != "" {
+				continue
+			}
 			out = append(out, NoteJump{Company: company, From: j.From, To: j.To, Ratio: j.Ratio})
 		}
 	}

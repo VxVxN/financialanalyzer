@@ -18,7 +18,8 @@ tables.
   margins, leverage, growth, score and data-quality flags; P/E against the
   median of comparable sector peers with a current valuation and its
   percentile within the company's own history, and a median row over the
-  shown companies. Ready-made and saved selections, filter chips, optional
+  shown companies that follows the same freshness and reporting-kind rules as
+  the sector median. A bank's score is left off that column. Ready-made and saved selections, filter chips, optional
   columns, a summary drawer per company and a comparison tray.
 - **Cross-company comparison** (`/compare`) — overlay any metric for the
   companies picked here or collected in the screener's tray on one interactive
@@ -179,13 +180,25 @@ Runs are sequential; overlapping runs wait on a Postgres advisory lock. With
 message to that chat. On Monday, after the quotes job, the same chat gets a
 note: companies cheap against their own history and their sector, portfolio
 names whose P/E entered the outer quartile of their ten-year band since the
-previous note, quotes older than 30 days, capitalization jumps of 2× or more,
+previous note, quotes older than 30 days, capitalization jumps of 2× or more
+that have not been classified on `/updates`,
 and IFRS years the pull wrote that were not in the manual table yet.
 
 Dividends have no free exchange API. They are entered on the company card, in
 the annual IFRS batch, or in a dividends-only file (`компания;год;дивиденды`)
 on `/updates`, which sets that column and leaves the other IFRS figures alone.
 Until a company has a dividends figure, its card says so next to the empty yield.
+For an annual RSBU or IFRS year the card and the screener also show the payout
+(dividends over that year's profit) and dividend growth over 3 and 5 years;
+banks are left out of the payout, because their fourth quarter is one quarter.
+
+`/updates` lists registry companies whose newest stored year is still parent
+RSBU, and capitalization jumps of 2× or more. Classifying a jump (split, extra
+issue, buyback, bad data, or a real price move) stops the Monday warning. Until
+it is marked as a real price move, the ten-year P/E, P/B and yield band starts
+at the later year, so the percentile is not built across the jump. When debt
+and cash on a period come from different kinds of statements, the company card
+says why net debt, EV, EV/EBIT and P/FCF are blank.
 
 Historical market caps undo later share splits (MOEX's split list plus the
 bundled `share_splits.txt` for splits MOEX omits); the fetcher warns when a cap
@@ -243,6 +256,7 @@ The server logs a warning if the default database password is in use, or if
 | GET    | `/updates`                        | IFRS batch, timetable, quote freshness, run history |
 | GET    | `/api/fetch-runs`                 | Scheduler jobs and the latest 50 runs as JSON |
 | POST   | `/api/fetch`                      | Start a data refresh 🔒              |
+| POST   | `/api/cap-reviews`                | Classify a capitalization jump 🔒    |
 | POST   | `/api/import-manual`              | Import a batch of annual IFRS rows 🔒 |
 | GET    | `/api/companies`                  | List companies                       |
 | DELETE | `/api/companies`                  | Delete a company 🔒                  |

@@ -16,7 +16,7 @@ func TestBuildScreenerRow(t *testing.T) {
 			Revenue: f(1200), NetProfit: f(100), Capitalization: f(500), Equity: f(250), PE: f(5), ROE: f(40)},
 	}
 
-	stored := BuildScreenerRow(h, nil)
+	stored := BuildScreenerRow(h, nil, nil)
 	if stored.Current || stored.Company != "R" || stored.Category != "retail" || stored.LastPeriod != "2025-Q4" {
 		t.Errorf("stored row header = %+v", stored)
 	}
@@ -38,7 +38,7 @@ func TestBuildScreenerRow(t *testing.T) {
 
 	thin := 0.001 // 1 млн ₽ a day, under the 10 млн floor
 	quote := &models.MarketQuote{Company: "R", Capitalization: 800, Turnover: &thin, PriceDate: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}
-	live := BuildScreenerRow(h, quote)
+	live := BuildScreenerRow(h, quote, nil)
 	if !live.Current || live.PriceDate != "2026-09-29" {
 		t.Errorf("live row = %+v", live)
 	}

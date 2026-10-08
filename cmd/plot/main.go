@@ -312,6 +312,7 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 		r.Delete("/api/manual-financials", controller.DeleteManualFinancials)
 		r.Post("/api/fetch", controller.StartFetch)
 		r.Post("/api/fetch-ifrs", controller.StartIFRS)
+		r.Post("/api/cap-reviews", controller.SaveCapReview)
 	})
 	r.Group(func(r chi.Router) {
 		if cfg.AuthEnabled() {

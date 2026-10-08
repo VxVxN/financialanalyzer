@@ -41,6 +41,7 @@ var indexMetricGroups = []metricGroup{
 		Items: []metricItem{
 			{ID: "pb", Label: "P/B"},
 			{ID: "div_yield", Label: "Див. доходность"},
+			{ID: "payout", Label: "Коэффициент выплат"},
 			{ID: "ev", Label: "EV"},
 			{ID: "ev_ebit", Label: "EV/EBIT"},
 			{ID: "p_fcf", Label: "P/FCF"},
@@ -73,6 +74,8 @@ var indexMetricGroups = []metricGroup{
 			{ID: "net_profit_cagr3", Label: "CAGR прибыли 3 г."},
 			{ID: "revenue_cagr5", Label: "CAGR выручки 5 л."},
 			{ID: "net_profit_cagr5", Label: "CAGR прибыли 5 л."},
+			{ID: "dividends_cagr3", Label: "CAGR дивидендов 3 г."},
+			{ID: "dividends_cagr5", Label: "CAGR дивидендов 5 л."},
 		},
 	},
 }

@@ -37,6 +37,10 @@
         margin: 12px 0 0; padding-left: 18px; max-height: 240px; overflow: auto;
         font-size: 13px; color: var(--text-2); line-height: 1.5;
     }
+    .jump-kind {
+        min-height: 36px; padding: 6px 8px; background: var(--surface); color: var(--text-1);
+        border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: inherit; font-size: 14px;
+    }
 
 </style>
 </head>
@@ -98,6 +102,60 @@
                 <button type="button" class="btn" id="backfill-submit">Дозаполнить пустые колонки</button>
                 <span class="ops-status" id="backfill-status" aria-live="polite"></span>
             </div>
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-rsbu">
+        <h2 id="h-rsbu">Последний год — только РСБУ</h2>
+        <div class="card note">
+            <p>Компании из реестра, у которых самый новый сохранённый год — годовая РСБУ юрлица и за этот год нет МСФО. P/E и ROE такого года — цифры эмитента, не группы. Пока год не введён или не подтянут кнопкой выше, в отборе «дешевле истории» компания не участвует.</p>
+            {{if .RSBU}}
+            <ul class="ifrs-fills">
+                {{range .RSBU}}
+                <li><a href="/company/{{.Company | urlquery}}">{{.Company}}</a> — {{.Year}}</li>
+                {{end}}
+            </ul>
+            {{else}}
+            <p>Таких компаний нет: у кого есть данные, последний год уже не только РСБУ, либо компании ещё нет в базе.</p>
+            {{end}}
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-jumps">
+        <h2 id="h-jumps">Скачки капитализации</h2>
+        <div class="card note">
+            <p>Год к году капитализация изменилась вдвое или больше. Пока скачок не разобран как «это цена», перцентиль P/E, P/B и доходности считается только с позднего года: старая капитализация с новой несопоставима. «Ошибка» выбрасывает поздний год и оставляет более ранние. Сплит, допэмиссия и байбек поправку числа акций не вносят — полоса всё равно начинается с позднего года. Разобранный скачок больше не повторяется в понедельничной заметке.</p>
+            {{if .Jumps}}
+            <div class="table-wrap" style="margin-top:12px">
+            <table class="table runs">
+                <thead>
+                <tr><th>Компания</th><th>Годы</th><th>Во сколько</th><th>Разбор</th></tr>
+                </thead>
+                <tbody>
+                {{range .Jumps}}
+                <tr>
+                    <td><a href="/company/{{.Company | urlquery}}">{{.Company}}</a></td>
+                    <td class="num">{{.From}} → {{.To}}</td>
+                    <td class="num">{{.Ratio}}</td>
+                    <td>
+                        <select class="jump-kind" data-company="{{.Company}}" data-from="{{.From}}" data-to="{{.To}}" aria-label="Причина скачка {{.Company}} {{.From}}–{{.To}}">
+                            <option value="" {{if eq .Kind ""}}selected{{end}}>не разобрано</option>
+                            <option value="split" {{if eq .Kind "split"}}selected{{end}}>сплит</option>
+                            <option value="issue" {{if eq .Kind "issue"}}selected{{end}}>допэмиссия</option>
+                            <option value="buyback" {{if eq .Kind "buyback"}}selected{{end}}>байбек</option>
+                            <option value="error" {{if eq .Kind "error"}}selected{{end}}>ошибка</option>
+                            <option value="price" {{if eq .Kind "price"}}selected{{end}}>это цена</option>
+                        </select>
+                    </td>
+                </tr>
+                {{end}}
+                </tbody>
+            </table>
+            </div>
+            <p class="ops-status" id="jump-status" style="margin-top:8px"></p>
+            {{else}}
+            <p>Скачков нет.</p>
+            {{end}}
         </div>
     </section>
 
@@ -298,6 +356,32 @@
         tick();
     };
     pollIFRS();
+
+    document.querySelectorAll('.jump-kind').forEach((sel) => {
+        sel.addEventListener('change', async () => {
+            const status = $('jump-status');
+            status.textContent = 'Сохранение…';
+            sel.disabled = true;
+            try {
+                const resp = await fetch('/api/cap-reviews', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        company: sel.dataset.company,
+                        from: Number(sel.dataset.from),
+                        to: Number(sel.dataset.to),
+                        kind: sel.value,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.error || resp.status);
+                location.reload();
+            } catch (err) {
+                status.textContent = 'Ошибка: ' + err.message;
+                sel.disabled = false;
+            }
+        });
+    });
 
     $('ifrs-submit').addEventListener('click', async () => {
         $('ifrs-status').textContent = 'Запуск…';

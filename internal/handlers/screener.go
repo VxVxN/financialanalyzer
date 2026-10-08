@@ -27,6 +27,11 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 	if err != nil {
 		return nil, err
 	}
+	reviews, err := controller.repo.CapReviews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byCompany := analytics.GroupCapReviews(reviews)
 
 	rows := make([]analytics.ScreenerRow, 0, len(companies))
 	for _, c := range companies {
@@ -38,7 +43,7 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 		if q, ok := quotes[c]; ok && analytics.QuoteIsFresh(q, controller.now()) {
 			quote = &q
 		}
-		row := analytics.BuildScreenerRow(history, quote)
+		row := analytics.BuildScreenerRow(history, quote, byCompany[c])
 		row.Portfolio = inPortfolio(row.Company)
 		rows = append(rows, row)
 	}
@@ -88,7 +93,11 @@ func (controller *Controller) CheapList(ctx context.Context) (msg string, eventI
 		years = append(years, analytics.NoteYear{Company: ev.Company, Year: year})
 		eventIDs = append(eventIDs, ev.ID)
 	}
-	return analytics.MondayMessage(rows, analytics.StaleQuotes(quotes, controller.now()), analytics.CollectJumps(histories), years, prev), eventIDs, analytics.NextPortfolioBands(rows), nil
+	reviews, err := controller.repo.CapReviews(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return analytics.MondayMessage(rows, analytics.StaleQuotes(quotes, controller.now()), analytics.CollectJumps(histories, analytics.GroupCapReviews(reviews)), years, prev), eventIDs, analytics.NextPortfolioBands(rows), nil
 }
 
 // ScreenerAPI returns the screener rows as JSON (null = no data).

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/config"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
@@ -60,6 +61,7 @@ var writeRoutes = []routeCase{
 	{http.MethodDelete, "/api/company-note?company=SBER", ""},
 	{http.MethodPut, "/api/manual-financials", `{"company":"SBER","year":2025,"dividends":800}`},
 	{http.MethodDelete, "/api/manual-financials?company=SBER&year=2025", ""},
+	{http.MethodPost, "/api/cap-reviews", `{"company":"LKOH","from":2023,"to":2024,"kind":"price"}`},
 }
 
 var startRoutes = []routeCase{
@@ -264,6 +266,15 @@ func (s *stubRepo) PendingDigestEvents(context.Context) ([]models.DigestEvent, e
 }
 func (s *stubRepo) PortfolioBands(context.Context) (map[string]string, error) {
 	return nil, nil
+}
+func (s *stubRepo) CapReviews(context.Context) ([]analytics.CapReview, error) { return nil, nil }
+func (s *stubRepo) SaveCapReview(context.Context, analytics.CapReview) error {
+	s.writes++
+	return nil
+}
+func (s *stubRepo) DeleteCapReview(context.Context, string, int, int) error {
+	s.writes++
+	return nil
 }
 func (s *stubRepo) DeleteManualFinancials(context.Context, string, int) error { s.writes++; return nil }
 func (s *stubRepo) SaveQuarterData(context.Context, models.QuarterData) error {

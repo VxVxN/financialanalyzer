@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,6 +65,29 @@ type quotesView struct {
 	Latest       string // latest trade date, "" if none
 }
 
+type rsbuGapView struct {
+	Company string
+	Year    int
+}
+
+type capJumpView struct {
+	Company   string
+	From, To  int
+	Ratio     string
+	Kind      string
+	KindLabel string
+}
+
+func jumpRatioText(ratio float64) string {
+	times := ratio
+	mark := "×"
+	if ratio < 1 && ratio > 0 {
+		times = 1 / ratio
+		mark = "÷"
+	}
+	return mark + strings.ReplaceAll(fmt.Sprintf("%.1f", times), ".", ",")
+}
+
 // quotesSummary counts stored and fresh quotes and finds the latest trade date.
 func quotesSummary(quotes map[string]models.MarketQuote, now time.Time) quotesView {
 	var v quotesView
@@ -81,6 +105,36 @@ func quotesSummary(quotes map[string]models.MarketQuote, now time.Time) quotesVi
 		v.Latest = latest.Format("02.01.2006")
 	}
 	return v
+}
+
+func rsbuGapViews(histories map[string][]models.QuarterData) []rsbuGapView {
+	gaps := analytics.RSBUOnlyLatest(registryTickers(), histories)
+	out := make([]rsbuGapView, len(gaps))
+	for i, g := range gaps {
+		out[i] = rsbuGapView{Company: g.Company, Year: g.Year}
+	}
+	return out
+}
+
+func capJumpViews(histories map[string][]models.QuarterData, reviews []analytics.CapReview) []capJumpView {
+	byCompany := analytics.GroupCapReviews(reviews)
+	var out []capJumpView
+	for company, rows := range histories {
+		for _, j := range analytics.CapJumps(rows) {
+			kind := analytics.ReviewKind(byCompany[company], j.From, j.To)
+			out = append(out, capJumpView{
+				Company: company, From: j.From, To: j.To,
+				Ratio: jumpRatioText(j.Ratio), Kind: kind, KindLabel: analytics.CapReviewLabel(kind),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Company != out[j].Company {
+			return out[i].Company < out[j].Company
+		}
+		return out[i].From < out[j].From
+	})
+	return out
 }
 
 func newRunView(r models.FetchRun) runView {
@@ -160,6 +214,21 @@ func (controller *Controller) UpdatesHandler(w http.ResponseWriter, r *http.Requ
 		controller.htmlServerError(w, "failed to load market quotes", err)
 		return
 	}
+	companies, err := controller.repo.GetAllCompanies(r.Context())
+	if err != nil {
+		controller.htmlServerError(w, "failed to list companies", err)
+		return
+	}
+	histories, err := controller.repo.GetCompaniesHistory(r.Context(), companies)
+	if err != nil {
+		controller.htmlServerError(w, "failed to load company history", err)
+		return
+	}
+	reviews, err := controller.repo.CapReviews(r.Context())
+	if err != nil {
+		controller.htmlServerError(w, "failed to load cap reviews", err)
+		return
+	}
 
 	data := struct {
 		Meta             pageMeta
@@ -168,11 +237,15 @@ func (controller *Controller) UpdatesHandler(w http.ResponseWriter, r *http.Requ
 		Quotes           quotesView
 		Runs             []runView
 		QuoteMaxAgeDays  int
+		RSBU             []rsbuGapView
+		Jumps            []capJumpView
 	}{
 		Meta:             pageMeta{Title: "Обновление данных", Active: "updates"},
 		SchedulerEnabled: controller.schedule != nil,
 		Quotes:           quotesSummary(quotes, controller.now()),
 		QuoteMaxAgeDays:  int(analytics.QuoteMaxAge / (24 * time.Hour)),
+		RSBU:             rsbuGapViews(histories),
+		Jumps:            capJumpViews(histories, reviews),
 	}
 	for _, j := range controller.scheduleStatus() {
 		data.Jobs = append(data.Jobs, jobView{

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -93,6 +94,29 @@ func TestUpdatesPage(t *testing.T) {
 		!strings.Contains(body, "Автоматическое обновление выключено") ||
 		!strings.Contains(body, "Котировок нет") || !strings.Contains(body, "Запусков пока не было") {
 		t.Errorf("empty page: status %d\n%s", rec.Code, body)
+	}
+}
+
+func TestUpdatesRSBUAndCapJumps(t *testing.T) {
+	repo := &fakeRepo{
+		companies: []string{"LKOH", "X5"},
+		history: map[string][]models.QuarterData{
+			"LKOH": {
+				{Year: 2023, Quarter: "Q4", Company: "LKOH", Source: models.SourceRSBU, Capitalization: models.Float(100)},
+				{Year: 2024, Quarter: "Q4", Company: "LKOH", Source: models.SourceRSBU, Capitalization: models.Float(300)},
+			},
+			"X5": {{Year: 2024, Quarter: "Q4", Company: "X5", Source: models.SourceManual, Revenue: models.Float(1)}},
+		},
+		capReviews: []analytics.CapReview{{Company: "LKOH", From: 2023, To: 2024, Kind: analytics.CapReviewIssue}},
+	}
+	body := do(t, newUpdatesServer(repo, nil), http.MethodGet, "/updates", "").Body.String()
+	for _, want := range []string{"Последний год — только РСБУ", ">LKOH</a>", "Скачки капитализации", `value="issue" selected`, "×3,0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("updates page lacks %q", want)
+		}
+	}
+	if strings.Contains(body, ">X5</a>") {
+		t.Error("X5 has IFRS for 2024 and must not be listed as RSBU-only")
 	}
 }
 

@@ -68,11 +68,20 @@ func kindMatters(metric string) bool { return metric != "div_yield" }
 // ok is false when current is unknown or fewer than MinBandPoints periods
 // qualify.
 func HistoricalBand(history []models.QuarterData, metric string, current float64, standalone bool) (HistoryBand, bool) {
+	return historicalBand(history, metric, current, standalone, CapBandWindow{})
+}
+
+// historicalBand is HistoricalBand limited to window. P/E, P/B and yield all
+// rest on market cap, so a cap jump that window cuts out does not enter them.
+func historicalBand(history []models.QuarterData, metric string, current float64, standalone bool, window CapBandWindow) (HistoryBand, bool) {
 	if math.IsNaN(current) || math.IsInf(current, 0) {
 		return HistoryBand{}, false
 	}
 	var s Series
 	for _, p := range historySeries(history, metric) {
+		if !window.Allows(p.Year) {
+			continue
+		}
 		if !math.IsNaN(p.Value) && !math.IsInf(p.Value, 0) && (!kindMatters(metric) || p.Standalone == standalone) {
 			s = append(s, p)
 		}
@@ -166,6 +175,17 @@ func (r ScreenerRow) CurrentAt(metric string, now time.Time) bool {
 // (standalone or group) as the row's own. A row without a current value of
 // the metric, or without a category, gets no median: there is nothing to compare.
 func ApplySectorMedians(rows []ScreenerRow, now time.Time) {
+	for i := range rows {
+		rows[i].PECurrent = rows[i].CurrentAt("pe", now)
+		rows[i].PBCurrent = rows[i].CurrentAt("pb", now)
+		rows[i].DivYieldCurrent = rows[i].CurrentAt("div_yield", now)
+		if p, ok := rows[i].Basis["pe"]; ok {
+			rows[i].PEStandalone = p.Standalone
+		}
+		if p, ok := rows[i].Basis["pb"]; ok {
+			rows[i].PBStandalone = p.Standalone
+		}
+	}
 	byCat := map[string][]int{}
 	for i, r := range rows {
 		if r.Category != "" {

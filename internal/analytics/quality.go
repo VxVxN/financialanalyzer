@@ -104,6 +104,10 @@ func metricInputs(metric string) []string {
 		return []string{"capitalization", "equity"}
 	case "div_yield":
 		return []string{"dividends", "capitalization"}
+	case "payout":
+		return []string{"dividends", "net_profit"}
+	case "dividends_cagr3", "dividends_cagr5":
+		return []string{"dividends"}
 	case "net_debt":
 		return []string{"debt", "cash"}
 	case "ev":

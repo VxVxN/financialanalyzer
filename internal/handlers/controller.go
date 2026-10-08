@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/ifrs"
@@ -36,6 +37,9 @@ type Repository interface {
 	SaveQuarterData(ctx context.Context, data models.QuarterData) error
 	PendingDigestEvents(ctx context.Context) ([]models.DigestEvent, error)
 	PortfolioBands(ctx context.Context) (map[string]string, error)
+	CapReviews(ctx context.Context) ([]analytics.CapReview, error)
+	SaveCapReview(ctx context.Context, rev analytics.CapReview) error
+	DeleteCapReview(ctx context.Context, company string, from, to int) error
 }
 
 // ScheduleSource reports the data-refresh timetable (*scheduler.Scheduler).

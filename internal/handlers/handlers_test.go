@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 )
@@ -48,6 +49,8 @@ type fakeRepo struct {
 
 	events []models.DigestEvent
 	bands  map[string]string
+
+	capReviews []analytics.CapReview
 }
 
 func (f *fakeRepo) Ping(ctx context.Context) error { return f.pingErr }
@@ -102,6 +105,24 @@ func (f *fakeRepo) PendingDigestEvents(context.Context) ([]models.DigestEvent, e
 }
 func (f *fakeRepo) PortfolioBands(context.Context) (map[string]string, error) {
 	return f.bands, nil
+}
+func (f *fakeRepo) CapReviews(context.Context) ([]analytics.CapReview, error) {
+	return f.capReviews, nil
+}
+func (f *fakeRepo) SaveCapReview(_ context.Context, rev analytics.CapReview) error {
+	f.capReviews = append(f.capReviews, rev)
+	return nil
+}
+func (f *fakeRepo) DeleteCapReview(_ context.Context, company string, from, to int) error {
+	var kept []analytics.CapReview
+	for _, rev := range f.capReviews {
+		if rev.Company == company && rev.From == from && rev.To == to {
+			continue
+		}
+		kept = append(kept, rev)
+	}
+	f.capReviews = kept
+	return nil
 }
 func (f *fakeRepo) SaveManualFinancials(_ context.Context, m models.ManualFinancials) error {
 	known := false
@@ -691,7 +712,7 @@ func TestStaleQuoteIsIgnored(t *testing.T) {
 func TestRelativeValuation(t *testing.T) {
 	year := func(company string, y int, pe float64) models.QuarterData {
 		return models.QuarterData{Year: y, Quarter: "Q4", Company: company, Category: "oil", Source: models.SourceCSV,
-			PE: models.Float(pe), Capitalization: models.Float(pe * 100), NetProfit: models.Float(100)}
+			PE: models.Float(pe), Capitalization: models.Float(1000), NetProfit: models.Float(100)}
 	}
 	hist := map[string][]models.QuarterData{
 		"A": {year("A", 2022, 10), year("A", 2023, 8), year("A", 2024, 6), year("A", 2025, 3)},

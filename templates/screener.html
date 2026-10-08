@@ -190,8 +190,9 @@
             (по рыночной цене или по данным не старше 18 месяцев) и того же типа отчётности (нужно не меньше двух);
             <b>история P/E</b> — перцентиль: доля периодов за последние 10 лет (того же типа отчётности), где P/E был ниже текущего;
             низкий — дёшево относительно истории. Для P/B и доходности то же — в подсказке при наведении на ячейку.
-            <b>Медиана</b> внизу таблицы — простая медиана по показанным компаниям, поэтому может отличаться от медианы сектора.
-            <b>Балл</b> — эвристика из роста, рентабельности, маржи, долга и P/E (у банков — из роста дохода, ROE и P/B). Рядом с баллом — сколько компонентов было в данных: балл по двум из пяти нельзя сравнивать с баллом по всем. Это не рекомендация.
+            <b>Медиана</b> P/E, P/B и доходности внизу таблицы считается по тем же правилам, что медиана сектора: только актуальная оценка (рынок или период не старше 18 месяцев) и, для P/E и P/B, один тип отчётности. Если в таблице смешаны МСФО и РСБУ, берётся тот тип, компаний которого больше.
+            <b>Коэффициент выплат</b> — дивиденды года к прибыли этого года, только для годовой РСБУ или МСФО; у банков не считается. <b>Рост дивидендов</b> — среднегодовой за 3 и 5 лет.
+            <b>Балл</b> — эвристика из роста, рентабельности, маржи, долга и P/E. Балл банка считается по другой шкале и в этой колонке не показывается: он на карточке компании. Рядом с баллом — сколько компонентов было в данных: балл по двум из пяти нельзя сравнивать с баллом по всем. Это не рекомендация.
         </p>
     </details>
 </main>
@@ -234,6 +235,7 @@
         { key: 'pe_hist_pct', label: 'История P/E', kind: 'pctile', base: true },
         { key: 'pb', label: 'P/B', kind: 'ratio', base: true, band: 'pb' },
         { key: 'div_yield', label: 'Див. дох.', kind: 'pct', base: true, band: 'div_yield' },
+        { key: 'payout', label: 'Выплаты', kind: 'pct' },
         { key: 'roe', label: 'ROE', kind: 'pct', base: true },
         { key: 'ev_ebit', label: 'EV/EBIT', kind: 'ratio' },
         { key: 'p_fcf', label: 'P/FCF', kind: 'ratio' },
@@ -242,6 +244,8 @@
         { key: 'debt_ebitda', label: 'Долг/EBITDA', kind: 'ratio' },
         { key: 'revenue_yoy', label: 'Выручка г/г', kind: 'pct', signed: true },
         { key: 'net_profit_yoy', label: 'Прибыль г/г', kind: 'pct', signed: true },
+        { key: 'dividends_cagr3', label: 'Дивиденды 3г', kind: 'pct', signed: true },
+        { key: 'dividends_cagr5', label: 'Дивиденды 5л', kind: 'pct', signed: true },
         { key: 'score', label: 'Балл', kind: 'score', base: true },
         { key: 'anomalies', label: 'Замечания', kind: 'flags', base: true },
         { key: 'valuation', label: 'Основа оценки', kind: 'basis', base: true, cls: 'left' },
@@ -461,12 +465,18 @@
                     '<div class="ruler-mark" style="left:' + (v * 0.72).toFixed(1) + 'px"></div></div><span class="num ' + cls + '">' + pctText(v) + '</span></div></td>';
             }
             case 'score': {
+                if (!known(v)) {
+                    const title = r.bank
+                        ? 'Балл банка считается по другой шкале и в этой колонке не показывается — он на карточке компании.'
+                        : 'Недостаточно данных для балла.';
+                    return '<td class="na" title="' + esc(title) + '">—</td>';
+                }
                 const of = r.score_scale || 5;
                 const parts = (r.score_parts || 0) + '/' + of;
-                const title = (r.bank ? 'Шкала банка: рост дохода, ROE и P/B. ' : 'Рост, ROE, маржа, долг и P/E. ') +
-                    'Посчитано по ' + (r.score_parts || 0) + ' из ' + of + '. Незаполненные компоненты не входят в итог.';
+                const title = 'Рост, ROE, маржа, долг и P/E. Посчитано по ' + (r.score_parts || 0) + ' из ' + of +
+                    '. Незаполненные компоненты не входят в итог.';
                 return '<td title="' + esc(title) + '"><span class="score num' + (v >= 70 ? ' hi' : '') + '">' + v +
-                    '</span> <span class="meta num">' + parts + (r.bank ? ' банк' : '') + '</span></td>';
+                    '</span> <span class="meta num">' + parts + '</span></td>';
             }
             case 'turnover':
                 return known(v) ? '<td class="num" title="Средний дневной оборот примерно за квартал">' + esc(turnoverText(v)) + '</td>' : '<td class="na">—</td>';
@@ -496,6 +506,20 @@
         const s = vals.slice().sort((a, b) => a - b), m = Math.floor(s.length / 2);
         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     }
+    // valuationMedian uses the sector-median rules on the rows actually shown:
+    // a current value, and for P/E and P/B a single reporting kind.
+    function valuationMedian(rows, key) {
+        let picked = rows.filter((r) => known(r[key]) && r[key + '_current']);
+        let kind = '';
+        if (key === 'pe' || key === 'pb') {
+            const group = picked.filter((r) => !r[key + '_standalone']);
+            const stand = picked.filter((r) => r[key + '_standalone']);
+            if (group.length >= stand.length) { picked = group; kind = 'МСФО группы'; }
+            else { picked = stand; kind = 'РСБУ и формы ЦБ'; }
+        }
+        return { value: median(picked.map((r) => r[key])), n: picked.length, kind: kind };
+    }
+    const BAND_MEDIAN = new Set(['pe', 'pb', 'div_yield']);
     const NO_MEDIAN = new Set(['score', 'anomalies', 'pe_vs_sector', 'pe_hist_pct']);
 
     // ------------------------------------------------------------ render
@@ -545,6 +569,11 @@
             $('foot').innerHTML = '<tr><td></td>' + cols.map((c, i) => {
                 if (i === 0) return '<td class="left">Медиана (' + rows.length + ')</td>';
                 if (['text', 'basis', 'source', 'score', 'flags'].includes(c.kind) || NO_MEDIAN.has(c.key)) return '<td></td>';
+                if (BAND_MEDIAN.has(c.key)) {
+                    const med = valuationMedian(rows, c.key);
+                    const title = (med.kind ? med.kind + ', ' : '') + 'актуальных оценок: ' + med.n;
+                    return '<td class="num" title="' + esc(title) + '">' + (known(med.value) ? esc(fmtValue(c.kind, med.value, c.signed)) : '') + '</td>';
+                }
                 const m = median(rows.map((r) => r[c.key]).filter(known));
                 if (c.kind === 'turnover') return '<td class="num">' + (known(m) ? esc(turnoverText(m)) : '') + '</td>';
                 return '<td class="num">' + esc(fmtValue(c.kind, m, c.signed)) + '</td>';

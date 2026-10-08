@@ -55,11 +55,12 @@ func IsFlow(metric string) bool {
 func IsDerived(metric string) bool {
 	switch metric {
 	case "net_margin", "ebitda_margin", "debt_ebitda",
-		"pb", "div_yield",
+		"pb", "div_yield", "payout",
 		"net_debt", "ev", "operating_margin", "ev_ebit", "fcf", "p_fcf",
 		"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 		"revenue_cagr3", "net_profit_cagr3",
-		"revenue_cagr5", "net_profit_cagr5":
+		"revenue_cagr5", "net_profit_cagr5",
+		"dividends_cagr3", "dividends_cagr5":
 		return true
 	}
 	return false
@@ -70,11 +71,12 @@ var AllMetrics = []string{
 	"revenue", "net_profit", "ebitda", "operating_profit",
 	"capitalization", "debt", "cash", "net_debt", "equity", "dividends",
 	"operating_cash_flow", "capex", "fcf",
-	"pe", "roe", "pb", "div_yield", "ev", "ev_ebit", "p_fcf",
+	"pe", "roe", "pb", "div_yield", "payout", "ev", "ev_ebit", "p_fcf",
 	"net_margin", "ebitda_margin", "operating_margin", "debt_ebitda",
 	"revenue_yoy", "net_profit_yoy", "ebitda_yoy",
 	"revenue_cagr3", "net_profit_cagr3",
 	"revenue_cagr5", "net_profit_cagr5",
+	"dividends_cagr3", "dividends_cagr5",
 }
 
 var metricSet = func() map[string]struct{} {
@@ -413,6 +415,14 @@ func DerivedSeries(history []models.QuarterData, metric string, base Period) Ser
 		// Dividends sit on the Q4 row (year's record dates) and cap is the
 		// year-end value, so the quarterly/annual yield is a trailing one.
 		return ratio(pick("dividends"), pick("capitalization"), 100)
+	case "payout":
+		// Annual profit only. A bank Q4 is one quarter, and a CSV Q4 is one
+		// quarter, so dividends / that profit would not be a year's payout.
+		return payoutSeries(history)
+	case "dividends_cagr3":
+		return rollingCAGR(AnnualSeries(history, "dividends"), PeriodAnnual, 3)
+	case "dividends_cagr5":
+		return rollingCAGR(AnnualSeries(history, "dividends"), PeriodAnnual, 5)
 	case "revenue_yoy":
 		return yoy(pick("revenue"), base)
 	case "net_profit_yoy":
@@ -444,6 +454,43 @@ func SeriesFor(history []models.QuarterData, metric string, period Period) Serie
 	default:
 		return QuarterlySeries(history, metric)
 	}
+}
+
+// MixedBalanceNote is the company-card sentence when debt and cash come from
+// different kinds of statements, so net debt and the multiples on it are blank.
+const MixedBalanceNote = "Долг и денежные средства из разной отчётности — чистый долг, EV, EV/EBIT и P/FCF за этот период не считаются."
+
+// hasMixedBalance reports whether any period refuses net debt because debt
+// and cash are not one balance sheet.
+func hasMixedBalance(history []models.QuarterData) bool {
+	return len(mixedBalanceLabels(history, PeriodQuarter)) > 0 || len(mixedBalanceLabels(history, PeriodAnnual)) > 0
+}
+
+// payoutSeries is dividends / net profit, in percent, on annual rows only
+// (RSBU Q4 and a manual IFRS year). A loss has no payout. A reported zero
+// dividend is a real 0%. Banks and quarterly rows stay NaN.
+func payoutSeries(history []models.QuarterData) Series {
+	hist := SortHistory(history)
+	out := make(Series, 0, len(hist))
+	for _, q := range hist {
+		val := math.NaN()
+		if isAnnualFigure(q) {
+			profit := models.ValueOrNaN(q.NetProfit)
+			div := models.ValueOrNaN(q.Dividends)
+			if profit > 0 && !math.IsNaN(div) {
+				val = div / profit * 100
+			}
+		}
+		out = append(out, Point{
+			Label:      qLabel(q.Year, q.Quarter),
+			Year:       q.Year,
+			Index:      q.Year*10 + quarterIdx(q.Quarter),
+			Value:      val,
+			Standalone: standalone(q),
+			Annual:     isAnnualFigure(q),
+		})
+	}
+	return out
 }
 
 func ratio(num, den Series, scale float64) Series {
@@ -764,6 +811,13 @@ type Snapshot struct {
 	PBLabel                                string  // period PB was taken from ("" when PB is NaN)
 	DivYield                               float64 // dividends / market cap, %, latest period that has both
 	DivYieldLabel                          string  // period DivYield was taken from
+	Payout                                 float64 // dividends / annual net profit, %, latest annual row that has it
+	PayoutLabel                            string
+	DividendsCAGR3                         float64 // annual dividend CAGR, 3 years
+	DividendsCAGR5                         float64 // annual dividend CAGR, 5 years
+	// BalanceNote explains a blank net debt / EV / EV/EBIT / P/FCF when debt
+	// and cash were written by different kinds of source. Empty otherwise.
+	BalanceNote string
 	// DividendsMissing is set when no period reports dividends, so an empty
 	// yield means they were not entered rather than a real zero payout.
 	DividendsMissing bool
@@ -826,6 +880,9 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 		NetProfitCAGR5: math.NaN(),
 		PB:             math.NaN(),
 		DivYield:       math.NaN(),
+		Payout:         math.NaN(),
+		DividendsCAGR3: math.NaN(),
+		DividendsCAGR5: math.NaN(),
 
 		NetDebt:         math.NaN(),
 		EVEBIT:          math.NaN(),
@@ -870,11 +927,18 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	if p, ok := LatestValid(DerivedSeries(hist, "div_yield", PeriodQuarter)); ok {
 		snap.DivYield, snap.DivYieldLabel, snap.DivYieldPoint = p.Value, p.Label, p
 	}
+	if p, ok := LatestValid(DerivedSeries(hist, "payout", PeriodQuarter)); ok {
+		snap.Payout, snap.PayoutLabel = p.Value, p.Label
+	}
+	snap.DividendsCAGR3 = lastNonNaN(DerivedSeries(hist, "dividends_cagr3", PeriodAnnual))
+	snap.DividendsCAGR5 = lastNonNaN(DerivedSeries(hist, "dividends_cagr5", PeriodAnnual))
 	if _, ok := LatestValid(QuarterlySeries(hist, "dividends")); !ok {
 		snap.DividendsMissing = true
 	}
 	if p, ok := LatestValid(DerivedSeries(hist, "net_debt", PeriodQuarter)); ok {
 		snap.NetDebt, snap.NetDebtLabel = p.Value, p.Label
+	} else if hasMixedBalance(hist) {
+		snap.BalanceNote = MixedBalanceNote
 	}
 	// The quarterly base pairs each period's EV / cap with TTM flows.
 	if p, ok := LatestValid(DerivedSeries(hist, "ev_ebit", PeriodQuarter)); ok {
@@ -1094,6 +1158,9 @@ type Current struct {
 	EBITLabel        string
 	PFCF             float64 // cap / TTM free cash flow (NaN when FCF is not positive)
 	FCFLabel         string
+	// BalanceNote explains a blank EV/EBIT or P/FCF when the latest debt and
+	// cash are not one balance sheet.
+	BalanceNote string
 	// Stale is set when a fundamental exists but ended more than
 	// MaxFundamentalAge before the quote; its multiple is then NaN and its
 	// label says "too old" rather than silently pairing today's price with
@@ -1199,6 +1266,9 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 		if recent(p, &cur.FCFLabel) && p.Value > 0 && !mixedBalanceLabels(history, PeriodTTM)[p.Label] {
 			cur.PFCF = q.Capitalization / p.Value
 		}
+	}
+	if _, ok := LatestValid(DerivedSeries(history, "net_debt", PeriodQuarter)); !ok && hasMixedBalance(history) {
+		cur.BalanceNote = MixedBalanceNote
 	}
 	return cur
 }
