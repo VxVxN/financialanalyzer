@@ -158,6 +158,38 @@ func TestRouterAuthDisabled(t *testing.T) {
 	}
 }
 
+func TestRouterImportDividendsRequiresAuth(t *testing.T) {
+	h, repo := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
+	if rec := serveDividendImport(h, false); rec.Code != http.StatusUnauthorized {
+		t.Errorf("without auth: %d", rec.Code)
+	}
+	if repo.writes != 0 {
+		t.Fatalf("unauthenticated import wrote %d times", repo.writes)
+	}
+	if rec := serveDividendImport(h, true); rec.Code != http.StatusOK {
+		t.Errorf("with auth: %d %s", rec.Code, rec.Body)
+	}
+	if repo.writes == 0 {
+		t.Error("authenticated import did not write")
+	}
+}
+
+func serveDividendImport(h http.Handler, auth bool) *httptest.ResponseRecorder {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, _ := w.CreateFormFile("file", "div.csv")
+	_, _ = fw.Write([]byte("компания;год;дивиденды\nX5;2024;12,5\n"))
+	_ = w.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/import-dividends", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	if auth {
+		req.SetBasicAuth("admin", "s3cret")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestRouterImportManualRequiresAuth(t *testing.T) {
 	h, repo := newTestRouter(&config.Config{AuthUser: "admin", AuthPassword: "s3cret"})
 	if rec := serveManualImport(h, false); rec.Code != http.StatusUnauthorized {
@@ -222,6 +254,16 @@ func (s *stubRepo) GetManualFinancials(context.Context, string) ([]models.Manual
 func (s *stubRepo) SaveManualFinancials(context.Context, models.ManualFinancials) error {
 	s.writes++
 	return nil
+}
+func (s *stubRepo) SaveManualDividends(context.Context, models.ManualFinancials) error {
+	s.writes++
+	return nil
+}
+func (s *stubRepo) PendingDigestEvents(context.Context) ([]models.DigestEvent, error) {
+	return nil, nil
+}
+func (s *stubRepo) PortfolioBands(context.Context) (map[string]string, error) {
+	return nil, nil
 }
 func (s *stubRepo) DeleteManualFinancials(context.Context, string, int) error { s.writes++; return nil }
 func (s *stubRepo) SaveQuarterData(context.Context, models.QuarterData) error {

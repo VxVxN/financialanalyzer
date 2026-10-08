@@ -62,6 +62,10 @@ func TestStartFetch(t *testing.T) {
 	if len(j.fetches) != 1 || j.fetches[0].Tickers != "NLMK,OZON:retail" || !j.fetches[0].QuotesOnly || !j.fetches[0].Force {
 		t.Errorf("req = %+v", j.fetches)
 	}
+	rec = do(t, newJobsServer(j), http.MethodPost, "/api/fetch", `{"backfill":true}`)
+	if rec.Code != http.StatusAccepted || len(j.fetches) != 2 || !j.fetches[1].Backfill || j.fetches[1].Force {
+		t.Errorf("backfill: %d %+v", rec.Code, j.fetches)
+	}
 
 	rec = do(t, newJobsServer(j), http.MethodPost, "/api/fetch", `{"tickers_file":"/etc/passwd"}`)
 	if rec.Code != http.StatusBadRequest {

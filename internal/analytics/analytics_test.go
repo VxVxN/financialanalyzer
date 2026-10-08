@@ -346,8 +346,8 @@ func TestValuationMetrics(t *testing.T) {
 	if !approx(snap.PB, 3, 1e-9) {
 		t.Errorf("snapshot P/B = %v, want 3 (carried from 2024-Q4)", snap.PB)
 	}
-	if snap.DivYield != 0 {
-		t.Errorf("snapshot dividend yield = %v, want 0 (no payout in 2024 is a real zero)", snap.DivYield)
+	if snap.DivYield != 0 || snap.DividendsMissing {
+		t.Errorf("snapshot dividend yield = %v missing = %v, want 0 and entered", snap.DivYield, snap.DividendsMissing)
 	}
 
 	noEquity := []models.QuarterData{{Year: 2024, Quarter: "Q4", Company: "Y", Capitalization: f(100), Equity: f(0)}}
@@ -364,8 +364,12 @@ func TestValuationMetrics(t *testing.T) {
 func TestValuationEdgeCases(t *testing.T) {
 	f := models.Float
 	snap := BuildSnapshot(nil)
-	if !math.IsNaN(snap.PB) || !math.IsNaN(snap.DivYield) || !math.IsNaN(snap.PE) {
-		t.Errorf("empty history: PB=%v DivYield=%v PE=%v, want NaN", snap.PB, snap.DivYield, snap.PE)
+	if !math.IsNaN(snap.PB) || !math.IsNaN(snap.DivYield) || !math.IsNaN(snap.PE) || !snap.DividendsMissing {
+		t.Errorf("empty history: PB=%v DivYield=%v PE=%v missing=%v", snap.PB, snap.DivYield, snap.PE, snap.DividendsMissing)
+	}
+	bare := BuildSnapshot([]models.QuarterData{{Year: 2024, Quarter: "Q4", Company: "Y", Capitalization: f(100), NetProfit: f(10)}})
+	if !bare.DividendsMissing || !math.IsNaN(bare.DivYield) {
+		t.Errorf("no dividends: missing=%v yield=%v", bare.DividendsMissing, bare.DivYield)
 	}
 
 	// Bank-style: latest row is Q1 with profit only; valuation comes from Q4

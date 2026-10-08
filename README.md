@@ -176,22 +176,33 @@ disables a job). On startup, if a job has no completed run today (Moscow), it
 is caught up after 30 s — including when the process starts before the slot.
 Runs are sequential; overlapping runs wait on a Postgres advisory lock. With
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, a failed or partial run sends a
-message to that chat.
+message to that chat. On Monday, after the quotes job, the same chat gets a
+note: companies cheap against their own history and their sector, portfolio
+names whose P/E entered the outer quartile of their ten-year band since the
+previous note, quotes older than 30 days, capitalization jumps of 2× or more,
+and IFRS years the pull wrote that were not in the manual table yet.
 
-Dividends have no free exchange API, so they are entered with the annual IFRS
-figures — on the company card or in the batch on `/updates`.
+Dividends have no free exchange API. They are entered on the company card, in
+the annual IFRS batch, or in a dividends-only file (`компания;год;дивиденды`)
+on `/updates`, which sets that column and leaves the other IFRS figures alone.
+Until a company has a dividends figure, its card says so next to the empty yield.
 
 Historical market caps undo later share splits (MOEX's split list plus the
 bundled `share_splits.txt` for splits MOEX omits); the fetcher warns when a cap
-jumps more than 4× year over year so a missing split can be added.
+jumps by 2× or more year over year, and that year is marked on the
+capitalization chart, so a missing split, an extra issue or a buyback can be
+seen.
 
 The primary-source fetcher reports **annual, unconsolidated RSBU** figures, so
 P/E and ROE diverge from IFRS aggregators; banks come from separate CBR form
 102/101 archives (`bank_tickers.txt`; bank revenue is net interest income + fee
 income), and EBITDA is left empty; profit from sales (line 2200) stands in for
 EBIT in EV/EBIT. Cash, operating cash flow and capex (lines 1250, 4100, 4221)
-feed net debt, EV and FCF; rows fetched before these columns existed get them
-with `force` on `/updates`. See package docs for details.
+feed net debt, EV and FCF. Rows fetched before these columns existed stay
+empty until a run with `force`, or until «Дозаполнить пустые колонки» on
+`/updates` (`backfill` on `POST /api/fetch`), which re-downloads only the years
+where equity, debt, cash or the cash-flow lines are still empty. See package
+docs for details.
 
 ## Configuration
 

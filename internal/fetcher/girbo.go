@@ -25,7 +25,7 @@ type fetchResult struct {
 
 // fetchAll runs the ticker specs through a pool of workers, each with its own
 // rate-limited clients, and returns the per-ticker tally.
-func fetchAll(ctx context.Context, repo *database.Repository, specs []tickerSpec, concurrency int, force bool, logger *slog.Logger) (out pipelineResult) {
+func fetchAll(ctx context.Context, repo *database.Repository, specs []tickerSpec, concurrency int, force, backfill bool, logger *slog.Logger) (out pipelineResult) {
 	jobs := make(chan tickerSpec)
 	results := make(chan fetchResult)
 
@@ -39,7 +39,7 @@ func fetchAll(ctx context.Context, repo *database.Repository, specs []tickerSpec
 			bo := girbo.NewClient()
 			mx := newMoexClient(logger)
 			for spec := range jobs {
-				results <- fetchOne(ctx, repo, bo, mx, spec, force, logger)
+				results <- fetchOne(ctx, repo, bo, mx, spec, force, backfill, logger)
 			}
 		}()
 	}
@@ -81,10 +81,10 @@ func fetchAll(ctx context.Context, repo *database.Repository, specs []tickerSpec
 }
 
 // fetchOne fetches and saves one ticker, returning its outcome.
-func fetchOne(ctx context.Context, repo *database.Repository, bo *girbo.Client, mx *moex.Client, spec tickerSpec, force bool, logger *slog.Logger) fetchResult {
+func fetchOne(ctx context.Context, repo *database.Repository, bo *girbo.Client, mx *moex.Client, spec tickerSpec, force, backfill bool, logger *slog.Logger) fetchResult {
 	res := fetchResult{ticker: spec.Ticker, category: spec.Category}
 
-	rows, listed, err := fetchTicker(ctx, repo, bo, mx, spec, force, logger)
+	rows, listed, err := fetchTicker(ctx, repo, bo, mx, spec, force, backfill, logger)
 	var partial *girbo.PartialError
 	if err != nil && !errors.As(err, &partial) {
 		res.outcome, res.err = outcomeFailed, err
@@ -110,17 +110,23 @@ func fetchOne(ctx context.Context, repo *database.Repository, bo *girbo.Client, 
 
 // fetchTicker combines one company's annual RSBU reports with year-end market
 // caps into Q4 QuarterData rows, computing P/E and ROE. Years already stored
-// for the company are not even downloaded unless force; listed counts the
-// years ГИР БО has for the company (new or already stored), so the caller can
-// tell "nothing new" from "no data at all" — stored CSV rows alone do not make
-// a company known to ГИР БО. A *girbo.PartialError comes with the rows that
-// did parse.
-func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Client, mx *moex.Client, spec tickerSpec, force bool, logger *slog.Logger) (rows []models.QuarterData, listed int, err error) {
+// for the company are not even downloaded unless force. backfill (and not
+// force) re-downloads a stored RSBU year whose equity, debt, cash or cash-flow
+// columns are still NULL, and still skips a complete year and a CSV year.
+// listed counts the years ГИР БО has for the company (new or already stored),
+// so the caller can tell "nothing new" from "no data at all" — stored CSV rows
+// alone do not make a company known to ГИР БО. A *girbo.PartialError comes
+// with the rows that did parse.
+func fetchTicker(ctx context.Context, repo *database.Repository, bo *girbo.Client, mx *moex.Client, spec tickerSpec, force, backfill bool, logger *slog.Logger) (rows []models.QuarterData, listed int, err error) {
 	company := strings.ToUpper(spec.Ticker)
 
 	var existing map[string]struct{}
 	if !force {
-		existing, err = repo.ExistingPeriods(ctx, company)
+		if backfill {
+			existing, err = repo.CompletePeriods(ctx, company)
+		} else {
+			existing, err = repo.ExistingPeriods(ctx, company)
+		}
 		if err != nil {
 			return nil, 0, fmt.Errorf("existing periods: %w", err)
 		}

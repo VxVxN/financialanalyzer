@@ -42,11 +42,36 @@ func TestImportManual(t *testing.T) {
 	}
 }
 
+func TestImportDividends(t *testing.T) {
+	repo := &fakeRepo{companies: []string{"X5"}}
+	c := NewController(repo, slog.New(slog.DiscardHandler))
+	c.now = func() time.Time { return testNow }
+	r := chi.NewRouter()
+	r.Post("/api/import-dividends", c.ImportDividends)
+
+	rec := postFile(t, r, "/api/import-dividends", "div.csv", "компания;год;дивиденды\nX5;2024;12,5\n")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if len(repo.savedManual) != 1 || repo.savedManual[0].Revenue != nil || *repo.savedManual[0].Dividends != 12.5 {
+		t.Fatalf("saved = %+v", repo.savedManual)
+	}
+	rec = postFile(t, r, "/api/import-dividends", "div.csv", "компания;год;выручка;дивиденды\nX5;2024;1;1\n")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("IFRS columns: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func postManualFile(t *testing.T, h http.Handler, csv string) *httptest.ResponseRecorder {
+	t.Helper()
+	return postFile(t, h, "/api/import-manual", "ifrs.csv", csv)
+}
+
+func postFile(t *testing.T, h http.Handler, path, name, csv string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	fw, err := w.CreateFormFile("file", "ifrs.csv")
+	fw, err := w.CreateFormFile("file", name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +79,7 @@ func postManualFile(t *testing.T, h http.Handler, csv string) *httptest.Response
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/import-manual", &buf)
+	req := httptest.NewRequest(http.MethodPost, path, &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

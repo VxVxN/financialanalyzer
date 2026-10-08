@@ -8,11 +8,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/fetcher"
 	"github.com/VxVxN/financialanalyzer/internal/ifrs"
+	"github.com/VxVxN/financialanalyzer/internal/models"
 	"github.com/VxVxN/financialanalyzer/internal/notify"
 )
 
@@ -114,11 +117,33 @@ func (o *Ops) StartIFRS(companies []string, years []int) error {
 			o.ifrsStatus = st
 			o.mu.Unlock()
 		})
+		o.recordNewIFRSYears(res)
 		o.mu.Lock()
 		o.ifrsStatus = res.Status()
 		o.mu.Unlock()
 	}()
 	return nil
+}
+
+// recordNewIFRSYears queues years the pull created for the next Monday note.
+// A field filled on a year that already had a manual row is not queued.
+func (o *Ops) recordNewIFRSYears(res ifrs.Result) {
+	if o.repo == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(o.ctx), 15*time.Second)
+	defer cancel()
+	for _, f := range res.Fills {
+		if !f.NewYear {
+			continue
+		}
+		err := o.repo.AddDigestEvent(ctx, models.DigestEvent{
+			Kind: models.DigestIFRSYear, Company: f.Company, Detail: strconv.Itoa(f.Year),
+		})
+		if err != nil {
+			o.logger.Warn("IFRS year not queued for the Monday note", "company", f.Company, "year", f.Year, "error", err)
+		}
+	}
 }
 
 // IFRSStatus is the latest automatic IFRS run, for the updates page to poll.

@@ -34,7 +34,7 @@ func openTestDB(t *testing.T) *database.Repository {
 	if err := database.RunMigrations(db, financialanalyzer.MigrationsFS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs, manual_financials, cheap_list_sends`); err != nil {
+	if _, err := db.Exec(`TRUNCATE company_financials, company_notes, market_quotes, fetch_runs, manual_financials, cheap_list_sends, digest_events, portfolio_bands`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return database.NewRepository(db)
@@ -469,6 +469,127 @@ func TestManualFinancials(t *testing.T) {
 	}
 	if list, _ := repo.GetManualFinancials(ctx, "X5"); len(list) != 0 {
 		t.Errorf("manual entries left after DeleteCompany: %+v", list)
+	}
+}
+
+func TestSaveManualDividendsKeepsIFRS(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	f := models.Float
+	if err := repo.SaveQuarterData(ctx, models.QuarterData{Year: 2024, Quarter: "Q4", Company: "X5",
+		Source: models.SourceRSBU, Revenue: f(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveManualFinancials(ctx, models.ManualFinancials{Company: "X5", Year: 2024, Revenue: f(4000), NetProfit: f(100)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveManualDividends(ctx, models.ManualFinancials{Company: "X5", Year: 2024, Dividends: f(80)}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.GetManualFinancials(ctx, "X5")
+	if err != nil || len(list) != 1 || list[0].Revenue == nil || *list[0].Revenue != 4000 || list[0].Dividends == nil || *list[0].Dividends != 80 {
+		t.Fatalf("manual = %+v, %v", list, err)
+	}
+	if err := repo.SaveManualDividends(ctx, models.ManualFinancials{Company: "NOPE", Year: 2024, Dividends: f(1)}); !errors.Is(err, database.ErrCompanyNotFound) {
+		t.Errorf("unknown company: %v", err)
+	}
+	// A year with no manual row becomes a dividends-only entry.
+	if err := repo.SaveManualDividends(ctx, models.ManualFinancials{Company: "X5", Year: 2023, Dividends: f(0)}); err != nil {
+		t.Fatal(err)
+	}
+	list, err = repo.GetManualFinancials(ctx, "X5")
+	if err != nil || len(list) != 2 {
+		t.Fatalf("years = %+v, %v", list, err)
+	}
+}
+
+func TestCompletePeriods(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	f := models.Float
+	save := func(q models.QuarterData) {
+		t.Helper()
+		if err := repo.SaveQuarterData(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(models.QuarterData{Year: 2024, Quarter: "Q4", Company: "GAP", Source: models.SourceRSBU, Revenue: f(10), Equity: f(1)})
+	save(models.QuarterData{Year: 2023, Quarter: "Q4", Company: "GAP", Source: models.SourceRSBU,
+		Equity: f(1), Debt: f(0), Cash: f(0), OperatingProfit: f(1), OperatingCashFlow: f(1), Capex: f(0)})
+	save(models.QuarterData{Year: 2024, Quarter: "Q4", Company: "CSV", Source: models.SourceCSV, Revenue: f(10)})
+	save(models.QuarterData{Year: 2024, Quarter: "Q4", Company: "BANK", Source: models.SourceCBR102, NetProfit: f(1)})
+	save(models.QuarterData{Year: 2024, Quarter: "Q3", Company: "BANK", Source: models.SourceCBR102, NetProfit: f(1), Equity: f(5)})
+
+	gap, err := repo.CompletePeriods(ctx, "GAP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gap["2024-Q4"]; ok {
+		t.Error("an RSBU year missing cash-flow columns must be re-fetched")
+	}
+	if _, ok := gap["2023-Q4"]; !ok {
+		t.Error("a complete RSBU year must be skipped")
+	}
+	csv, err := repo.CompletePeriods(ctx, "CSV")
+	if err != nil || len(csv) != 1 {
+		t.Fatalf("csv periods = %v, %v", csv, err)
+	}
+	bank, err := repo.CompletePeriods(ctx, "BANK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := bank["2024-Q4"]; ok {
+		t.Error("a bank quarter without equity must be re-fetched")
+	}
+	if _, ok := bank["2024-Q3"]; !ok {
+		t.Error("a bank quarter with equity must be skipped")
+	}
+}
+
+func TestDigestEvents(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	if err := repo.AddDigestEvent(ctx, models.DigestEvent{Kind: models.DigestIFRSYear, Company: "X5", Detail: "2024"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddDigestEvent(ctx, models.DigestEvent{Kind: models.DigestIFRSYear, Company: "BELU", Detail: "2023"}); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := repo.PendingDigestEvents(ctx)
+	if err != nil || len(ev) != 2 || ev[0].Company != "X5" || ev[1].Detail != "2023" {
+		t.Fatalf("events = %+v, %v", ev, err)
+	}
+	if err := repo.DeleteDigestEvents(ctx, []int64{ev[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	ev, err = repo.PendingDigestEvents(ctx)
+	if err != nil || len(ev) != 1 || ev[0].Company != "BELU" {
+		t.Fatalf("after delete = %+v, %v", ev, err)
+	}
+	if err := repo.DeleteDigestEvents(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPortfolioBands(t *testing.T) {
+	repo := openTestDB(t)
+	ctx := context.Background()
+	got, err := repo.PortfolioBands(ctx)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty bands = %v, %v", got, err)
+	}
+	if err := repo.SavePortfolioBands(ctx, map[string]string{"X5": "low", "T": "mid"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SavePortfolioBands(ctx, map[string]string{"X5": "high"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SavePortfolioBands(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.PortfolioBands(ctx)
+	if err != nil || got["X5"] != "high" || got["T"] != "mid" || len(got) != 2 {
+		t.Fatalf("bands = %v, %v", got, err)
 	}
 }
 

@@ -81,6 +81,12 @@ type Request struct {
 	All bool
 	// Force re-fetches periods already stored instead of skipping them.
 	Force bool
+	// Backfill re-fetches a stored period only when a column added after the
+	// row was written is still NULL: equity, debt, cash, operating profit,
+	// operating cash flow and capex for an RSBU year, equity for a bank
+	// quarter. Complete periods and CSV rows are left alone, and years that
+	// are not stored yet are still fetched. Force wins over Backfill.
+	Backfill bool
 	// QuotesOnly refreshes only the latest exchange closes.
 	QuotesOnly bool
 	// Concurrency is the number of ГИР БО tickers fetched in parallel
@@ -126,6 +132,8 @@ func (r Request) Scope() string {
 	}
 	if r.Force {
 		parts = append(parts, "force")
+	} else if r.Backfill {
+		parts = append(parts, "backfill")
 	}
 	return strings.Join(parts, " ")
 }
@@ -215,8 +223,8 @@ func Run(ctx context.Context, repo *database.Repository, req Request, logger *sl
 		if concurrency > len(specs) {
 			concurrency = len(specs)
 		}
-		logger.Info("Fetching companies (ГИР БО)", "tickers", len(specs), "concurrency", concurrency, "force", req.Force)
-		sum.add(fetchAll(ctx, repo, specs, concurrency, req.Force, logger))
+		logger.Info("Fetching companies (ГИР БО)", "tickers", len(specs), "concurrency", concurrency, "force", req.Force, "backfill", req.Backfill && !req.Force)
+		sum.add(fetchAll(ctx, repo, specs, concurrency, req.Force, req.Backfill, logger))
 	}
 
 	if len(bankSpecs) > 0 && !req.QuotesOnly && ctx.Err() == nil {
@@ -225,8 +233,8 @@ func Run(ctx context.Context, repo *database.Repository, req Request, logger *sl
 			fromYear = defaultBankFromYear
 		}
 		toYear := time.Now().Year()
-		logger.Info("Fetching banks (ЦБ формы 102/101)", "tickers", len(bankSpecs), "years", fmt.Sprintf("%d-%d", fromYear, toYear), "force", req.Force)
-		sum.add(fetchBanks(ctx, repo, bankSpecs, fromYear, toYear, req.Force, logger))
+		logger.Info("Fetching banks (ЦБ формы 102/101)", "tickers", len(bankSpecs), "years", fmt.Sprintf("%d-%d", fromYear, toYear), "force", req.Force, "backfill", req.Backfill && !req.Force)
+		sum.add(fetchBanks(ctx, repo, bankSpecs, fromYear, toYear, req.Force, req.Backfill, logger))
 	}
 
 	// Latest prices for current valuation: cheap (two ISS calls per ticker),

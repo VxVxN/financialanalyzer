@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/models"
@@ -46,14 +47,48 @@ func (controller *Controller) buildScreener(ctx context.Context) ([]analytics.Sc
 	return rows, nil
 }
 
-// CheapList is the Monday operator note: comparable companies cheap against
-// both their own P/E history and their sector.
-func (controller *Controller) CheapList(ctx context.Context) (string, error) {
+// CheapList is the Monday operator note. eventIDs are the queued IFRS years
+// included in the text; the caller deletes them after the note is delivered.
+// bands is the P/E bucket to remember for each portfolio name, so the next
+// note mentions a quartile only when the name enters it.
+func (controller *Controller) CheapList(ctx context.Context) (msg string, eventIDs []int64, bands map[string]string, err error) {
 	rows, err := controller.buildScreener(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
-	return analytics.CheapListMessage(rows), nil
+	companies := make([]string, len(rows))
+	for i, r := range rows {
+		companies[i] = r.Company
+	}
+	histories, err := controller.repo.GetCompaniesHistory(ctx, companies)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	quotes, err := controller.repo.GetMarketQuotes(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	events, err := controller.repo.PendingDigestEvents(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	prev, err := controller.repo.PortfolioBands(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	var years []analytics.NoteYear
+	for _, ev := range events {
+		if ev.Kind != models.DigestIFRSYear {
+			continue
+		}
+		year, convErr := strconv.Atoi(ev.Detail)
+		if convErr != nil {
+			continue
+		}
+		years = append(years, analytics.NoteYear{Company: ev.Company, Year: year})
+		eventIDs = append(eventIDs, ev.ID)
+	}
+	return analytics.MondayMessage(rows, analytics.StaleQuotes(quotes, controller.now()), analytics.CollectJumps(histories), years, prev), eventIDs, analytics.NextPortfolioBands(rows), nil
 }
 
 // ScreenerAPI returns the screener rows as JSON (null = no data).

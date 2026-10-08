@@ -82,13 +82,14 @@ var bankQuarters = []string{"Q1", "Q2", "Q3", "Q4"}
 // bank, adds each quarter-end's balance-sheet equity from form 101, and
 // attaches year-end market cap + annual P/E + ROE to the Q4 (full-year) row.
 // Periods already stored are skipped, and whole years already complete are not
-// even downloaded, unless force is set. Outcomes (see classify): a download
+// even downloaded, unless force is set. backfill skips a quarter only once its
+// equity is filled. Outcomes (see classify): a download
 // error other than "not published yet" fails every bank (all of them miss that
 // period), a save error fails its bank, and a bank with no new rows is up to
 // date when it appears in this run's form 102 archives or nothing needed
 // downloading — otherwise it is failed (e.g. a wrong REGN or a revoked
 // license).
-func fetchBanks(ctx context.Context, repo *database.Repository, specs []bankSpec, fromYear, toYear int, force bool, logger *slog.Logger) (out pipelineResult) {
+func fetchBanks(ctx context.Context, repo *database.Repository, specs []bankSpec, fromYear, toYear int, force, backfill bool, logger *slog.Logger) (out pipelineResult) {
 	cb := cbr.NewClient()
 	mx := newMoexClient(logger)
 	capAt := func(ticker string, year int) *float64 {
@@ -102,7 +103,15 @@ func fetchBanks(ctx context.Context, repo *database.Repository, specs []bankSpec
 	existing := make(map[string]map[string]struct{}, len(specs))
 	if !force {
 		for _, s := range specs {
-			set, err := repo.ExistingPeriods(ctx, s.Ticker)
+			var set map[string]struct{}
+			var err error
+			// A backfill treats a quarter as stored only once equity is filled,
+			// so a row written before that column existed is fetched again.
+			if backfill {
+				set, err = repo.CompletePeriods(ctx, s.Ticker)
+			} else {
+				set, err = repo.ExistingPeriods(ctx, s.Ticker)
+			}
 			if err != nil {
 				logger.Warn("Existing periods lookup failed", "ticker", s.Ticker, "error", err)
 			}

@@ -137,8 +137,10 @@ func run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 // newScheduler builds the data-refresh scheduler from the config, or returns
 // nil when it is disabled. A malformed schedule is a startup error.
-// The Monday cheap-list note goes out with the quotes job and, if that
-// Monday was missed, once more after startup catch-up.
+// The Monday note goes out with the quotes job and, if that Monday was
+// missed, once more after startup catch-up. Besides the cheap list it names
+// portfolio P/E in the outer quartile of its decade, quotes older than 30
+// days, capitalization jumps, and IFRS years written since the previous note.
 func newScheduler(cfg *config.Config, app *application.Application, controller *handlers.Controller, logger *slog.Logger) (*scheduler.Scheduler, error) {
 	if !cfg.SchedulerEnabled {
 		return nil, nil
@@ -223,7 +225,7 @@ func sendCheapList(ctx context.Context, app *application.Application, controller
 	}
 	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	msg, err := controller.CheapList(nctx)
+	msg, eventIDs, bands, err := controller.CheapList(nctx)
 	if err != nil {
 		logger.Warn("Cheap-list not built", "error", err)
 		return
@@ -234,6 +236,13 @@ func sendCheapList(ctx context.Context, app *application.Application, controller
 	}
 	if err := app.Repo.MarkCheapListSent(nctx, monday); err != nil {
 		logger.Warn("Cheap-list send not recorded; it may be sent again", "error", err)
+		return
+	}
+	if err := app.Repo.SavePortfolioBands(nctx, bands); err != nil {
+		logger.Warn("Portfolio P/E bands not recorded; the quartile may be repeated", "error", err)
+	}
+	if err := app.Repo.DeleteDigestEvents(nctx, eventIDs); err != nil {
+		logger.Warn("Monday-note events not cleared; they may be sent again", "error", err)
 	}
 }
 
@@ -309,6 +318,7 @@ func newRouter(cfg *config.Config, controller *handlers.Controller) http.Handler
 			r.Use(handlers.RequireBasicAuth(cfg.AuthUser, cfg.AuthPassword))
 		}
 		r.Post("/api/import-manual", controller.ImportManual)
+		r.Post("/api/import-dividends", controller.ImportDividends)
 	})
 	return r
 }

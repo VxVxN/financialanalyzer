@@ -533,7 +533,7 @@ func renderCurrent(w http.ResponseWriter, c analytics.Current) {
 		{name: "Капитализация (сейчас)", value: fmtMoney(c.Capitalization)},
 		{name: "P/E (сейчас)", value: fmtRatio(c.PE), sub: sub("прибыль LTM на", c.EarningsLabel)},
 		{name: "P/B (сейчас)", value: fmtRatio(c.PB), sub: sub("капитал на", c.EquityLabel)},
-		{name: "Див. доходность (сейчас)", value: fmtPct(c.DivYield), sub: sub("дивиденды за", c.DividendsLabel)},
+		{name: "Див. доходность (сейчас)", value: fmtPct(c.DivYield), sub: yieldSub("дивиденды за", c.DividendsLabel, c.DividendsMissing)},
 		{name: "EV/EBIT (сейчас)", value: fmtRatio(c.EVEBIT), sub: sub("EBIT LTM на", c.EBITLabel)},
 		{name: "P/FCF (сейчас)", value: fmtRatio(c.PFCF), sub: sub("FCF LTM на", c.FCFLabel)},
 	})
@@ -546,6 +546,19 @@ func periodNote(s analytics.Snapshot, label string) string {
 		return ""
 	}
 	return "на " + label
+}
+
+// yieldSub is the line under a dividend-yield figure. A yield with no
+// dividends anywhere in the history says they were not entered.
+func yieldSub(prefix, label string, missing bool) string {
+	base := label
+	if prefix != "" && label != "" {
+		base = prefix + " " + label
+	}
+	if !missing {
+		return base
+	}
+	return joinSub(base, "дивиденды не введены")
 }
 
 // joinSub joins non-empty KPI sub-lines.
@@ -570,7 +583,7 @@ func renderKPIs(w http.ResponseWriter, s analytics.Snapshot) {
 			{name: "Капитализация", value: fmtMoney(s.Capitalization), sub: periodNote(s, s.CapLabel)},
 			{name: "P/E", value: fmtRatio(s.PE), sub: joinSub(peComment(s.PE), periodNote(s, s.PELabel))},
 			{name: "P/B", value: fmtRatio(s.PB), sub: s.PBLabel},
-			{name: "Див. доходность", value: fmtPct(s.DivYield), sub: s.DivYieldLabel},
+			{name: "Див. доходность", value: fmtPct(s.DivYield), sub: yieldSub("", s.DivYieldLabel, s.DividendsMissing)},
 			{name: "EV/EBIT", value: fmtRatio(s.EVEBIT), sub: s.EVEBITLabel},
 			{name: "P/FCF", value: fmtRatio(s.PFCF), sub: s.PFCFLabel},
 		}},

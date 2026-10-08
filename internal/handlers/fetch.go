@@ -19,6 +19,7 @@ type fetchRequest struct {
 	Banks        string `json:"banks"`
 	All          bool   `json:"all"`
 	Force        bool   `json:"force"`
+	Backfill     bool   `json:"backfill"`
 	QuotesOnly   bool   `json:"quotes_only"`
 	Concurrency  int    `json:"concurrency"`
 	BankFromYear int    `json:"bank_from_year"`
@@ -48,6 +49,7 @@ func (controller *Controller) StartFetch(w http.ResponseWriter, r *http.Request)
 		Banks:        normalizeList(body.Banks),
 		All:          body.All,
 		Force:        body.Force,
+		Backfill:     body.Backfill,
 		QuotesOnly:   body.QuotesOnly,
 		Concurrency:  body.Concurrency,
 		BankFromYear: body.BankFromYear,

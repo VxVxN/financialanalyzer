@@ -764,24 +764,27 @@ type Snapshot struct {
 	PBLabel                                string  // period PB was taken from ("" when PB is NaN)
 	DivYield                               float64 // dividends / market cap, %, latest period that has both
 	DivYieldLabel                          string  // period DivYield was taken from
-	NetDebt                                float64 // debt - cash, latest period that has both
-	NetDebtLabel                           string
-	EVEBIT                                 float64 // (cap + net debt) / TTM operating profit, latest period that has it
-	EVEBITLabel                            string
-	FCF                                    float64 // TTM operating cash flow - TTM capex
-	FCFLabel                               string  // period FCF was taken from
-	PFCF                                   float64 // cap / TTM FCF, latest period that has it
-	PFCFLabel                              string
-	OperatingMargin                        float64 // TTM operating profit / TTM revenue
-	NetMargin                              float64 // TTM net_profit / TTM revenue
-	EBITDAMargin                           float64 // TTM
-	DebtEBITDA                             float64 // last debt / TTM ebitda
-	RevenueYoY                             float64
-	NetProfitYoY                           float64
-	RevenueCAGR3Y                          float64
-	NetProfitCAGR3                         float64
-	RevenueCAGR5Y                          float64
-	NetProfitCAGR5                         float64
+	// DividendsMissing is set when no period reports dividends, so an empty
+	// yield means they were not entered rather than a real zero payout.
+	DividendsMissing bool
+	NetDebt          float64 // debt - cash, latest period that has both
+	NetDebtLabel     string
+	EVEBIT           float64 // (cap + net debt) / TTM operating profit, latest period that has it
+	EVEBITLabel      string
+	FCF              float64 // TTM operating cash flow - TTM capex
+	FCFLabel         string  // period FCF was taken from
+	PFCF             float64 // cap / TTM FCF, latest period that has it
+	PFCFLabel        string
+	OperatingMargin  float64 // TTM operating profit / TTM revenue
+	NetMargin        float64 // TTM net_profit / TTM revenue
+	EBITDAMargin     float64 // TTM
+	DebtEBITDA       float64 // last debt / TTM ebitda
+	RevenueYoY       float64
+	NetProfitYoY     float64
+	RevenueCAGR3Y    float64
+	NetProfitCAGR3   float64
+	RevenueCAGR5Y    float64
+	NetProfitCAGR5   float64
 	// Score is a 0-100 heuristic. Bank selects the bank scale (income growth,
 	// ROE, P/B). ScoreParts is how many of that scale's components had data;
 	// missing ones are left out and the rest are rescaled, so a high score
@@ -831,6 +834,7 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 		OperatingMargin: math.NaN(),
 	}
 	if len(hist) == 0 {
+		snap.DividendsMissing = true
 		return snap
 	}
 	last := hist[len(hist)-1]
@@ -865,6 +869,9 @@ func BuildSnapshot(history []models.QuarterData) Snapshot {
 	}
 	if p, ok := LatestValid(DerivedSeries(hist, "div_yield", PeriodQuarter)); ok {
 		snap.DivYield, snap.DivYieldLabel, snap.DivYieldPoint = p.Value, p.Label, p
+	}
+	if _, ok := LatestValid(QuarterlySeries(hist, "dividends")); !ok {
+		snap.DividendsMissing = true
 	}
 	if p, ok := LatestValid(DerivedSeries(hist, "net_debt", PeriodQuarter)); ok {
 		snap.NetDebt, snap.NetDebtLabel = p.Value, p.Label
@@ -1081,10 +1088,12 @@ type Current struct {
 	EquityLabel    string
 	DivYield       float64 // latest year's dividends / cap, %
 	DividendsLabel string
-	EVEBIT         float64 // (cap + latest net debt) / TTM operating profit (NaN for a loss)
-	EBITLabel      string
-	PFCF           float64 // cap / TTM free cash flow (NaN when FCF is not positive)
-	FCFLabel       string
+	// DividendsMissing is set when no period reports dividends.
+	DividendsMissing bool
+	EVEBIT           float64 // (cap + latest net debt) / TTM operating profit (NaN for a loss)
+	EBITLabel        string
+	PFCF             float64 // cap / TTM free cash flow (NaN when FCF is not positive)
+	FCFLabel         string
 	// Stale is set when a fundamental exists but ended more than
 	// MaxFundamentalAge before the quote; its multiple is then NaN and its
 	// label says "too old" rather than silently pairing today's price with
@@ -1157,6 +1166,8 @@ func BuildCurrent(history []models.QuarterData, q models.MarketQuote) Current {
 		if fresh(p, &cur.DividendsLabel) {
 			cur.DivYield, cur.DividendsPoint = p.Value/q.Capitalization*100, p
 		}
+	} else {
+		cur.DividendsMissing = true
 	}
 	// EV/EBIT and P/FCF report a too-old input in their own label rather than
 	// through Stale, which keeps meaning "P/E, P/B or yield withheld" — cash

@@ -84,6 +84,20 @@ func TestRunFillsGapsOnly(t *testing.T) {
 	if got.NetProfit == nil || *got.NetProfit != 10 {
 		t.Errorf("net profit = %v, want 10", value(got.NetProfit))
 	}
+	if res.Fills[0].NewYear {
+		t.Error("filling a field on a stored year must not count as a new year")
+	}
+}
+
+func TestRunMarksNewYear(t *testing.T) {
+	store := &memStore{companies: []string{"X5"}}
+	src := memSource{text: map[string]string{
+		"X5:2024": "МЛН РУБ.\nВЫРУЧКА\n1000\n",
+	}}
+	res := Run(context.Background(), store, src, nil, []int{2024}, nil, nil)
+	if res.Saved != 1 || len(res.Fills) != 1 || !res.Fills[0].NewYear || res.Fills[0].Year != 2024 {
+		t.Fatalf("result = %+v", res)
+	}
 }
 
 func TestRunDownloadError(t *testing.T) {

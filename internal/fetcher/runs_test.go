@@ -277,6 +277,8 @@ func TestRequestScope(t *testing.T) {
 		{Request{All: true}, KindFinancials, true, "registry"},
 		{Request{Tickers: "OZON,X5", Banks: "T"}, KindFinancials, false, "tickers=OZON,X5 banks=T"},
 		{Request{TickersFile: "/home/me/l.txt", Force: true}, KindFinancials, false, "file=l.txt force"},
+		{Request{Backfill: true}, KindFinancials, true, "stored backfill"},
+		{Request{Force: true, Backfill: true}, KindFinancials, true, "stored force"},
 	}
 	for _, tt := range tests {
 		if tt.req.Kind() != tt.kind || tt.req.FullScope() != tt.full || tt.req.Scope() != tt.scope {

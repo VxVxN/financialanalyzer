@@ -45,6 +45,9 @@ type fakeRepo struct {
 	savedCompany string
 	savedNote    string
 	deleted      []string
+
+	events []models.DigestEvent
+	bands  map[string]string
 }
 
 func (f *fakeRepo) Ping(ctx context.Context) error { return f.pingErr }
@@ -94,6 +97,12 @@ func (f *fakeRepo) RecentFetchRuns(_ context.Context, limit int) ([]models.Fetch
 func (f *fakeRepo) GetManualFinancials(_ context.Context, company string) ([]models.ManualFinancials, error) {
 	return f.manual, nil
 }
+func (f *fakeRepo) PendingDigestEvents(context.Context) ([]models.DigestEvent, error) {
+	return f.events, nil
+}
+func (f *fakeRepo) PortfolioBands(context.Context) (map[string]string, error) {
+	return f.bands, nil
+}
 func (f *fakeRepo) SaveManualFinancials(_ context.Context, m models.ManualFinancials) error {
 	known := false
 	for _, c := range f.companies {
@@ -104,6 +113,9 @@ func (f *fakeRepo) SaveManualFinancials(_ context.Context, m models.ManualFinanc
 	}
 	f.savedManual = append(f.savedManual, m)
 	return nil
+}
+func (f *fakeRepo) SaveManualDividends(_ context.Context, m models.ManualFinancials) error {
+	return f.SaveManualFinancials(context.Background(), m)
 }
 func (f *fakeRepo) DeleteManualFinancials(_ context.Context, company string, year int) error {
 	if f.manualErr != nil {
@@ -416,6 +428,25 @@ func TestChartShowsSourceAndFlags(t *testing.T) {
 	}
 }
 
+func TestCapJumpMarksCapitalizationChart(t *testing.T) {
+	repo := &fakeRepo{history: map[string][]models.QuarterData{
+		"BELU": {
+			{Year: 2023, Quarter: "Q4", Company: "BELU", Capitalization: models.Float(100)},
+			{Year: 2024, Quarter: "Q4", Company: "BELU", Capitalization: models.Float(250)},
+		},
+	}}
+	body := do(t, newTestServer(repo), http.MethodGet, "/chart/capitalization?companies=BELU", "").Body.String()
+	for _, want := range []string{`"triangle"`, "выросла в 2,5 раза", "2023", "скакнула вдвое"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("capitalization chart missing %q", want)
+		}
+	}
+	other := do(t, newTestServer(repo), http.MethodGet, "/chart/revenue?companies=BELU", "").Body.String()
+	if strings.Contains(other, "выросла в 2,5 раза") || strings.Contains(other, "скакнула вдвое") {
+		t.Error("a cap jump must not mark the revenue chart")
+	}
+}
+
 func TestDashboardDataQuality(t *testing.T) {
 	repo := &fakeRepo{companyHist: []models.QuarterData{holdingRow}}
 	rec := do(t, newTestServer(repo), http.MethodGet, "/company/X5", "")
@@ -423,7 +454,7 @@ func TestDashboardDataQuality(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Источник: РСБУ (эмитент)", "Качество данных", "2025-Q4", "чистая прибыль больше выручки", "В портфеле"} {
+	for _, want := range []string{"Источник: РСБУ (эмитент)", "Качество данных", "2025-Q4", "чистая прибыль больше выручки", "В портфеле", "дивиденды не введены"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -495,6 +526,39 @@ func TestPortfolioMark(t *testing.T) {
 	page := do(t, r, http.MethodGet, "/", "").Body.String()
 	if !strings.Contains(page, "Портфель") || !strings.Contains(page, `"portfolio":true`) {
 		t.Error("screener page should offer the portfolio view and mark X5")
+	}
+}
+
+func TestCheapListWiresSignals(t *testing.T) {
+	repo := &fakeRepo{
+		companies: []string{"X5"},
+		history: map[string][]models.QuarterData{
+			"X5": {
+				{Year: 2023, Quarter: "Q4", Company: "X5", Capitalization: models.Float(100)},
+				{Year: 2024, Quarter: "Q4", Company: "X5", Capitalization: models.Float(250)},
+			},
+		},
+		quotes: map[string]models.MarketQuote{
+			"OLD": {Company: "OLD", Capitalization: 10, PriceDate: testNow.Add(-40 * 24 * time.Hour)},
+		},
+		events: []models.DigestEvent{{ID: 7, Kind: models.DigestIFRSYear, Company: "X5", Detail: "2024"}},
+	}
+	c := NewController(repo, slog.New(slog.DiscardHandler))
+	c.now = func() time.Time { return testNow }
+	msg, ids, bands, err := c.CheapList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"OLD —", "X5 — 2023→2024", "X5 — 2024", "МСФО: дописан год"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("note lacks %q\n%s", want, msg)
+		}
+	}
+	if len(ids) != 1 || ids[0] != 7 {
+		t.Errorf("event ids = %v", ids)
+	}
+	if bands["X5"] == "" {
+		t.Errorf("bands = %v, want X5 remembered", bands)
 	}
 }
 
@@ -580,6 +644,15 @@ func TestDashboardCurrentValuation(t *testing.T) {
 	body := do(t, newTestServer(withQuote), http.MethodGet, "/company/SBER", "").Body.String()
 	if !strings.Contains(body, "Текущая оценка · закрытие 2026-09-29") || !strings.Contains(body, "P/E (сейчас)") {
 		t.Error("dashboard with a quote should show the current-valuation block")
+	}
+	if strings.Count(body, "дивиденды не введены") < 2 {
+		t.Error("empty yield should say dividends were not entered, next to the current and the stored figure")
+	}
+	paid := []models.QuarterData{{Year: 2025, Quarter: "Q4", Company: "SBER", Source: models.SourceCBR102,
+		NetProfit: models.Float(1500), Capitalization: models.Float(6000), Dividends: models.Float(0)}}
+	paidBody := do(t, newTestServer(&fakeRepo{companyHist: paid, quotes: withQuote.quotes}), http.MethodGet, "/company/SBER", "").Body.String()
+	if strings.Contains(paidBody, "дивиденды не введены") {
+		t.Error("a reported zero payout must not say dividends were not entered")
 	}
 
 	noQuote := &fakeRepo{companyHist: hist}

@@ -216,24 +216,6 @@ func TestUniqueNames(t *testing.T) {
 	}
 }
 
-func TestCapJumps(t *testing.T) {
-	f := models.Float
-	row := func(y int, c float64) models.QuarterData {
-		return models.QuarterData{Year: y, Quarter: "Q4", Capitalization: f(c)}
-	}
-	// BELU before the split fix: 2023 cap 675.9 -> 2024 64.7 (x0.096).
-	rows := []models.QuarterData{row(2025, 51.6), row(2023, 675.9), row(2024, 64.7), row(2021, 423), row(2022, 350),
-		{Year: 2020, Quarter: "Q4"}}
-	got := capJumps(rows)
-	if len(got) != 1 || got[0].from != 2023 || got[0].to != 2024 || math.Abs(got[0].ratio-64.7/675.9) > 1e-9 {
-		t.Errorf("capJumps = %+v, want one 2023->2024 jump", got)
-	}
-	// A gap year is not "consecutive".
-	if got := capJumps([]models.QuarterData{row(2020, 10), row(2022, 100)}); len(got) != 0 {
-		t.Errorf("gap years flagged: %+v", got)
-	}
-}
-
 func TestUnexplainedShares(t *testing.T) {
 	splits := []moex.Split{{TradeDate: "2024-07-15", Before: 1, After: 10}}
 	// A recorded 1:10 between the two quotes is the whole change.

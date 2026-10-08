@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"time"
 
 	"github.com/VxVxN/financialanalyzer"
+	"github.com/VxVxN/financialanalyzer/internal/analytics"
 	"github.com/VxVxN/financialanalyzer/internal/database"
 	"github.com/VxVxN/financialanalyzer/internal/models"
 	"github.com/VxVxN/financialanalyzer/internal/scraper/moex"
@@ -23,45 +23,6 @@ func uniqueNames(names []string) []string {
 		}
 		seen[n] = struct{}{}
 		out = append(out, n)
-	}
-	return out
-}
-
-// capJumpRatio is the year-over-year market-cap change beyond which a split
-// missing from MOEX's list (and share_splits.txt) is the likely cause.
-// Splits of 1:2-1:4 stay under it; those show up as a share-count change
-// (see unexplainedShares) once the next quote is saved.
-const capJumpRatio = 4.0
-
-type capJump struct {
-	from, to int
-	ratio    float64 // later cap / earlier cap
-}
-
-// capJumps finds consecutive years whose year-end (latest-quarter) market caps
-// differ by more than capJumpRatio in either direction. Splits of 1:2-1:4 and
-// ones masked by a same-year price move go unnoticed.
-func capJumps(rows []models.QuarterData) []capJump {
-	caps := map[int]float64{}
-	var years []int
-	for _, r := range rows {
-		if r.Capitalization != nil && *r.Capitalization > 0 {
-			if _, seen := caps[r.Year]; !seen {
-				years = append(years, r.Year)
-			}
-			caps[r.Year] = *r.Capitalization
-		}
-	}
-	sort.Ints(years)
-	var out []capJump
-	for i := 1; i < len(years); i++ {
-		if years[i] != years[i-1]+1 {
-			continue
-		}
-		ratio := caps[years[i]] / caps[years[i-1]]
-		if ratio > capJumpRatio || ratio < 1/capJumpRatio {
-			out = append(out, capJump{from: years[i-1], to: years[i], ratio: ratio})
-		}
 	}
 	return out
 }
@@ -109,9 +70,9 @@ func warnCapJumps(ctx context.Context, repo *database.Repository, companies []st
 			logger.Warn("Cap-jump check skipped", "ticker", company, "error", err)
 			continue
 		}
-		for _, j := range capJumps(history) {
-			logger.Warn("Market cap jumps between years — possibly an unrecorded split; add it to share_splits.txt",
-				"ticker", company, "from", j.from, "to", j.to, "ratio", fmt.Sprintf("%.1fx", j.ratio))
+		for _, j := range analytics.CapJumps(history) {
+			logger.Warn("Market cap jumps between years — possibly an unrecorded split, extra issue or buyback; add a split to share_splits.txt",
+				"ticker", company, "from", j.From, "to", j.To, "ratio", fmt.Sprintf("%.1fx", j.Ratio))
 		}
 	}
 }

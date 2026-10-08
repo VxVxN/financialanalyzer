@@ -134,9 +134,10 @@ type companyQuality struct {
 }
 
 func qualityFor(history []models.QuarterData, metric string, period analytics.Period) companyQuality {
+	anoms := append(analytics.CheckHistory(history), analytics.CapJumpAnomalies(history)...)
 	return companyQuality{
 		Sources: analytics.Sources(history),
-		Flags:   analytics.AnomaliesByLabel(analytics.CheckHistory(history), metric, period),
+		Flags:   analytics.AnomaliesByLabel(anoms, metric, period),
 	}
 }
 
@@ -457,8 +458,12 @@ func renderSeriesTable(w http.ResponseWriter, seriesByCompany map[string]analyti
 	}
 
 	fmt.Fprintf(w, `</tbody></table></div>`)
+	flagNote := "значение выглядит подозрительно"
+	if metric == "capitalization" {
+		flagNote = "значение выглядит подозрительно или капитализация скакнула вдвое и больше к соседнему году"
+	}
 	fmt.Fprintf(w, `<div class="table-legend">⚠ Источник: данные не по МСФО группы и могут быть несопоставимы между компаниями. `+
-		`▲ Ячейка или треугольная точка: значение выглядит подозрительно (причина — во всплывающей подсказке).</div>`)
+		`▲ Ячейка или треугольная точка: %s (причина — во всплывающей подсказке).</div>`, flagNote)
 }
 
 // humanFormat renders a money value stored in billions of RUB (the unit of

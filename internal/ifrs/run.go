@@ -31,6 +31,9 @@ type Fill struct {
 	Company string `json:"company"`
 	Year    int    `json:"year"`
 	Text    string `json:"text"`
+	// NewYear is set when this save created the manual row. Filling a field
+	// on a year that was already stored is not a new year.
+	NewYear bool `json:"new_year,omitempty"`
 }
 
 // Result is what one button press changed. Counts are company-years.
@@ -194,6 +197,7 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 				res.Missing++
 				continue
 			}
+			_, existed := byYear[year]
 			merged, fields := fillGaps(byYear[year], parsed)
 			if len(fields) == 0 {
 				res.Unchanged++
@@ -208,7 +212,7 @@ func Run(ctx context.Context, store Store, src Source, companies []string, years
 			}
 			byYear[year] = merged
 			line := strings.Join(fields, ", ")
-			res.Fills = append(res.Fills, Fill{Company: company, Year: year, Text: line})
+			res.Fills = append(res.Fills, Fill{Company: company, Year: year, Text: line, NewYear: !existed})
 			res.Saved++
 			logger.Info("ifrs: filled manual entry", "company", company, "year", year, "fields", line)
 		}

@@ -31,8 +31,11 @@ type Repository interface {
 	RecentFetchRuns(ctx context.Context, limit int) ([]models.FetchRun, error)
 	GetManualFinancials(ctx context.Context, company string) ([]models.ManualFinancials, error)
 	SaveManualFinancials(ctx context.Context, m models.ManualFinancials) error
+	SaveManualDividends(ctx context.Context, m models.ManualFinancials) error
 	DeleteManualFinancials(ctx context.Context, company string, year int) error
 	SaveQuarterData(ctx context.Context, data models.QuarterData) error
+	PendingDigestEvents(ctx context.Context) ([]models.DigestEvent, error)
+	PortfolioBands(ctx context.Context) (map[string]string, error)
 }
 
 // ScheduleSource reports the data-refresh timetable (*scheduler.Scheduler).

@@ -46,7 +46,7 @@
     <div class="page-header">
         <div>
             <h1 class="page-title">Обновление данных</h1>
-            <p class="page-sub">Годовые МСФО, расписание и история запусков. Время московское. <a href="/">К скринеру</a></p>
+            <p class="page-sub">Годовые МСФО, дивиденды, расписание и история запусков. Время московское. <a href="/">К скринеру</a></p>
         </div>
     </div>
 
@@ -71,6 +71,33 @@
             </div>
             <ul class="ifrs-fills" id="ifrs-fills" hidden></ul>
             <p>Кнопка сама скачивает годовые отчёты с российского сервера, без VPN, и дописывает только пустые поля за пять последних лет. Цифры, которые уже введены, не меняются. Ниже — что именно записано, в миллиардах рублей.</p>
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-dividends">
+        <h2 id="h-dividends">Дивиденды</h2>
+        <div class="card note">
+            <p>Бесплатного источника дивидендов нет, поэтому доходность и дивидендный отбор молчат, пока цифры не введены. Файл — тот же годовой формат, отдельной колонкой: <code>компания;год;дивиденды</code>, миллиарды рублей. Строка дописывает только дивиденды и не затирает уже введённый МСФО за этот год. Ноль — компания не платила. Компания уже должна быть в базе.</p>
+            <form id="div-form" class="ops-form" style="margin-top:16px">
+                <label>Файл
+                    <input type="file" id="div-file" accept=".csv,text/csv" required>
+                </label>
+                <div class="ops-actions">
+                    <button type="submit" class="btn btn-primary" id="div-submit">Загрузить дивиденды</button>
+                    <span class="ops-status" id="div-status"></span>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-backfill">
+        <h2 id="h-backfill">Пустые колонки</h2>
+        <div class="card note">
+            <p>После миграции, которая добавила капитал, долг или денежный поток, старые строки не получают эти цифры, пока год не скачан заново. Кнопка дописывает только годы РСБУ, где одна из этих колонок пустая, и кварталы банков без капитала. Уже заполненные годы и строки из CSV не трогает — весь ГИР БО заново не качается.</p>
+            <div class="ops-actions" style="margin-top:16px">
+                <button type="button" class="btn" id="backfill-submit">Дозаполнить пустые колонки</button>
+                <span class="ops-status" id="backfill-status" aria-live="polite"></span>
+            </div>
         </div>
     </section>
 
@@ -175,6 +202,55 @@
             $('manual-status').textContent = 'Ошибка: ' + err.message;
         }
         $('manual-submit').disabled = false;
+    });
+
+    $('div-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const file = $('div-file').files[0];
+        if (!file) { $('div-status').textContent = 'Выберите файл'; return; }
+        const body = new FormData();
+        body.append('file', file, file.name);
+        $('div-status').textContent = 'Загрузка…';
+        $('div-submit').disabled = true;
+        try {
+            const resp = await fetch('/api/import-dividends', { method: 'POST', body: body });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                const detail = data.errors && data.errors.length ? data.errors.join('; ') : (data.error || resp.status);
+                throw new Error(detail);
+            }
+            let text = 'Сохранено лет: ' + data.saved + ' из ' + data.total;
+            if (data.errors && data.errors.length) text += '. Не записаны: ' + data.errors.join('; ');
+            $('div-status').textContent = text;
+            $('div-file').value = '';
+        } catch (err) {
+            $('div-status').textContent = 'Ошибка: ' + err.message;
+        }
+        $('div-submit').disabled = false;
+    });
+
+    $('backfill-submit').addEventListener('click', async () => {
+        $('backfill-status').textContent = 'Запуск…';
+        $('backfill-submit').disabled = true;
+        try {
+            const resp = await fetch('/api/fetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{"backfill":true}',
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.status === 409) {
+                $('backfill-status').textContent = 'Уже выполняется';
+                $('backfill-submit').disabled = false;
+                return;
+            }
+            if (!resp.ok) throw new Error(data.error || resp.status);
+            $('backfill-status').textContent = 'Запущено. Результат появится в истории запусков — обновите страницу.';
+            $('backfill-submit').disabled = false;
+        } catch (err) {
+            $('backfill-status').textContent = 'Ошибка: ' + err.message;
+            $('backfill-submit').disabled = false;
+        }
     });
 
     let ifrsPoll = 0;

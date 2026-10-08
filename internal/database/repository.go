@@ -160,6 +160,43 @@ func (r *Repository) ExistingPeriods(ctx context.Context, company string) (map[s
 	return out, nil
 }
 
+// CompletePeriods returns the "YEAR-QUARTER" keys a column backfill can skip.
+// An RSBU row is complete when equity, debt, cash, operating profit, operating
+// cash flow and capex are all stored (a reported zero counts). A CBR row is
+// complete when equity is stored — banks have no debt or cash-flow lines, so
+// those NULLs are not a gap. Any other source (CSV, legacy) is returned as
+// complete so a backfill does not overwrite it with ГИР БО.
+func (r *Repository) CompletePeriods(ctx context.Context, company string) (map[string]struct{}, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT year, quarter FROM company_financials
+		WHERE company = $1 AND (
+			(source = 'rsbu' AND equity IS NOT NULL AND debt IS NOT NULL AND cash IS NOT NULL
+				AND operating_profit IS NOT NULL AND operating_cash_flow IS NOT NULL AND capex IS NOT NULL)
+			OR (source = 'cbr_102' AND equity IS NOT NULL)
+			OR COALESCE(source, '') NOT IN ('rsbu', 'cbr_102')
+		)`, company)
+	if err != nil {
+		return nil, fmt.Errorf("query complete periods for %s: %w", company, err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var (
+			year    int
+			quarter string
+		)
+		if err := rows.Scan(&year, &quarter); err != nil {
+			return nil, fmt.Errorf("scan complete period: %w", err)
+		}
+		out[fmt.Sprintf("%d-%s", year, quarter)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+	return out, nil
+}
+
 // GetCompanyHistory returns a company's history with its manual entries
 // overlaid (models.ApplyManual), ordered by period.
 func (r *Repository) GetCompanyHistory(ctx context.Context, company string) ([]models.QuarterData, error) {
@@ -725,6 +762,90 @@ func (r *Repository) MarkCheapListSent(ctx context.Context, monday time.Time) er
 	return nil
 }
 
+// PendingDigestEvents returns operator events waiting for the next Monday note,
+// oldest first.
+func (r *Repository) PendingDigestEvents(ctx context.Context) ([]models.DigestEvent, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, kind, company, detail FROM digest_events ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query digest events: %w", err)
+	}
+	defer rows.Close()
+	var out []models.DigestEvent
+	for rows.Next() {
+		var ev models.DigestEvent
+		if err := rows.Scan(&ev.ID, &ev.Kind, &ev.Company, &ev.Detail); err != nil {
+			return nil, fmt.Errorf("scan digest event: %w", err)
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate digest events: %w", err)
+	}
+	return out, nil
+}
+
+// AddDigestEvent queues one event for the next Monday note.
+func (r *Repository) AddDigestEvent(ctx context.Context, ev models.DigestEvent) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO digest_events (kind, company, detail) VALUES ($1, $2, $3)`,
+		ev.Kind, ev.Company, ev.Detail)
+	if err != nil {
+		return fmt.Errorf("add digest event: %w", err)
+	}
+	return nil
+}
+
+// PortfolioBands returns the P/E quartile bucket remembered for each portfolio
+// name after the last delivered Monday note.
+func (r *Repository) PortfolioBands(ctx context.Context) (map[string]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT company, band FROM portfolio_bands`)
+	if err != nil {
+		return nil, fmt.Errorf("query portfolio bands: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var company, band string
+		if err := rows.Scan(&company, &band); err != nil {
+			return nil, fmt.Errorf("scan portfolio band: %w", err)
+		}
+		out[company] = band
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate portfolio bands: %w", err)
+	}
+	return out, nil
+}
+
+// SavePortfolioBands remembers this week's bucket for each portfolio name.
+// An empty map does nothing.
+func (r *Repository) SavePortfolioBands(ctx context.Context, bands map[string]string) error {
+	for company, band := range bands {
+		_, err := r.db.ExecContext(ctx, `
+			INSERT INTO portfolio_bands (company, band) VALUES ($1, $2)
+			ON CONFLICT (company) DO UPDATE SET band = EXCLUDED.band, updated_at = CURRENT_TIMESTAMP`,
+			company, band)
+		if err != nil {
+			return fmt.Errorf("save portfolio band: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteDigestEvents removes the events included in a note that was delivered.
+// An empty list does nothing.
+func (r *Repository) DeleteDigestEvents(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM digest_events WHERE id = ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("delete digest events: %w", err)
+	}
+	return nil
+}
+
 // AbandonStaleRuns marks as abandoned the runs still "running" that started
 // more than olderThan ago or carry one of triggers (whatever their age): their
 // process died without recording an outcome.
@@ -819,6 +940,33 @@ func (r *Repository) SaveManualFinancials(ctx context.Context, m models.ManualFi
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("save manual financials %s %d: %w", m.Company, m.Year, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", ErrCompanyNotFound, m.Company)
+	}
+	return nil
+}
+
+// SaveManualDividends sets one company-year's dividends and leaves every other
+// manual column as it was. A year with no manual row gets a dividends-only
+// one. The company must already have fetched or imported rows.
+func (r *Repository) SaveManualDividends(ctx context.Context, m models.ManualFinancials) error {
+	if m.Dividends == nil {
+		return fmt.Errorf("save manual dividends %s %d: no dividends", m.Company, m.Year)
+	}
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO manual_financials (company, year, dividends, updated_at)
+		SELECT $1::varchar, $2::integer, $3::numeric, CURRENT_TIMESTAMP
+		WHERE EXISTS (SELECT 1 FROM company_financials WHERE company = $1::varchar)
+		ON CONFLICT (company, year) DO UPDATE SET
+			dividends = EXCLUDED.dividends, updated_at = CURRENT_TIMESTAMP`,
+		m.Company, m.Year, m.Dividends)
+	if err != nil {
+		return fmt.Errorf("save manual dividends %s %d: %w", m.Company, m.Year, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("save manual dividends %s %d: %w", m.Company, m.Year, err)
 	}
 	if n == 0 {
 		return fmt.Errorf("%w: %s", ErrCompanyNotFound, m.Company)

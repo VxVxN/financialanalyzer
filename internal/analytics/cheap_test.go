@@ -30,3 +30,49 @@ func TestCheapListMessage(t *testing.T) {
 		t.Fatalf("empty list = %q", empty)
 	}
 }
+
+func TestMondayMessage(t *testing.T) {
+	rows := []ScreenerRow{
+		{Company: "X5", Portfolio: true, PE: f64(4), PEHistPct: f64(8)},
+		{Company: "T", Portfolio: true, PE: f64(20), PEHistPct: f64(90)},
+		{Company: "MID", Portfolio: true, PE: f64(10), PEHistPct: f64(40)},
+		{Company: "OUT", PE: f64(3), PEHistPct: f64(5)},
+	}
+	msg := MondayMessage(rows,
+		[]NoteQuote{{Company: "OLD", Date: "01.06.2026"}},
+		[]NoteJump{{Company: "BELU", From: 2023, To: 2024, Ratio: 0.1}},
+		[]NoteYear{{Company: "X5", Year: 2024}},
+		nil,
+	)
+	for _, want := range []string{
+		"Дешевле своей истории",
+		"X5 — P/E 4.0 вошёл в нижнюю четверть",
+		"T — P/E 20.0 вошёл в верхнюю четверть",
+		"OLD — 01.06.2026",
+		"BELU — 2023→2024, в 10,0 раза меньше",
+		"X5 — 2024",
+		"МСФО: дописан год",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message lacks %q\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "MID —") || strings.Contains(msg, "OUT —") {
+		t.Errorf("message names a name it should not:\n%s", msg)
+	}
+
+	again := MondayMessage(rows, nil, nil, nil, map[string]string{"X5": BandLow, "T": BandHigh, "MID": BandMid})
+	if strings.Contains(again, "X5 —") || strings.Contains(again, "T —") {
+		t.Errorf("a name that stayed in its quartile must not be repeated:\n%s", again)
+	}
+	moved := MondayMessage(rows, nil, nil, nil, map[string]string{"X5": BandLow, "T": BandMid})
+	if !strings.Contains(moved, "T — P/E 20.0 вошёл в верхнюю четверть") || strings.Contains(moved, "X5 —") {
+		t.Errorf("only a new entry should be named:\n%s", moved)
+	}
+
+	quiet := MondayMessage(nil, nil, nil, nil, nil)
+	if !strings.Contains(quiet, "Таких бумаг нет.") || !strings.Contains(quiet, "Таких котировок нет.") ||
+		!strings.Contains(quiet, "Таких скачков нет.") || strings.Contains(quiet, "МСФО") {
+		t.Fatalf("quiet week = %q", quiet)
+	}
+}
